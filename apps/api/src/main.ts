@@ -1,5 +1,5 @@
 import { NestFactory } from '@nestjs/core';
-import { Logger, ValidationPipe } from '@nestjs/common';
+import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
 import { toNodeHandler } from 'better-auth/node';
 import { AppModule } from './app.module';
@@ -27,6 +27,12 @@ async function bootstrap() {
   // 其余接口恢复 JSON / 表单解析
   app.use(json());
   app.use(urlencoded({ extended: true }));
+
+  // 所有 Nest 接口加 /api 前缀（与 better-auth 的 /api/auth 同域，且与前端 SPA 路由隔离）
+  // health 排除在外，供容器健康检查直连 /health
+  app.setGlobalPrefix('api', {
+    exclude: [{ path: 'health', method: RequestMethod.GET }],
+  });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 

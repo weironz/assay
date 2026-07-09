@@ -10,3 +10,5 @@ coverage/
 apps/api/prisma/migrations/dev.db*
 storage-data/
 .playwright-mcp/
+backups/
+*.tsbuildinfo

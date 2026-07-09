@@ -66,6 +66,22 @@ admin@example.com / admin12345
 
 登录后可在「用户管理」创建其他角色（handler / supervisor / requester）用户。
 
+## 生产部署
+
+单域名部署：Nginx 托管前端静态资源，并把 `/api/` 反代到后端；前端 SPA 路由与 API 通过 `/api` 前缀隔离。
+
+```bash
+cp .env.prod.example .env      # 填入强密码 / 密钥 / PUBLIC_URL
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+- 访问：`http://<PUBLIC_URL>`（默认 `WEB_PORT=8088`）
+- 首次启动自动执行数据库迁移（`prisma migrate deploy`）+ 灌种子 + 创建管理员
+- 仅 `web:80` 对外暴露；postgres / redis / rustfs 均为内部服务
+- 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
+
+生产环境务必修改：`POSTGRES_PASSWORD`、`S3_ACCESS_KEY/SECRET_KEY`、`AUTH_SECRET`、`ADMIN_PASSWORD`。
+
 ## 当前进度
 
 - [x] P0 骨架 + docker compose 一键起
@@ -74,4 +90,4 @@ admin@example.com / admin12345
 - [x] P3 富文本(Tiptap+Markdown) + 附件(RustFS) + 双端 XSS 消毒 + 操作历史时间线
 - [x] P4 站内通知(铃铛/未读) + SLA 超时提醒(BullMQ) + 优先级升级 + SLA 倒计时徽章
 - [x] P5 仪表盘统计 + 保存筛选视图 + 深色模式 + 管理员删除工单
-- [ ] P6 打包部署
+- [x] P6 生产打包:多阶段镜像 + Nginx 单域名反代 + Prisma 迁移 + 备份脚本

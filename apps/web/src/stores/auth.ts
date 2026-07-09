@@ -27,7 +27,7 @@ export const useAuth = create<AuthState>((set, get) => ({
   loading: true,
   fetchMe: async () => {
     try {
-      const { data } = await api.get<AuthUser>('/auth/me');
+      const { data } = await api.get<AuthUser>('/me');
       set({ user: data, loading: false });
       return data;
     } catch {

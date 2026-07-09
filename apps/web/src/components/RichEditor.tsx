@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { useEditor, EditorContent, Editor } from '@tiptap/react';
+import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
@@ -15,12 +15,10 @@ interface Props {
 }
 
 function Btn({
-  editor,
   onClick,
   active,
   label,
 }: {
-  editor: Editor;
   onClick: () => void;
   active?: boolean;
   label: string;
@@ -77,24 +75,24 @@ export default function RichEditor({
   return (
     <div className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
       <div className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-700 p-1">
-        <Btn editor={editor} label="B" active={editor.isActive('bold')}
+        <Btn label="B" active={editor.isActive('bold')}
           onClick={() => editor.chain().focus().toggleBold().run()} />
-        <Btn editor={editor} label="I" active={editor.isActive('italic')}
+        <Btn label="I" active={editor.isActive('italic')}
           onClick={() => editor.chain().focus().toggleItalic().run()} />
-        <Btn editor={editor} label="H1" active={editor.isActive('heading', { level: 1 })}
+        <Btn label="H1" active={editor.isActive('heading', { level: 1 })}
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} />
-        <Btn editor={editor} label="H2" active={editor.isActive('heading', { level: 2 })}
+        <Btn label="H2" active={editor.isActive('heading', { level: 2 })}
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
-        <Btn editor={editor} label="• 列表" active={editor.isActive('bulletList')}
+        <Btn label="• 列表" active={editor.isActive('bulletList')}
           onClick={() => editor.chain().focus().toggleBulletList().run()} />
-        <Btn editor={editor} label="1. 列表" active={editor.isActive('orderedList')}
+        <Btn label="1. 列表" active={editor.isActive('orderedList')}
           onClick={() => editor.chain().focus().toggleOrderedList().run()} />
-        <Btn editor={editor} label="引用" active={editor.isActive('blockquote')}
+        <Btn label="引用" active={editor.isActive('blockquote')}
           onClick={() => editor.chain().focus().toggleBlockquote().run()} />
-        <Btn editor={editor} label="代码块" active={editor.isActive('codeBlock')}
+        <Btn label="代码块" active={editor.isActive('codeBlock')}
           onClick={() => editor.chain().focus().toggleCodeBlock().run()} />
         {onUploadImage && (
-          <Btn editor={editor} label="🖼 图片"
+          <Btn label="🖼 图片"
             onClick={() => fileRef.current?.click()} />
         )}
         <input
