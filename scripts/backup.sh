@@ -8,7 +8,7 @@ TS="$(date +%Y%m%d-%H%M%S)"
 DEST="$OUT_DIR/$TS"
 mkdir -p "$DEST"
 
-COMPOSE="docker compose -f docker-compose.prod.yml"
+COMPOSE="docker compose -f docker-compose.yaml"
 
 echo "[1/2] 备份 PostgreSQL → $DEST/db.sql.gz"
 $COMPOSE exec -T postgres sh -c 'pg_dump -U "${POSTGRES_USER:-assay}" "${POSTGRES_DB:-assay}"' \
@@ -25,4 +25,4 @@ else
 fi
 
 echo "✅ 备份完成：$DEST"
-echo "   恢复 DB： gunzip -c $DEST/db.sql.gz | docker compose -f docker-compose.prod.yml exec -T postgres psql -U assay assay"
+echo "   恢复 DB： gunzip -c $DEST/db.sql.gz | docker compose -f docker-compose.yaml exec -T postgres psql -U assay assay"

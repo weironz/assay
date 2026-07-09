@@ -8,8 +8,10 @@
     "dev:web": "pnpm --filter web dev",
     "prisma:migrate": "pnpm --filter api prisma migrate dev",
     "prisma:seed": "pnpm --filter api prisma db seed",
-    "up": "docker compose up -d",
-    "down": "docker compose down"
+    "up": "docker compose -f docker-compose.dev.yml up -d",
+    "down": "docker compose -f docker-compose.dev.yml down",
+    "prod:up": "docker compose up -d",
+    "prod:pull": "docker compose pull"
   },
   "engines": {
     "node": ">=20"

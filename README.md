@@ -11,16 +11,17 @@
 ```
 apps/api   NestJS 后端（Prisma / 存储抽象 / 健康检查）
 apps/web   React 前端（Vite / Tailwind v4 / TanStack Query）
-docker-compose.yml   一键拉起 pg + redis + rustfs + adminer + api + web
+docker-compose.dev.yml   开发环境：pg + redis + rustfs + adminer + api + web（本地构建、热更新）
+docker-compose.yaml      生产环境：拉取 Docker Hub 镜像 + Nginx 单域名
 ```
 
 ## 快速开始（开发环境一键拉起）
 
-前置：Docker + Docker Compose。
+前置：Docker + Docker Compose。开发用 `docker-compose.dev.yml`：
 
 ```bash
 cp .env.example .env      # 首次
-docker compose up -d --build
+docker compose -f docker-compose.dev.yml up -d --build
 ```
 
 启动后：
@@ -44,16 +45,16 @@ docker compose up -d --build
 如需手动重跑：
 
 ```bash
-docker compose exec api pnpm db:seed
+docker compose -f docker-compose.dev.yml exec api pnpm db:seed
 ```
 
-## 常用命令
+## 常用命令（开发）
 
 ```bash
-docker compose logs -f api     # 看后端日志
-docker compose logs -f web     # 看前端日志
-docker compose down            # 停止
-docker compose down -v         # 停止并清空数据卷
+docker compose -f docker-compose.dev.yml logs -f api   # 看后端日志
+docker compose -f docker-compose.dev.yml logs -f web   # 看前端日志
+docker compose -f docker-compose.dev.yml down          # 停止
+docker compose -f docker-compose.dev.yml down -v       # 停止并清空数据卷
 ```
 
 ## 登录
@@ -69,16 +70,30 @@ admin@example.com / admin12345
 ## 生产部署
 
 单域名部署：Nginx 托管前端静态资源，并把 `/api/` 反代到后端；前端 SPA 路由与 API 通过 `/api` 前缀隔离。
+生产 `docker-compose.yaml` **直接拉取 Docker Hub 预构建镜像**，无需在服务器上构建：
+
+- `willdockerhub/assay-api`（后端）
+- `willdockerhub/assay-web`（前端 + Nginx）
 
 ```bash
 cp .env.prod.example .env      # 填入强密码 / 密钥 / PUBLIC_URL
-docker compose -f docker-compose.prod.yml up -d --build
+docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像启动
 ```
 
 - 访问：`http://<PUBLIC_URL>`（默认 `WEB_PORT=8088`）
 - 首次启动自动执行数据库迁移（`prisma migrate deploy`）+ 灌种子 + 创建管理员
 - 仅 `web:80` 对外暴露；postgres / redis / rustfs 均为内部服务
+- 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `0.1.0`）
 - 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
+
+### 更新镜像（在开发机构建并推送）
+
+```bash
+docker build -t willdockerhub/assay-api:latest ./apps/api
+docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" ./apps/web
+docker push willdockerhub/assay-api:latest && docker push willdockerhub/assay-web:latest
+# 服务器上： docker compose pull && docker compose up -d
+```
 
 生产环境务必修改：`POSTGRES_PASSWORD`、`S3_ACCESS_KEY/SECRET_KEY`、`AUTH_SECRET`、`ADMIN_PASSWORD`。
 

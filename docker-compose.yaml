@@ -38,9 +38,7 @@ services:
       - rustfs-data-prod:/data
 
   api:
-    build:
-      context: ./apps/api
-      dockerfile: Dockerfile
+    image: willdockerhub/assay-api:${IMAGE_TAG:-latest}
     restart: always
     env_file: .env
     environment:
@@ -59,11 +57,7 @@ services:
       rustfs: { condition: service_started }
 
   web:
-    build:
-      context: ./apps/web
-      dockerfile: Dockerfile
-      args:
-        VITE_API_BASE_URL: ""
+    image: willdockerhub/assay-web:${IMAGE_TAG:-latest}
     restart: always
     ports:
       - "${WEB_PORT:-8088}:80"
