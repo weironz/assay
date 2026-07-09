@@ -112,6 +112,7 @@ function useTicketMutation<T>(fn: (id: string, arg: T) => Promise<any>) {
     onSuccess: (_d, { id }) => {
       qc.invalidateQueries({ queryKey: ['ticket', id] });
       qc.invalidateQueries({ queryKey: ['tickets'] });
+      qc.invalidateQueries({ queryKey: ['history', id] });
     },
   });
 }
@@ -128,6 +129,18 @@ export function useDeleteTicket() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['tickets'] }),
   });
 }
+
+/** 编辑工单基本字段（标题/优先级/类型/分类/队列） */
+export const useUpdateTicket = () =>
+  useTicketMutation<Record<string, unknown>>((id, patch) =>
+    api.patch(`/tickets/${id}`, patch),
+  );
+
+/** 编辑某条消息正文 */
+export const useUpdateMessage = () =>
+  useTicketMutation<{ messageId: string; body: string }>((id, arg) =>
+    api.patch(`/tickets/${id}/messages/${arg.messageId}`, { body: arg.body }),
+  );
 
 export const useAssign = () =>
   useTicketMutation<{ assigneeId: string; queueId?: string }>((id, arg) =>

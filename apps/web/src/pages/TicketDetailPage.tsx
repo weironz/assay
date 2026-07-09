@@ -8,6 +8,8 @@ import {
   useAssignees,
   useAttachments,
   useHistory,
+  useUpdateTicket,
+  useUpdateMessage,
   uploadAttachment,
   attachmentUrl,
   Attachment,
@@ -45,12 +47,18 @@ export default function TicketDetailPage() {
   const { data: assignees } = useAssignees();
   const { data: attachments } = useAttachments(id);
   const { data: history } = useHistory(id);
+  const updateTicket = useUpdateTicket();
+  const updateMessage = useUpdateMessage();
 
   const [reply, setReply] = useState('');
   const [internal, setInternal] = useState(false);
   const [assigneeId, setAssigneeId] = useState('');
   const [editorKey, setEditorKey] = useState(0);
   const [showHistory, setShowHistory] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [msgDraft, setMsgDraft] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !t) return <div className="text-gray-400">加载中…</div>;
@@ -59,8 +67,29 @@ export default function TicketDetailPage() {
     user?.roles.includes('admin') ||
     user?.roles.includes('supervisor') ||
     user?.roles.includes('handler');
+  const isSupervisorOrAdmin =
+    !!user?.roles.includes('admin') || !!user?.roles.includes('supervisor');
   const canAssign =
     has('ticket:assign') && ['NEW', 'REOPENED'].includes(t.status);
+  const canEditTicket =
+    has('ticket:update') && (isStaff || t.requester?.id === user?.id);
+
+  const saveTitle = () => {
+    const v = titleDraft.trim();
+    if (!v) return;
+    updateTicket.mutate(
+      { id, arg: { title: v } },
+      { onSuccess: () => setEditingTitle(false) },
+    );
+  };
+  const saveMsg = () => {
+    if (!editingMsgId || !msgDraft.replace(/<[^>]*>/g, '').trim()) return;
+    updateMessage.mutate(
+      { id, arg: { messageId: editingMsgId, body: msgDraft } },
+      { onSuccess: () => setEditingMsgId(null) },
+    );
+  };
+  const uploadImg = async (file: File) => attachmentUrl(await uploadAttachment(id, file));
 
   const plain = reply.replace(/<[^>]*>/g, '').trim();
 
@@ -95,7 +124,43 @@ export default function TicketDetailPage() {
           {STATUS_LABEL[t.status]}
         </span>
       </div>
-      <h1 className="text-xl font-semibold">{t.title}</h1>
+      {editingTitle ? (
+        <div className="flex items-center gap-2">
+          <input
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            className="flex-1 text-xl font-semibold rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1"
+            autoFocus
+          />
+          <button
+            onClick={saveTitle}
+            className="rounded-md bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700"
+          >
+            保存
+          </button>
+          <button
+            onClick={() => setEditingTitle(false)}
+            className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm"
+          >
+            取消
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <h1 className="text-xl font-semibold">{t.title}</h1>
+          {canEditTicket && (
+            <button
+              onClick={() => {
+                setTitleDraft(t.title);
+                setEditingTitle(true);
+              }}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              编辑
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 状态流转 + 指派 */}
       <div className="flex flex-wrap items-center gap-2">
@@ -136,31 +201,74 @@ export default function TicketDetailPage() {
         {/* 中栏 */}
         <div className="lg:col-span-2 space-y-3">
           <div className="space-y-3">
-            {t.messages.map((m) => (
-              <div
-                key={m.id}
-                className={`rounded-lg border p-3 ${
-                  m.isInternal
-                    ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'
-                    : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'
-                }`}
-              >
-                <div className="flex items-center justify-between text-xs mb-2">
-                  <span className="font-medium text-gray-700 dark:text-gray-300">
-                    {m.author.name}
-                    {m.isInternal && <span className="ml-2 text-amber-600">内部备注</span>}
-                  </span>
-                  <span className="text-gray-400">
-                    {new Date(m.createdAt).toLocaleString()}
-                  </span>
-                </div>
-                {/* 服务端已消毒；此处再经 DOMPurify 二次消毒后渲染 */}
+            {t.messages.map((m) => {
+              const canEditMsg = m.author.id === user?.id || isSupervisorOrAdmin;
+              const editing = editingMsgId === m.id;
+              return (
                 <div
-                  className="rich text-sm text-gray-800 dark:text-gray-200"
-                  dangerouslySetInnerHTML={renderHtml(m.body)}
-                />
-              </div>
-            ))}
+                  key={m.id}
+                  className={`rounded-lg border p-3 ${
+                    m.isInternal
+                      ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'
+                      : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'
+                  }`}
+                >
+                  <div className="flex items-center justify-between text-xs mb-2">
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {m.author.name}
+                      {m.isInternal && <span className="ml-2 text-amber-600">内部备注</span>}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-gray-400">
+                        {new Date(m.createdAt).toLocaleString()}
+                      </span>
+                      {canEditMsg && !editing && (
+                        <button
+                          onClick={() => {
+                            setMsgDraft(m.body);
+                            setEditingMsgId(m.id);
+                          }}
+                          className="text-blue-600 hover:underline"
+                        >
+                          编辑
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                  {editing ? (
+                    <div className="space-y-2">
+                      <RichEditor
+                        content={m.body}
+                        minHeight={80}
+                        onChange={setMsgDraft}
+                        onUploadImage={uploadImg}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          onClick={() => setEditingMsgId(null)}
+                          className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm"
+                        >
+                          取消
+                        </button>
+                        <button
+                          onClick={saveMsg}
+                          disabled={updateMessage.isPending}
+                          className="rounded-md bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+                        >
+                          保存
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* 服务端已消毒；此处再经 DOMPurify 二次消毒后渲染 */
+                    <div
+                      className="rich text-sm text-gray-800 dark:text-gray-200"
+                      dangerouslySetInnerHTML={renderHtml(m.body)}
+                    />
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* 回复框（富文本） */}

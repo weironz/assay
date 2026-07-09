@@ -100,4 +100,15 @@ export class TicketsController {
   ) {
     return this.tickets.addMessage(user, id, dto);
   }
+
+  @Patch(':id/messages/:messageId')
+  @RequirePermissions('ticket:comment')
+  updateMessage(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('messageId') messageId: string,
+    @Body() dto: CreateMessageDto,
+  ) {
+    return this.tickets.updateMessage(user, id, messageId, dto);
+  }
 }

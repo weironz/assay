@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
@@ -47,6 +47,25 @@ export default function RichEditor({
   onUploadImage,
 }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const editorRef = useRef<Editor | null>(null);
+  const uploadRef = useRef(onUploadImage);
+  uploadRef.current = onUploadImage;
+
+  // 上传图片并在光标处插入
+  const uploadAndInsert = async (file: File) => {
+    const up = uploadRef.current;
+    if (!up) return;
+    try {
+      const url = await up(file);
+      editorRef.current?.chain().focus().setImage({ src: url }).run();
+    } catch {
+      alert('图片上传失败');
+    }
+  };
+
+  // 从粘贴/拖拽事件里取出图片文件
+  const imagesFrom = (list?: FileList | null) =>
+    list ? Array.from(list).filter((f) => f.type.startsWith('image/')) : [];
 
   const editor = useEditor({
     extensions: [
@@ -56,20 +75,36 @@ export default function RichEditor({
     ],
     content,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
+    editorProps: {
+      // 粘贴截图/图片 → 自动上传插入
+      handlePaste: (_v, event) => {
+        const imgs = imagesFrom(event.clipboardData?.files);
+        if (imgs.length && uploadRef.current) {
+          imgs.forEach((f) => uploadAndInsert(f));
+          return true;
+        }
+        return false;
+      },
+      // 拖拽图片进编辑器 → 自动上传插入
+      handleDrop: (_v, event) => {
+        const imgs = imagesFrom((event as DragEvent).dataTransfer?.files);
+        if (imgs.length && uploadRef.current) {
+          event.preventDefault();
+          imgs.forEach((f) => uploadAndInsert(f));
+          return true;
+        }
+        return false;
+      },
+    },
   });
+  editorRef.current = editor;
 
   if (!editor) return null;
 
   const pickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
-    if (!file || !onUploadImage) return;
-    try {
-      const url = await onUploadImage(file);
-      editor.chain().focus().setImage({ src: url }).run();
-    } catch {
-      alert('图片上传失败');
-    }
+    if (file) await uploadAndInsert(file);
   };
 
   return (

@@ -21,6 +21,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   requester: [
     'ticket:create',
     'ticket:read',
+    'ticket:update', // 编辑自己工单的标题/优先级（service 限制仅本人）
     'ticket:comment',
     'ticket:transition', // 关单/重开/取消（具体动作由 WorkflowService 细粒度控制）
   ],

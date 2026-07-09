@@ -333,6 +333,33 @@ export class TicketsService {
     return message;
   }
 
+  // ---------- 编辑消息（作者本人或 admin/supervisor）----------
+  async updateMessage(
+    user: AuthUser,
+    ticketId: string,
+    messageId: string,
+    dto: CreateMessageDto,
+  ) {
+    const msg = await this.prisma.ticketMessage.findUnique({
+      where: { id: messageId },
+    });
+    if (!msg || msg.ticketId !== ticketId) {
+      throw new NotFoundException('消息不存在');
+    }
+    const isStaff =
+      user.roles.includes('admin') || user.roles.includes('supervisor');
+    if (msg.authorId !== user.id && !isStaff) {
+      throw new ForbiddenException('只能编辑自己的消息');
+    }
+    const updated = await this.prisma.ticketMessage.update({
+      where: { id: messageId },
+      data: { body: cleanHtml(dto.body) },
+      include: { author: { select: { id: true, name: true } } },
+    });
+    await this.history(ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
+    return updated;
+  }
+
   // ---------- 删除（仅管理员）----------
   async remove(user: AuthUser, id: string) {
     if (!user.roles.includes('admin')) {
