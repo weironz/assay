@@ -1,0 +1,357 @@
+// 工单管理系统数据模型
+// 详见 docs/01-设计文档.md 第 3 节
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ 枚举 ============
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TicketStatus {
+  NEW
+  ASSIGNED
+  IN_PROGRESS
+  PENDING
+  RESOLVED
+  CLOSED
+  REOPENED
+  CANCELLED
+}
+
+enum MessageType {
+  REPLY // 公开回复
+  NOTE // 内部备注
+  SYSTEM // 系统事件
+}
+
+enum HistoryAction {
+  CREATE
+  ASSIGN
+  TRANSITION
+  MESSAGE
+  UPDATE
+  ATTACH
+}
+
+// ============ 用户与权限（RBAC）============
+// User 同时是 better-auth 的用户表：核心字段 name/email/emailVerified/image
+// 由 better-auth 管理，密码存于 account 表；username/phone/status 为业务扩展。
+model User {
+  id            String     @id @default(cuid())
+  name          String
+  email         String     @unique
+  emailVerified Boolean    @default(false)
+  image         String?
+  // 业务扩展字段
+  username      String?    @unique
+  phone         String?
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // better-auth 关系
+  sessions Session[]
+  accounts Account[]
+
+  // 业务关系
+  roles             UserRole[]
+  requestedTickets  Ticket[]           @relation("Requester")
+  assignedTickets   Ticket[]           @relation("Assignee")
+  defaultForQueues  Queue[]            @relation("QueueDefaultAssignee")
+  messages          TicketMessage[]
+  uploadedFiles     TicketAttachment[]
+  historyEntries    TicketHistory[]
+  notifications     Notification[]
+  savedViews        SavedView[]
+
+  @@map("users")
+}
+
+// ============ better-auth 表（会话/凭据/验证）============
+model Session {
+  id        String   @id @default(cuid())
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model Account {
+  id                    String    @id @default(cuid())
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("accounts")
+}
+
+model Verification {
+  id         String   @id @default(cuid())
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  name        String   @unique // requester / handler / supervisor / admin
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  users       UserRole[]
+  permissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id    String @id @default(cuid())
+  code  String @unique // e.g. ticket:create, ticket:assign
+  name  String
+
+  roles RolePermission[]
+
+  @@map("permissions")
+}
+
+model UserRole {
+  userId String @map("user_id")
+  roleId String @map("role_id")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@map("user_roles")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============ 队列 / 类型 / 分类 / 标签 ============
+model Queue {
+  id                String  @id @default(cuid())
+  name              String  @unique
+  description       String?
+  defaultAssigneeId String? @map("default_assignee_id")
+
+  defaultAssignee User?    @relation("QueueDefaultAssignee", fields: [defaultAssigneeId], references: [id])
+  tickets         Ticket[]
+
+  @@map("queues")
+}
+
+model TicketType {
+  id             String   @id @default(cuid())
+  name           String   @unique
+  slaResponseMin Int      @default(60) @map("sla_response_min")
+  slaResolveMin  Int      @default(1440) @map("sla_resolve_min")
+
+  tickets Ticket[]
+
+  @@map("ticket_types")
+}
+
+model Category {
+  id       String  @id @default(cuid())
+  name     String
+  parentId String? @map("parent_id")
+
+  parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryTree")
+  tickets  Ticket[]
+
+  @@map("categories")
+}
+
+model Tag {
+  id    String @id @default(cuid())
+  name  String @unique
+  color String @default("#888888")
+
+  tickets TicketTag[]
+
+  @@map("tags")
+}
+
+model TicketTag {
+  ticketId String @map("ticket_id")
+  tagId    String @map("tag_id")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  tag    Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, tagId])
+  @@map("ticket_tags")
+}
+
+// ============ 工单主表（容器，不含正文）============
+model Ticket {
+  id              String       @id @default(cuid())
+  ticketNo        String       @unique @map("ticket_no")
+  title           String
+  requesterId     String       @map("requester_id")
+  assigneeId      String?      @map("assignee_id")
+  queueId         String?      @map("queue_id")
+  typeId          String?      @map("type_id")
+  categoryId      String?      @map("category_id")
+  priority        Priority     @default(MEDIUM)
+  status          TicketStatus @default(NEW)
+  slaDueAt        DateTime?    @map("sla_due_at")
+  firstResponseAt DateTime?    @map("first_response_at")
+  extra           Json? // 预留自定义字段
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  closedAt        DateTime?    @map("closed_at")
+
+  requester User        @relation("Requester", fields: [requesterId], references: [id])
+  assignee  User?       @relation("Assignee", fields: [assigneeId], references: [id])
+  queue     Queue?      @relation(fields: [queueId], references: [id])
+  type      TicketType? @relation(fields: [typeId], references: [id])
+  category  Category?   @relation(fields: [categoryId], references: [id])
+
+  messages    TicketMessage[]
+  attachments TicketAttachment[]
+  history     TicketHistory[]
+  tags        TicketTag[]
+  notifications Notification[]
+
+  @@index([status])
+  @@index([assigneeId])
+  @@index([queueId])
+  @@map("tickets")
+}
+
+// ============ 逐条消息 / 往来（正文在这里）============
+model TicketMessage {
+  id          String      @id @default(cuid())
+  ticketId    String      @map("ticket_id")
+  authorId    String      @map("author_id")
+  type        MessageType @default(REPLY)
+  isInternal  Boolean     @default(false) @map("is_internal")
+  contentType String      @default("text/html") @map("content_type")
+  body        String
+  createdAt   DateTime    @default(now()) @map("created_at")
+
+  ticket      Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author      User               @relation(fields: [authorId], references: [id])
+  attachments TicketAttachment[]
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
+// ============ 附件（object_key 指向 StorageService）============
+model TicketAttachment {
+  id         String  @id @default(cuid())
+  ticketId   String  @map("ticket_id")
+  messageId  String? @map("message_id")
+  fileName   String  @map("file_name")
+  objectKey  String  @map("object_key")
+  fileSize   Int     @map("file_size")
+  mime       String
+  uploaderId String  @map("uploader_id")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  ticket   Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  message  TicketMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  uploader User           @relation(fields: [uploaderId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_attachments")
+}
+
+// ============ 审计历史 ============
+model TicketHistory {
+  id        String        @id @default(cuid())
+  ticketId  String        @map("ticket_id")
+  userId    String        @map("user_id")
+  action    HistoryAction
+  field     String?
+  oldValue  String?       @map("old_value")
+  newValue  String?       @map("new_value")
+  createdAt DateTime      @default(now()) @map("created_at")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id])
+
+  @@index([ticketId])
+  @@map("ticket_history")
+}
+
+// ============ 通知 ============
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  ticketId  String?  @map("ticket_id")
+  type      String
+  title     String
+  content   String?
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ticket Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@index([userId, isRead])
+  @@map("notifications")
+}
+
+// ============ 保存筛选视图 ============
+model SavedView {
+  id         String  @id @default(cuid())
+  userId     String  @map("user_id")
+  name       String
+  filterJson Json    @map("filter_json")
+  isShared   Boolean @default(false) @map("is_shared")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("saved_views")
+}

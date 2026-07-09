@@ -1,0 +1,27 @@
+# 开发用镜像：容器内安装依赖 + 热更新
+FROM node:22-alpine
+
+# Prisma 在 alpine 需要 openssl
+RUN apk add --no-cache openssl
+
+RUN corepack enable && corepack prepare pnpm@10.13.1 --activate
+
+WORKDIR /app
+
+# 先拷贝清单，利用缓存
+COPY package.json ./
+COPY prisma ./prisma
+
+RUN pnpm install
+
+# 生成 Prisma Client（schema 已在上面拷入）
+RUN pnpm prisma generate
+
+# 其余源码由 docker-compose 挂载卷提供
+COPY . .
+
+EXPOSE 3000
+
+# 启动前用 db push 同步表结构（P0 便捷方式），再热更新启动
+# 正式迁移文件在后续阶段用 `prisma migrate dev` 生成
+CMD ["sh", "-c", "pnpm prisma db push --skip-generate && pnpm db:seed || true; pnpm start:dev"]

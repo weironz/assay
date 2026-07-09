@@ -1,0 +1,17 @@
+{
+  "name": "assay-ticket-system",
+  "version": "0.0.1",
+  "private": true,
+  "description": "工单管理系统 - monorepo (NestJS + React)",
+  "scripts": {
+    "dev:api": "pnpm --filter api start:dev",
+    "dev:web": "pnpm --filter web dev",
+    "prisma:migrate": "pnpm --filter api prisma migrate dev",
+    "prisma:seed": "pnpm --filter api prisma db seed",
+    "up": "docker compose up -d",
+    "down": "docker compose down"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

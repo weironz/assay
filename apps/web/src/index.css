@@ -1,0 +1,42 @@
+@import "tailwindcss";
+
+/* 深色模式由 html.dark 类控制（支持手动切换），而非仅跟随系统 */
+@custom-variant dark (&:where(.dark, .dark *));
+
+:root {
+  color-scheme: light dark;
+}
+.dark {
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+/* 富文本内容渲染样式（Tiptap 编辑器 + 消息展示复用 .rich） */
+.tiptap :focus { outline: none; }
+.tiptap .ProseMirror { outline: none; min-height: 60px; }
+.tiptap h1, .rich h1 { font-size: 1.4em; font-weight: 700; margin: 0.5em 0; }
+.tiptap h2, .rich h2 { font-size: 1.2em; font-weight: 700; margin: 0.5em 0; }
+.tiptap h3, .rich h3 { font-size: 1.05em; font-weight: 600; margin: 0.5em 0; }
+.tiptap p, .rich p { margin: 0.4em 0; }
+.tiptap ul, .rich ul { list-style: disc; padding-left: 1.4em; margin: 0.4em 0; }
+.tiptap ol, .rich ol { list-style: decimal; padding-left: 1.4em; margin: 0.4em 0; }
+.tiptap blockquote, .rich blockquote {
+  border-left: 3px solid #cbd5e1; padding-left: 0.8em; color: #64748b; margin: 0.5em 0;
+}
+.tiptap pre, .rich pre {
+  background: #0f172a; color: #e2e8f0; padding: 0.6em 0.8em;
+  border-radius: 6px; overflow-x: auto; font-size: 0.85em; margin: 0.5em 0;
+}
+.tiptap code, .rich code { font-family: ui-monospace, monospace; }
+.tiptap img, .rich img { max-width: 100%; border-radius: 6px; margin: 0.4em 0; }
+.tiptap a, .rich a { color: #2563eb; text-decoration: underline; }
+/* 空编辑器占位符 */
+.tiptap p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #9ca3af; float: left; height: 0; pointer-events: none;
+}
