@@ -83,7 +83,7 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 - 访问：`http://<PUBLIC_URL>`（默认 `WEB_PORT=8088`）
 - 首次启动自动执行数据库迁移（`prisma migrate deploy`）+ 灌种子 + 创建管理员
 - 仅 `web:80` 对外暴露；postgres / redis / rustfs 均为内部服务
-- 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `0.1.1`）
+- 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `0.1.2`）
 - 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
 
 ### 更新镜像（在开发机构建并推送）

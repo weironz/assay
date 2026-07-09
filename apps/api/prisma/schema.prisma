@@ -290,7 +290,7 @@ model TicketMessage {
 // ============ 附件（object_key 指向 StorageService）============
 model TicketAttachment {
   id         String  @id @default(cuid())
-  ticketId   String  @map("ticket_id")
+  ticketId   String? @map("ticket_id") // 草稿附件（建单前上传）ticketId 暂为空，提交时关联
   messageId  String? @map("message_id")
   fileName   String  @map("file_name")
   objectKey  String  @map("object_key")
@@ -299,7 +299,7 @@ model TicketAttachment {
   uploaderId String  @map("uploader_id")
   createdAt  DateTime @default(now()) @map("created_at")
 
-  ticket   Ticket         @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  ticket   Ticket?        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   message  TicketMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
   uploader User           @relation(fields: [uploaderId], references: [id])
 

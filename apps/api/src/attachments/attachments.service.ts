@@ -45,7 +45,21 @@ export class AttachmentsService {
     messageId?: string,
   ) {
     await this.assertCanView(user, ticketId);
-    const objectKey = this.buildKey(ticketId, file.originalname);
+    return this.store(user, file, ticketId, messageId);
+  }
+
+  /** 草稿上传：建单前上传（图片/附件），ticketId 暂为 null，提交时再关联 */
+  async uploadDraft(user: AuthUser, file: Express.Multer.File) {
+    return this.store(user, file, null);
+  }
+
+  private async store(
+    user: AuthUser,
+    file: Express.Multer.File,
+    ticketId: string | null,
+    messageId?: string,
+  ) {
+    const objectKey = this.buildKey(ticketId ?? 'draft', file.originalname);
     await this.storage.put({
       key: objectKey,
       body: file.buffer,
@@ -79,9 +93,19 @@ export class AttachmentsService {
       where: { id },
     });
     if (!rec) throw new NotFoundException('附件不存在');
-    await this.assertCanView(user, rec.ticketId);
+    // 草稿附件(ticketId 为空)：登录用户即可访问；已挂工单的按工单可见性校验
+    if (rec.ticketId) await this.assertCanView(user, rec.ticketId);
     const body = await this.storage.get(rec.objectKey);
     return { rec, body };
+  }
+
+  /** 将草稿附件关联到新建的工单（仅本人上传的草稿） */
+  async linkDrafts(userId: string, ticketId: string, ids: string[]) {
+    if (!ids?.length) return;
+    await this.prisma.ticketAttachment.updateMany({
+      where: { id: { in: ids }, uploaderId: userId, ticketId: null },
+      data: { ticketId },
+    });
   }
 
   private serialize(r: {
@@ -89,7 +113,7 @@ export class AttachmentsService {
     fileName: string;
     fileSize: number;
     mime: string;
-    ticketId: string;
+    ticketId: string | null;
     messageId: string | null;
   }) {
     return {

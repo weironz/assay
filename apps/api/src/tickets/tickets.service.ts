@@ -98,6 +98,17 @@ export class TicketsService {
       },
     });
     await this.history(ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
+    // 关联建单前上传的草稿附件（仅本人、仍未挂单的）
+    if (dto.attachmentIds?.length) {
+      await this.prisma.ticketAttachment.updateMany({
+        where: {
+          id: { in: dto.attachmentIds },
+          uploaderId: user.id,
+          ticketId: null,
+        },
+        data: { ticketId: ticket.id },
+      });
+    }
     return this.findOne(user, ticket.id);
   }
 

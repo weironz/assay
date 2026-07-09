@@ -35,6 +35,10 @@ export class CreateTicketDto {
   @IsOptional()
   @IsString()
   queueId?: string;
+
+  @IsOptional()
+  @IsString({ each: true })
+  attachmentIds?: string[]; // 建单前上传的草稿附件
 }
 
 export class UpdateTicketDto {

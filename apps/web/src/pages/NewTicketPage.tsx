@@ -1,10 +1,13 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   useCreateTicket,
   useQueues,
   useTypes,
   useCategories,
+  uploadDraft,
+  attachmentUrl,
+  Attachment,
 } from '../features/tickets/api';
 import { PRIORITY_LABEL } from '../lib/ticket-meta';
 import RichEditor from '../components/RichEditor';
@@ -25,6 +28,23 @@ export default function NewTicketPage() {
     queueId: '',
   });
   const [error, setError] = useState('');
+  const [drafts, setDrafts] = useState<Attachment[]>([]);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  // 编辑器内插图：上传草稿并记录 id
+  const uploadImg = async (file: File) => {
+    const a = await uploadDraft(file);
+    setDrafts((d) => [...d, a]);
+    return attachmentUrl(a);
+  };
+
+  const addFiles = async (files: FileList | null) => {
+    if (!files?.length) return;
+    for (const f of Array.from(files)) {
+      const a = await uploadDraft(f);
+      setDrafts((d) => [...d, a]);
+    }
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -39,6 +59,7 @@ export default function NewTicketPage() {
         typeId: form.typeId || undefined,
         categoryId: form.categoryId || undefined,
         queueId: form.queueId || undefined,
+        attachmentIds: drafts.map((d) => d.id),
       };
       const t = await createMut.mutateAsync(payload);
       navigate(`/tickets/${t.id}`);
@@ -71,10 +92,50 @@ export default function NewTicketPage() {
             描述 *（支持富文本，可用 Markdown 快捷输入：# 标题、**加粗**、- 列表）
           </label>
           <RichEditor
-            placeholder="详细描述问题…"
+            placeholder="详细描述问题…（可粘贴截图 / 拖拽图片）"
             minHeight={280}
             onChange={(html) => setForm((f) => ({ ...f, body: html }))}
+            onUploadImage={uploadImg}
           />
+        </div>
+
+        {/* 附件 */}
+        <div>
+          <div className="flex items-center gap-3 mb-1">
+            <label className="text-sm text-gray-500">附件</label>
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              + 上传文件
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              hidden
+              onChange={(e) => addFiles(e.target.files)}
+            />
+          </div>
+          {drafts.length > 0 && (
+            <ul className="text-xs space-y-1">
+              {drafts.map((a) => (
+                <li key={a.id} className="flex items-center gap-2">
+                  <span className="text-gray-600 dark:text-gray-300 break-all">
+                    {a.mime.startsWith('image/') ? '🖼' : '📎'} {a.fileName}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setDrafts((d) => d.filter((x) => x.id !== a.id))}
+                    className="text-red-500 hover:underline"
+                  >
+                    移除
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>

@@ -29,6 +29,14 @@ export async function uploadAttachment(
   return data as Attachment;
 }
 
+/** 草稿上传：建单前上传（ticketId 暂空），提交时用 attachmentIds 关联 */
+export async function uploadDraft(file: File): Promise<Attachment> {
+  const fd = new FormData();
+  fd.append('file', file);
+  const { data } = await api.post('/uploads', fd);
+  return data as Attachment;
+}
+
 // —— 逻辑层：数据请求 hooks（界面组件只调用，不含 fetch 细节）——
 
 export interface TicketListItem {
@@ -101,6 +109,7 @@ export function useCreateTicket() {
       typeId?: string;
       categoryId?: string;
       queueId?: string;
+      attachmentIds?: string[];
     }) => (await api.post('/tickets', body)).data as TicketDetail,
   });
 }

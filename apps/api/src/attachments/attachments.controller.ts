@@ -31,6 +31,17 @@ export class AttachmentsController {
     return this.attachments.upload(user, ticketId, file, messageId);
   }
 
+  /** 草稿上传：建单前上传图片/附件（提交工单时通过 attachmentIds 关联） */
+  @Post('uploads')
+  @RequirePermissions('ticket:create')
+  @UseInterceptors(FileInterceptor('file'))
+  uploadDraft(
+    @CurrentUser() user: AuthUser,
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    return this.attachments.uploadDraft(user, file);
+  }
+
   @Get('tickets/:id/attachments')
   @RequirePermissions('ticket:read')
   list(@CurrentUser() user: AuthUser, @Param('id') ticketId: string) {

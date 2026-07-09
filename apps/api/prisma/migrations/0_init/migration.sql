@@ -197,7 +197,7 @@ CREATE TABLE "ticket_messages" (
 -- CreateTable
 CREATE TABLE "ticket_attachments" (
     "id" TEXT NOT NULL,
-    "ticket_id" TEXT NOT NULL,
+    "ticket_id" TEXT,
     "message_id" TEXT,
     "file_name" TEXT NOT NULL,
     "object_key" TEXT NOT NULL,
