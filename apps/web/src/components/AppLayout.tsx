@@ -1,8 +1,10 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../stores/auth';
 import { signOut } from '../lib/auth-client';
 import NotificationBell from './NotificationBell';
 import ThemeToggle from './ThemeToggle';
+import ChangePasswordModal from './ChangePasswordModal';
 
 interface MenuItem {
   to: string;
@@ -20,6 +22,7 @@ const MENU: MenuItem[] = [
 export default function AppLayout() {
   const { user, has, clear } = useAuth();
   const navigate = useNavigate();
+  const [showPwd, setShowPwd] = useState(false);
 
   const logout = async () => {
     await signOut();
@@ -65,6 +68,12 @@ export default function AppLayout() {
             </span>
           </span>
           <button
+            onClick={() => setShowPwd(true)}
+            className="text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600"
+          >
+            修改密码
+          </button>
+          <button
             onClick={logout}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-red-600"
           >
@@ -75,6 +84,7 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
+      {showPwd && <ChangePasswordModal onClose={() => setShowPwd(false)} />}
     </div>
   );
 }

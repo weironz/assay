@@ -8,7 +8,7 @@ import {
   Post,
 } from '@nestjs/common';
 import { UsersService } from './users.service';
-import { CreateUserDto, UpdateUserDto } from './dto';
+import { CreateUserDto, ResetPasswordDto, UpdateUserDto } from './dto';
 import { RequirePermissions } from '../auth/decorators';
 
 @Controller('users')
@@ -39,5 +39,10 @@ export class UsersController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.users.remove(id);
+  }
+
+  @Post(':id/reset-password')
+  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
+    return this.users.resetPassword(id, dto.newPassword);
   }
 }

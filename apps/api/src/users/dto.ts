@@ -32,6 +32,12 @@ export class CreateUserDto {
   roleNames!: string[]; // ['handler'] 等
 }
 
+export class ResetPasswordDto {
+  @IsString()
+  @MinLength(6)
+  newPassword!: string;
+}
+
 export class UpdateUserDto {
   @IsOptional()
   @IsString()

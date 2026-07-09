@@ -60,6 +60,16 @@ export default function UsersPage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
 
+  const resetPwd = (u: UserRow) => {
+    const pwd = prompt(`为「${u.name}」设置新密码（≥6 位）：`);
+    if (!pwd) return;
+    if (pwd.length < 6) return alert('密码至少 6 位');
+    api
+      .post(`/users/${u.id}/reset-password`, { newPassword: pwd })
+      .then(() => alert('密码已重置'))
+      .catch((e) => alert(e?.response?.data?.message || '重置失败'));
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     setMsg('');
@@ -168,6 +178,12 @@ export default function UsersPage() {
                     className="text-blue-600 hover:underline"
                   >
                     {u.status === 'ACTIVE' ? '禁用' : '启用'}
+                  </button>
+                  <button
+                    onClick={() => resetPwd(u)}
+                    className="text-amber-600 hover:underline"
+                  >
+                    重置密码
                   </button>
                   <button
                     onClick={() => delMut.mutate(u.id)}

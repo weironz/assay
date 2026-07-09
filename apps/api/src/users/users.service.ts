@@ -87,6 +87,34 @@ export class UsersService {
     return { ok: true };
   }
 
+  /** 管理员重置某用户密码（用户忘记密码的兜底，无需原密码） */
+  async resetPassword(id: string, newPassword: string) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('用户不存在');
+    // 用 better-auth 内部哈希器，保证与登录校验一致
+    const ctx = await auth.$context;
+    const hashed = await ctx.password.hash(newPassword);
+    const acc = await this.prisma.account.findFirst({
+      where: { userId: id, providerId: 'credential' },
+    });
+    if (acc) {
+      await this.prisma.account.update({
+        where: { id: acc.id },
+        data: { password: hashed },
+      });
+    } else {
+      await this.prisma.account.create({
+        data: {
+          userId: id,
+          accountId: id,
+          providerId: 'credential',
+          password: hashed,
+        },
+      });
+    }
+    return { ok: true };
+  }
+
   /** 重置用户的角色集合 */
   private async setRoles(userId: string, roleNames: string[]) {
     const roles = await this.prisma.role.findMany({
