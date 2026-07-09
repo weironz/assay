@@ -52,6 +52,13 @@ services:
     depends_on:
       - postgres
 
+  # 开发用邮件捕获器：所有外发邮件进这里，Web UI 查看，不真正外发
+  mailpit:
+    image: axllent/mailpit:latest
+    restart: unless-stopped
+    ports:
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+
   api:
     build:
       context: ./apps/api
@@ -64,6 +71,11 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       S3_ENDPOINT: http://rustfs:9000
+      # 开发环境：邮件走 mailpit 捕获器（UI http://localhost:8025）
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      SMTP_FROM: 工单系统 <no-reply@assay.local>
+      APP_URL: http://localhost:5173
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:

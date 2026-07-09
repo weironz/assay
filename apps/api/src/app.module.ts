@@ -10,6 +10,7 @@ import { QueuesModule } from './queues/queues.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { MailModule } from './mail/mail.module';
 import { SlaModule } from './sla/sla.module';
 import { StatsModule } from './stats/stats.module';
 import { SavedViewsModule } from './saved-views/saved-views.module';
@@ -33,6 +34,7 @@ import { PermissionsGuard } from './auth/permissions.guard';
     QueuesModule,
     TicketsModule,
     AttachmentsModule,
+    MailModule,
     NotificationsModule,
     SlaModule,
     StatsModule,

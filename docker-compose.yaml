@@ -51,6 +51,7 @@ services:
       S3_ENDPOINT: http://rustfs:9000
       AUTH_BASE_URL: ${PUBLIC_URL:?set PUBLIC_URL}
       AUTH_TRUST_ORIGINS: ${PUBLIC_URL}
+      APP_URL: ${PUBLIC_URL}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
