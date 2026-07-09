@@ -35,12 +35,32 @@ export const auth = betterAuth({
     delete: async (key) => {
       await redis.del(key);
     },
+    // 原子自增（供限流计数用）：首次计数时设过期为窗口时长
+    increment: async (key: string, ttl?: number) => {
+      const count = await redis.incr(key);
+      if (count === 1 && ttl) await redis.expire(key, ttl);
+      return count;
+    },
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 天
     updateAge: 60 * 60 * 24, // 每天滑动续期
   },
+  // 限流：防登录爆破。计数走 Redis；真实 IP 取 nginx 设置的 x-real-ip
+  rateLimit: {
+    enabled: true,
+    window: 60,
+    max: 100,
+    storage: 'secondary-storage',
+    customRules: {
+      '/sign-in/email': { window: 60, max: 5 }, // 登录：每 IP 每分钟最多 5 次
+      '/forget-password': { window: 60, max: 3 },
+    },
+  },
   advanced: {
+    ipAddress: {
+      ipAddressHeaders: ['x-real-ip'],
+    },
     defaultCookieAttributes: {
       sameSite: 'lax',
       httpOnly: true,

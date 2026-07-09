@@ -18,7 +18,11 @@ export default function LoginPage() {
     try {
       const res = await signIn.email({ email, password });
       if (res.error) {
-        setError(res.error.message || '登录失败');
+        if (res.error.status === 429) {
+          setError('登录尝试过于频繁，请稍后再试');
+        } else {
+          setError('邮箱或密码错误');
+        }
         return;
       }
       const me = await fetchMe();
