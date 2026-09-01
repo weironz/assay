@@ -38,7 +38,9 @@ services:
       - rustfs-data-prod:/data
 
   api:
-    image: willdockerhub/assay-api:${IMAGE_TAG:-latest}
+    # 默认走阿里云 ACR（服务器在国内，拉取秒级）；
+    # 想改用 Docker Hub 就在 .env 里设 REGISTRY=willdockerhub
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-api:${IMAGE_TAG:-latest}
     restart: always
     env_file: .env
     environment:
@@ -58,7 +60,7 @@ services:
       rustfs: { condition: service_started }
 
   web:
-    image: willdockerhub/assay-web:${IMAGE_TAG:-latest}
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-web:${IMAGE_TAG:-latest}
     restart: always
     ports:
       - "${WEB_PORT:-8088}:80"

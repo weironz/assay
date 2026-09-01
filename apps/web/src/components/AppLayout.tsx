@@ -1,25 +1,29 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useAuth } from '../stores/auth';
 import { signOut } from '../lib/auth-client';
 import { absUrl } from '../lib/api';
 import BrandMark from './BrandMark';
 import NotificationBell from './NotificationBell';
 import ThemeToggle from './ThemeToggle';
+import LanguageSwitcher from './LanguageSwitcher';
 
 interface MenuItem {
   to: string;
-  label: string;
+  /** i18n key, resolved at render so the sidebar follows the active language */
+  labelKey: string;
   permission?: string;
 }
 
 const MENU: MenuItem[] = [
-  { to: '/dashboard', label: '仪表盘' },
-  { to: '/tickets', label: '工单' },
-  { to: '/users', label: '用户管理', permission: 'user:manage' },
-  { to: '/queues', label: '队列管理', permission: 'queue:manage' },
+  { to: '/dashboard', labelKey: 'nav.dashboard' },
+  { to: '/tickets', labelKey: 'nav.tickets' },
+  { to: '/users', labelKey: 'nav.users', permission: 'user:manage' },
+  { to: '/queues', labelKey: 'nav.queues', permission: 'queue:manage' },
 ];
 
 export default function AppLayout() {
+  const { t } = useTranslation();
   const { user, has, clear } = useAuth();
   const navigate = useNavigate();
 
@@ -56,7 +60,7 @@ export default function AppLayout() {
                   {isActive && (
                     <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-brand-500" />
                   )}
-                  {m.label}
+                  {t(m.labelKey)}
                 </>
               )}
             </NavLink>
@@ -67,12 +71,13 @@ export default function AppLayout() {
       {/* 右侧主区 */}
       <div className="flex-1 flex flex-col min-w-0">
         <header className="h-14 flex items-center justify-end gap-4 px-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
+          <LanguageSwitcher />
           <ThemeToggle />
           <NotificationBell />
           <NavLink
             to="/profile"
             className="flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-brand-700 dark:hover:text-brand-400"
-            title="个人中心"
+            title={t('nav.profile')}
           >
             {user?.image ? (
               <img
@@ -96,7 +101,7 @@ export default function AppLayout() {
             onClick={logout}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-red-600"
           >
-            退出登录
+            {t('nav.signOut')}
           </button>
         </header>
         <main className="flex-1 p-6 overflow-auto">

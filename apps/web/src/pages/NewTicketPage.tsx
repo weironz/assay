@@ -1,5 +1,6 @@
 import { FormEvent, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   useCreateTicket,
   useQueues,
@@ -9,10 +10,13 @@ import {
   attachmentUrl,
   Attachment,
 } from '../features/tickets/api';
-import { PRIORITY_LABEL } from '../lib/ticket-meta';
+import { PRIORITY_KEYS, priorityLabel } from '../lib/ticket-meta';
 import RichEditor from '../components/RichEditor';
+import { type Msg, useMsg } from '../lib/messages';
 
 export default function NewTicketPage() {
+  const { t } = useTranslation();
+  const msg = useMsg();
   const navigate = useNavigate();
   const createMut = useCreateTicket();
   const { data: queues } = useQueues();
@@ -27,7 +31,7 @@ export default function NewTicketPage() {
     categoryId: '',
     queueId: '',
   });
-  const [error, setError] = useState('');
+  const [error, setError] = useState<Msg>(null);
   const [drafts, setDrafts] = useState<Attachment[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -48,9 +52,9 @@ export default function NewTicketPage() {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError(null);
     if (!form.body.replace(/<[^>]*>/g, '').trim()) {
-      setError('请填写描述');
+      setError({ key: 'ticketNew.errBodyRequired' });
       return;
     }
     try {
@@ -61,10 +65,13 @@ export default function NewTicketPage() {
         queueId: form.queueId || undefined,
         attachmentIds: drafts.map((d) => d.id),
       };
-      const t = await createMut.mutateAsync(payload);
-      navigate(`/tickets/${t.id}`);
+      const created = await createMut.mutateAsync(payload);
+      navigate(`/tickets/${created.id}`);
     } catch (err: any) {
-      setError(err?.response?.data?.message || '创建失败');
+      const serverMsg = err?.response?.data?.message;
+      setError(
+        serverMsg ? { raw: serverMsg } : { key: 'ticketNew.errCreateFailed' },
+      );
     }
   };
 
@@ -73,13 +80,15 @@ export default function NewTicketPage() {
 
   return (
     <div className="max-w-5xl space-y-4">
-      <h1 className="text-xl font-semibold">新建工单</h1>
+      <h1 className="text-xl font-semibold">{t('ticketNew.title')}</h1>
       <form
         onSubmit={submit}
         className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 space-y-4"
       >
         <div>
-          <label className="block text-sm text-gray-500 mb-1">标题 *</label>
+          <label className="block text-sm text-gray-500 mb-1">
+            {t('ticketNew.fieldTitle')}
+          </label>
           <input
             required
             value={form.title}
@@ -89,10 +98,10 @@ export default function NewTicketPage() {
         </div>
         <div>
           <label className="block text-sm text-gray-500 mb-1">
-            描述 *（支持富文本，可用 Markdown 快捷输入：# 标题、**加粗**、- 列表）
+            {t('ticketNew.fieldBody')}
           </label>
           <RichEditor
-            placeholder="详细描述问题…（可粘贴截图 / 拖拽图片）"
+            placeholder={t('ticketNew.bodyPlaceholder')}
             minHeight={280}
             onChange={(html) => setForm((f) => ({ ...f, body: html }))}
             onUploadImage={uploadImg}
@@ -102,13 +111,15 @@ export default function NewTicketPage() {
         {/* 附件 */}
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <label className="text-sm text-gray-500">附件</label>
+            <label className="text-sm text-gray-500">
+              {t('ticketNew.attachments')}
+            </label>
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
               className="text-xs text-brand-700 hover:underline"
             >
-              + 上传文件
+              {t('ticketNew.addFile')}
             </button>
             <input
               ref={fileRef}
@@ -130,7 +141,7 @@ export default function NewTicketPage() {
                     onClick={() => setDrafts((d) => d.filter((x) => x.id !== a.id))}
                     className="text-red-500 hover:underline"
                   >
-                    移除
+                    {t('common.remove')}
                   </button>
                 </li>
               ))}
@@ -139,42 +150,48 @@ export default function NewTicketPage() {
         </div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm text-gray-500 mb-1">优先级</label>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.priority')}
+            </label>
             <select
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
               className={inputCls}
             >
-              {Object.entries(PRIORITY_LABEL).map(([k, v]) => (
+              {PRIORITY_KEYS.map((k) => (
                 <option key={k} value={k}>
-                  {v}
+                  {priorityLabel(t, k)}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">类型</label>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.type')}
+            </label>
             <select
               value={form.typeId}
               onChange={(e) => setForm({ ...form, typeId: e.target.value })}
               className={inputCls}
             >
-              <option value="">未指定</option>
-              {types?.map((t: any) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
+              <option value="">{t('common.notSpecified')}</option>
+              {types?.map((item: any) => (
+                <option key={item.id} value={item.id}>
+                  {item.name}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">分类</label>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.category')}
+            </label>
             <select
               value={form.categoryId}
               onChange={(e) => setForm({ ...form, categoryId: e.target.value })}
               className={inputCls}
             >
-              <option value="">未指定</option>
+              <option value="">{t('common.notSpecified')}</option>
               {categories?.map((c: any) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -183,13 +200,15 @@ export default function NewTicketPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">队列</label>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.queue')}
+            </label>
             <select
               value={form.queueId}
               onChange={(e) => setForm({ ...form, queueId: e.target.value })}
               className={inputCls}
             >
-              <option value="">未指定</option>
+              <option value="">{t('common.notSpecified')}</option>
               {queues?.map((qu: any) => (
                 <option key={qu.id} value={qu.id}>
                   {qu.name}
@@ -198,21 +217,23 @@ export default function NewTicketPage() {
             </select>
           </div>
         </div>
-        {error && <p className="text-sm text-red-500">{error}</p>}
+        {error && <p className="text-sm text-red-500">{msg(error)}</p>}
         <div className="flex gap-3">
           <button
             type="submit"
             disabled={createMut.isPending}
             className="rounded-md bg-brand-700 text-white px-5 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
           >
-            {createMut.isPending ? '提交中…' : '提交工单'}
+            {createMut.isPending
+              ? t('common.submitting')
+              : t('ticketNew.submit')}
           </button>
           <button
             type="button"
             onClick={() => navigate('/tickets')}
             className="rounded-md border border-gray-300 dark:border-gray-700 px-5 py-2 text-sm"
           >
-            取消
+            {t('common.cancel')}
           </button>
         </div>
       </form>

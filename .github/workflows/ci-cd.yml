@@ -1,0 +1,334 @@
+name: CI / CD
+
+# 推送只跑测试，不会自动发版。
+# 构建镜像与部署一律手动触发：Actions 页面点 "Run workflow"，
+# 或命令行 `gh workflow run ci-cd.yml`（加 -f skip_deploy=true 则只推镜像不部署）。
+on:
+  pull_request:
+  push:
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      skip_deploy:
+        description: '只构建推送镜像，不部署到服务器'
+        type: boolean
+        default: false
+      image_tag:
+        description: '镜像版本号（留空则用 commit sha）'
+        type: string
+        default: ''
+
+concurrency:
+  # PR 可以互相取消；main 上的发布流程不取消，避免服务器停在半途状态
+  group: cicd-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  HUB_API: willdockerhub/assay-api
+  HUB_WEB: willdockerhub/assay-web
+
+jobs:
+  web:
+    name: 前端 · 类型检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.0
+
+      - name: 安装依赖（锁定版本）
+        working-directory: apps/web
+        run: bun install --frozen-lockfile
+
+      - name: 类型检查
+        working-directory: apps/web
+        run: bunx tsc -p tsconfig.json --noEmit --incremental false
+
+      - name: 生产构建
+        working-directory: apps/web
+        env:
+          VITE_API_BASE_URL: ''
+        run: bun run build
+
+  api:
+    name: 后端 · 类型检查与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.13.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/api/package.json
+
+      - name: 安装依赖
+        working-directory: apps/api
+        run: pnpm install --ignore-scripts
+
+      - name: 生成 Prisma Client
+        working-directory: apps/api
+        run: pnpm prisma generate
+
+      - name: 校验 Prisma schema
+        working-directory: apps/api
+        run: pnpm prisma validate
+
+      - name: 编译
+        working-directory: apps/api
+        run: pnpm build
+
+  smoke:
+    name: 集成冒烟测试（整栈拉起）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: |
+          docker build -t assay-api:ci ./apps/api
+          docker build -t assay-web:ci --build-arg VITE_API_BASE_URL="" ./apps/web
+
+      - name: 拉起整栈
+        run: |
+          cat > .env <<'EOF'
+          PUBLIC_URL=http://localhost:8088
+          WEB_PORT=8088
+          IMAGE_TAG=ci
+          POSTGRES_USER=assay
+          POSTGRES_PASSWORD=ci_test_password
+          POSTGRES_DB=assay
+          S3_BUCKET=assay-attachments
+          S3_REGION=us-east-1
+          S3_ACCESS_KEY=ciaccesskey
+          S3_SECRET_KEY=cisecretkey
+          S3_FORCE_PATH_STYLE=true
+          AUTH_SECRET=ci_only_secret_not_used_in_production_xxxxx
+          ADMIN_EMAIL=admin@example.com
+          ADMIN_PASSWORD=ciadmin12345
+          ADMIN_NAME=CI Admin
+          EOF
+          # 用本地刚构建的镜像替代仓库镜像（CI 里不该去拉远端）
+          sed -i -E 's#image: \$\{REGISTRY:-[^}]*\}/assay-api:[^ ]*#image: assay-api:ci#; s#image: \$\{REGISTRY:-[^}]*\}/assay-web:[^ ]*#image: assay-web:ci#' docker-compose.yaml
+          grep -E 'image: assay-(api|web):ci' docker-compose.yaml
+          docker compose up -d
+
+      - name: 等待服务就绪
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS -m 3 http://localhost:8088/ >/dev/null 2>&1; then echo "web 就绪"; break; fi
+            sleep 3
+          done
+          for i in $(seq 1 60); do
+            if docker compose logs api 2>/dev/null | grep -q "API 已启动"; then echo "api 就绪"; break; fi
+            sleep 3
+          done
+
+      - name: 冒烟断言
+        run: |
+          set -e
+          echo "— 首页可访问"
+          curl -fsS -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:8088/
+
+          echo "— SPA 路由回退（前端路由不能被 API 前缀吃掉）"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/tickets)" = "200"
+
+          echo "— 未登录访问受保护接口应 401"
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/api/me)" = "401"
+
+          echo "— 管理员登录"
+          JAR=$(mktemp)
+          test "$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" \
+            -X POST http://localhost:8088/api/auth/sign-in/email \
+            -H 'Content-Type: application/json' -H 'Origin: http://localhost:8088' \
+            -d '{"email":"admin@example.com","password":"ciadmin12345"}')" = "200"
+
+          echo "— 登录后能取到自己的角色"
+          curl -fsS -b "$JAR" http://localhost:8088/api/me | grep -q '"roles":\["admin"\]'
+
+          echo "— 工单列表可访问"
+          curl -fsS -b "$JAR" -o /dev/null "http://localhost:8088/api/tickets?pageSize=1"
+
+          echo "— 登录限流生效（连打 8 次后应出现 429）"
+          CODES=""
+          for i in $(seq 1 8); do
+            CODES="$CODES $(curl -s -o /dev/null -w '%{http_code}' \
+              -X POST http://localhost:8088/api/auth/sign-in/email \
+              -H 'Content-Type: application/json' -H 'Origin: http://localhost:8088' \
+              -d '{"email":"admin@example.com","password":"wrong"}')"
+          done
+          echo "  返回码:$CODES"
+          echo "$CODES" | grep -q 429
+
+          echo "全部冒烟断言通过"
+
+      - name: 失败时输出日志
+        if: failure()
+        run: docker compose logs --tail 120
+
+      - name: 清理
+        if: always()
+        run: docker compose down -v
+
+  build:
+    name: 构建并推送镜像
+    # 只有类型检查、编译、整栈冒烟测试全过，才允许构建发布镜像；
+    # 且必须是手动触发——推代码不会自动发版
+    needs: [web, api, smoke]
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      acr_registry: ${{ steps.meta.outputs.acr_registry }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 计算镜像标签与仓库地址
+        id: meta
+        run: |
+          if [ -n "${{ inputs.image_tag }}" ]; then
+            echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+          # ACR_URL 形如 registry.cn-shenzhen.aliyuncs.com/namespace，登录只需域名部分
+          echo "acr_registry=$(echo '${{ secrets.ACR_URL }}' | cut -d/ -f1)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 登录阿里云 ACR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.meta.outputs.acr_registry }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: 构建并推送 api（一次构建，双仓库分发）
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          push: true
+          tags: |
+            ${{ env.HUB_API }}:latest
+            ${{ env.HUB_API }}:${{ steps.meta.outputs.tag }}
+            ${{ secrets.ACR_URL }}/assay-api:latest
+            ${{ secrets.ACR_URL }}/assay-api:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,scope=api,mode=max
+
+      - name: 构建并推送 web（一次构建，双仓库分发）
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/web
+          push: true
+          build-args: VITE_API_BASE_URL=
+          tags: |
+            ${{ env.HUB_WEB }}:latest
+            ${{ env.HUB_WEB }}:${{ steps.meta.outputs.tag }}
+            ${{ secrets.ACR_URL }}/assay-web:latest
+            ${{ secrets.ACR_URL }}/assay-web:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,scope=web,mode=max
+
+  deploy:
+    name: 部署到生产
+    needs: build
+    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_deploy }}
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: 准备 SSH
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # 固定主机指纹，不用 StrictHostKeyChecking=no（那等于放弃中间人防护）
+          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: 服务器登录 ACR
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          ACR_REGISTRY: ${{ needs.build.outputs.acr_registry }}
+          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
+        run: |
+          # 密码经 stdin 传入，不写进命令行（否则会出现在服务器进程列表里）
+          printf '%s' "$ACR_PASSWORD" | ssh -o BatchMode=yes "$USER@$HOST"             "docker login --username='$ACR_USERNAME' --password-stdin '$ACR_REGISTRY'"
+
+      - name: 拉取新镜像并滚动更新
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          ssh -o BatchMode=yes "$USER@$HOST" bash -euo pipefail <<EOF
+            cd /data/assay
+            echo "== 记录当前版本，供回滚用 =="
+            docker compose images -q api > /tmp/prev-api.txt 2>/dev/null || true
+            docker compose images -q web > /tmp/prev-web.txt 2>/dev/null || true
+
+            echo "== 拉取 $TAG =="
+            docker compose pull
+
+            echo "== 滚动更新 =="
+            docker compose up -d --remove-orphans
+          EOF
+
+      - name: 健康校验（失败即回滚）
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PUBLIC_URL: ${{ secrets.DEPLOY_PUBLIC_URL }}
+        run: |
+          ok=0
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$PUBLIC_URL/" || true)
+            api=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$PUBLIC_URL/api/me" || true)
+            # 首页 200 且受保护接口 401（说明前端静态与 API 反代都通）
+            if [ "$code" = "200" ] && [ "$api" = "401" ]; then ok=1; break; fi
+            sleep 5
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::健康校验失败，执行回滚"
+            ssh -o BatchMode=yes "$USER@$HOST" bash -euo pipefail <<'EOF'
+              cd /data/assay
+              REG=$(grep -oE '^REGISTRY=.*' .env | cut -d= -f2-)
+              REG=${REG:-registry.cn-shenzhen.aliyuncs.com/willspace}
+              PREV_API=$(cat /tmp/prev-api.txt 2>/dev/null || true)
+              PREV_WEB=$(cat /tmp/prev-web.txt 2>/dev/null || true)
+              [ -n "$PREV_API" ] && docker tag "$PREV_API" "$REG/assay-api:latest" || true
+              [ -n "$PREV_WEB" ] && docker tag "$PREV_WEB" "$REG/assay-web:latest" || true
+              docker compose up -d
+              echo "已回滚到上一版本"
+          EOF
+            exit 1
+          fi
+          echo "✅ 部署成功，站点健康"
+
+      - name: 部署摘要
+        if: always()
+        run: |
+          {
+            echo "### 部署结果"
+            echo ""
+            echo "- 镜像标签：\`${{ needs.build.outputs.tag }}\`"
+            echo "- 站点：${{ secrets.DEPLOY_PUBLIC_URL }}"
+            echo "- 结果：${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"

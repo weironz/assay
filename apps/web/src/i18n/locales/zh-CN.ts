@@ -186,7 +186,7 @@ const zhCN: Resource = {
     attachments: '附件',
     addAttachment: '+ 上传',
     noAttachments: '暂无附件',
-    history: '操作历史（{{count}}）',
+    history: '操作历史（{{n}}）',
   },
 
   historyAction: {
@@ -224,6 +224,7 @@ const zhCN: Resource = {
 
   queues: {
     title: '队列管理',
+    colName: '名称',
     namePlaceholder: '队列名称',
     descriptionPlaceholder: '描述（可选）',
     create: '新建队列',

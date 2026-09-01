@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   useTicket,
   useTransition,
@@ -16,31 +17,26 @@ import {
 } from '../features/tickets/api';
 import { useQueryClient } from '@tanstack/react-query';
 import {
-  STATUS_LABEL,
   STATUS_COLOR,
-  PRIORITY_LABEL,
   PRIORITY_COLOR,
-  ACTION_LABEL,
+  statusLabel,
+  priorityLabel,
+  actionLabel,
+  historyActionLabel,
 } from '../lib/ticket-meta';
 import { renderHtml } from '../lib/sanitize';
 import { useAuth } from '../stores/auth';
+import { useDateFormat } from '../i18n/format';
 import RichEditor from '../components/RichEditor';
 import SlaBadge from '../components/SlaBadge';
 
-const HISTORY_ACTION: Record<string, string> = {
-  CREATE: '创建工单',
-  ASSIGN: '指派',
-  TRANSITION: '状态变更',
-  MESSAGE: '回复/备注',
-  UPDATE: '编辑',
-  ATTACH: '附件',
-};
-
 export default function TicketDetailPage() {
+  const { t } = useTranslation();
+  const fmt = useDateFormat();
   const { id = '' } = useParams();
   const qc = useQueryClient();
   const { user, has } = useAuth();
-  const { data: t, isLoading } = useTicket(id);
+  const { data: ticket, isLoading } = useTicket(id);
   const transition = useTransition();
   const assign = useAssign();
   const addMessage = useAddMessage();
@@ -61,7 +57,8 @@ export default function TicketDetailPage() {
   const [msgDraft, setMsgDraft] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
 
-  if (isLoading || !t) return <div className="text-gray-400">加载中…</div>;
+  if (isLoading || !ticket)
+    return <div className="text-gray-400">{t('common.loading')}</div>;
 
   const isStaff =
     user?.roles.includes('admin') ||
@@ -70,9 +67,9 @@ export default function TicketDetailPage() {
   const isSupervisorOrAdmin =
     !!user?.roles.includes('admin') || !!user?.roles.includes('supervisor');
   const canAssign =
-    has('ticket:assign') && ['NEW', 'REOPENED'].includes(t.status);
+    has('ticket:assign') && ['NEW', 'REOPENED'].includes(ticket.status);
   const canEditTicket =
-    has('ticket:update') && (isStaff || t.requester?.id === user?.id);
+    has('ticket:update') && (isStaff || ticket.requester?.id === user?.id);
 
   const saveTitle = () => {
     const v = titleDraft.trim();
@@ -89,7 +86,8 @@ export default function TicketDetailPage() {
       { onSuccess: () => setEditingMsgId(null) },
     );
   };
-  const uploadImg = async (file: File) => attachmentUrl(await uploadAttachment(id, file));
+  const uploadImg = async (file: File) =>
+    attachmentUrl(await uploadAttachment(id, file));
 
   const plain = reply.replace(/<[^>]*>/g, '').trim();
 
@@ -117,11 +115,15 @@ export default function TicketDetailPage() {
     <div className="space-y-4">
       <div className="flex items-center gap-3">
         <Link to="/tickets" className="text-sm text-brand-700 hover:underline">
-          ← 返回
+          {t('ticketDetail.back')}
         </Link>
-        <span className="font-mono text-xs text-gray-400">{t.ticketNo}</span>
-        <span className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_COLOR[t.status]}`}>
-          {STATUS_LABEL[t.status]}
+        <span className="font-mono text-xs text-gray-400">
+          {ticket.ticketNo}
+        </span>
+        <span
+          className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_COLOR[ticket.status]}`}
+        >
+          {statusLabel(t, ticket.status)}
         </span>
       </div>
       {editingTitle ? (
@@ -136,27 +138,27 @@ export default function TicketDetailPage() {
             onClick={saveTitle}
             className="rounded-md bg-brand-700 text-white px-3 py-1.5 text-sm hover:bg-brand-800"
           >
-            保存
+            {t('common.save')}
           </button>
           <button
             onClick={() => setEditingTitle(false)}
             className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm"
           >
-            取消
+            {t('common.cancel')}
           </button>
         </div>
       ) : (
         <div className="flex items-center gap-2">
-          <h1 className="text-xl font-semibold">{t.title}</h1>
+          <h1 className="text-xl font-semibold">{ticket.title}</h1>
           {canEditTicket && (
             <button
               onClick={() => {
-                setTitleDraft(t.title);
+                setTitleDraft(ticket.title);
                 setEditingTitle(true);
               }}
               className="text-xs text-brand-700 hover:underline"
             >
-              编辑
+              {t('common.edit')}
             </button>
           )}
         </div>
@@ -164,14 +166,14 @@ export default function TicketDetailPage() {
 
       {/* 状态流转 + 指派 */}
       <div className="flex flex-wrap items-center gap-2">
-        {t.availableActions.map((a) => (
+        {ticket.availableActions.map((a) => (
           <button
             key={a}
             disabled={transition.isPending}
             onClick={() => transition.mutate({ id, arg: a })}
             className="rounded-md border border-brand-600 text-brand-700 px-3 py-1.5 text-sm hover:bg-brand-700 hover:text-white disabled:opacity-50"
           >
-            {ACTION_LABEL[a] ?? a}
+            {actionLabel(t, a)}
           </button>
         ))}
         {canAssign && (
@@ -179,11 +181,14 @@ export default function TicketDetailPage() {
             <select
               value={assigneeId}
               onChange={(e) => setAssigneeId(e.target.value)}
+              aria-label={t('ticketDetail.selectAssignee')}
               className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-2 py-1.5 text-sm"
             >
-              <option value="">选择处理人…</option>
+              <option value="">{t('ticketDetail.selectAssignee')}</option>
               {assignees?.map((u) => (
-                <option key={u.id} value={u.id}>{u.name}</option>
+                <option key={u.id} value={u.id}>
+                  {u.name}
+                </option>
               ))}
             </select>
             <button
@@ -191,7 +196,7 @@ export default function TicketDetailPage() {
               onClick={() => assign.mutate({ id, arg: { assigneeId } })}
               className="rounded-md bg-brand-700 text-white px-3 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
             >
-              指派
+              {t('ticketDetail.assign')}
             </button>
           </div>
         )}
@@ -201,7 +206,7 @@ export default function TicketDetailPage() {
         {/* 中栏 */}
         <div className="lg:col-span-2 space-y-3">
           <div className="space-y-3">
-            {t.messages.map((m) => {
+            {ticket.messages.map((m) => {
               const canEditMsg = m.author.id === user?.id || isSupervisorOrAdmin;
               const editing = editingMsgId === m.id;
               return (
@@ -216,11 +221,15 @@ export default function TicketDetailPage() {
                   <div className="flex items-center justify-between text-xs mb-2">
                     <span className="font-medium text-gray-700 dark:text-gray-300">
                       {m.author.name}
-                      {m.isInternal && <span className="ml-2 text-amber-600">内部备注</span>}
+                      {m.isInternal && (
+                        <span className="ml-2 text-amber-600">
+                          {t('ticketDetail.internalTag')}
+                        </span>
+                      )}
                     </span>
                     <span className="flex items-center gap-2">
                       <span className="text-gray-400">
-                        {new Date(m.createdAt).toLocaleString()}
+                        {fmt.dateTime(m.createdAt)}
                       </span>
                       {canEditMsg && !editing && (
                         <button
@@ -230,7 +239,7 @@ export default function TicketDetailPage() {
                           }}
                           className="text-brand-700 hover:underline"
                         >
-                          编辑
+                          {t('common.edit')}
                         </button>
                       )}
                     </span>
@@ -248,14 +257,14 @@ export default function TicketDetailPage() {
                           onClick={() => setEditingMsgId(null)}
                           className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm"
                         >
-                          取消
+                          {t('common.cancel')}
                         </button>
                         <button
                           onClick={saveMsg}
                           disabled={updateMessage.isPending}
                           className="rounded-md bg-brand-700 text-white px-3 py-1 text-sm hover:bg-brand-800 disabled:opacity-50"
                         >
-                          保存
+                          {t('common.save')}
                         </button>
                       </div>
                     </div>
@@ -275,7 +284,7 @@ export default function TicketDetailPage() {
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
             <RichEditor
               key={editorKey}
-              placeholder="输入回复…（支持 Markdown 快捷输入与插图）"
+              placeholder={t('ticketDetail.replyPlaceholder')}
               onChange={setReply}
               onUploadImage={async (file) => {
                 const a = await uploadAttachment(id, file);
@@ -290,7 +299,7 @@ export default function TicketDetailPage() {
                     checked={internal}
                     onChange={(e) => setInternal(e.target.checked)}
                   />
-                  内部备注（提单人不可见）
+                  {t('ticketDetail.internalCheckbox')}
                 </label>
               ) : (
                 <span />
@@ -300,7 +309,9 @@ export default function TicketDetailPage() {
                 onClick={submitReply}
                 className="rounded-md bg-brand-700 text-white px-4 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
               >
-                {internal ? '添加内部备注' : '回复'}
+                {internal
+                  ? t('ticketDetail.addInternalNote')
+                  : t('ticketDetail.reply')}
               </button>
             </div>
           </div>
@@ -309,38 +320,58 @@ export default function TicketDetailPage() {
         {/* 右栏 */}
         <div className="space-y-3 text-sm">
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
-            <Meta label="状态">
-              <span className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_COLOR[t.status]}`}>
-                {STATUS_LABEL[t.status]}
+            <Meta label={t('ticketDetail.metaStatus')}>
+              <span
+                className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_COLOR[ticket.status]}`}
+              >
+                {statusLabel(t, ticket.status)}
               </span>
             </Meta>
-            <Meta label="优先级">
-              <span className={PRIORITY_COLOR[t.priority]}>{PRIORITY_LABEL[t.priority]}</span>
+            <Meta label={t('ticketDetail.metaPriority')}>
+              <span className={PRIORITY_COLOR[ticket.priority]}>
+                {priorityLabel(t, ticket.priority)}
+              </span>
             </Meta>
-            <Meta label="提单人">{t.requester?.name}</Meta>
-            <Meta label="处理人">{t.assignee?.name ?? '未指派'}</Meta>
-            <Meta label="队列">{t.queue?.name ?? '—'}</Meta>
-            <Meta label="类型">{t.type?.name ?? '—'}</Meta>
-            <Meta label="分类">{t.category?.name ?? '—'}</Meta>
-            <Meta label="SLA 剩余">
-              <SlaBadge slaDueAt={t.slaDueAt} status={t.status} />
-              {!t.slaDueAt && '—'}
+            <Meta label={t('ticketDetail.metaRequester')}>
+              {ticket.requester?.name}
             </Meta>
-            <Meta label="SLA 截止">
-              {t.slaDueAt ? new Date(t.slaDueAt).toLocaleString() : '—'}
+            <Meta label={t('ticketDetail.metaAssignee')}>
+              {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
             </Meta>
-            <Meta label="创建时间">{new Date(t.createdAt).toLocaleString()}</Meta>
+            <Meta label={t('ticketDetail.metaQueue')}>
+              {ticket.queue?.name ?? t('common.empty')}
+            </Meta>
+            <Meta label={t('ticketDetail.metaType')}>
+              {ticket.type?.name ?? t('common.empty')}
+            </Meta>
+            <Meta label={t('ticketDetail.metaCategory')}>
+              {ticket.category?.name ?? t('common.empty')}
+            </Meta>
+            <Meta label={t('ticketDetail.metaSlaRemaining')}>
+              <SlaBadge slaDueAt={ticket.slaDueAt} status={ticket.status} />
+              {!ticket.slaDueAt && t('common.empty')}
+            </Meta>
+            <Meta label={t('ticketDetail.metaSlaDue')}>
+              {ticket.slaDueAt
+                ? fmt.dateTime(ticket.slaDueAt)
+                : t('common.empty')}
+            </Meta>
+            <Meta label={t('ticketDetail.metaCreatedAt')}>
+              {fmt.dateTime(ticket.createdAt)}
+            </Meta>
           </div>
 
           {/* 附件 */}
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-2">
             <div className="flex items-center justify-between">
-              <span className="text-gray-500">附件</span>
+              <span className="text-gray-500">
+                {t('ticketDetail.attachments')}
+              </span>
               <button
                 onClick={() => fileRef.current?.click()}
                 className="text-brand-700 text-xs hover:underline"
               >
-                + 上传
+                {t('ticketDetail.addAttachment')}
               </button>
               <input
                 ref={fileRef}
@@ -369,7 +400,9 @@ export default function TicketDetailPage() {
                 ))}
               </ul>
             ) : (
-              <p className="text-xs text-gray-400">暂无附件</p>
+              <p className="text-xs text-gray-400">
+                {t('ticketDetail.noAttachments')}
+              </p>
             )}
           </div>
 
@@ -377,20 +410,22 @@ export default function TicketDetailPage() {
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4">
             <button
               onClick={() => setShowHistory((s) => !s)}
+              aria-expanded={showHistory}
               className="text-gray-500 text-sm w-full text-left"
             >
-              操作历史 ({history?.length ?? 0}) {showHistory ? '▲' : '▼'}
+              {t('ticketDetail.history', { n: history?.length ?? 0 })}{' '}
+              {showHistory ? '▲' : '▼'}
             </button>
             {showHistory && (
               <ul className="mt-2 space-y-2">
                 {history?.map((h) => (
                   <li key={h.id} className="text-xs text-gray-500 flex gap-2">
                     <span className="text-gray-400 shrink-0">
-                      {new Date(h.createdAt).toLocaleString()}
+                      {fmt.dateTime(h.createdAt)}
                     </span>
                     <span>
-                      <b>{h.user.name}</b> {HISTORY_ACTION[h.action] ?? h.action}
-                      {h.newValue ? `：${h.newValue}` : ''}
+                      <b>{h.user.name}</b> {historyActionLabel(t, h.action)}
+                      {h.newValue ? `: ${h.newValue}` : ''}
                     </span>
                   </li>
                 ))}
@@ -403,11 +438,19 @@ export default function TicketDetailPage() {
   );
 }
 
-function Meta({ label, children }: { label: string; children: React.ReactNode }) {
+function Meta({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="flex justify-between gap-2">
       <span className="text-gray-400">{label}</span>
-      <span className="text-gray-700 dark:text-gray-200 text-right">{children}</span>
+      <span className="text-gray-700 dark:text-gray-200 text-right">
+        {children}
+      </span>
     </div>
   );
 }

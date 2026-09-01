@@ -1,17 +1,22 @@
 import { FormEvent, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { authClient } from '../lib/auth-client';
 import BrandMark from '../components/BrandMark';
+import LanguageSwitcher from '../components/LanguageSwitcher';
+import { type Msg, useMsg } from '../lib/messages';
 
 export default function ForgotPasswordPage() {
+  const { t } = useTranslation();
+  const msg = useMsg();
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<Msg>(null);
   const [loading, setLoading] = useState(false);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError(null);
     setLoading(true);
     try {
       const res = await authClient.requestPasswordReset({
@@ -21,27 +26,35 @@ export default function ForgotPasswordPage() {
       if (res.error) {
         setError(
           res.error.status === 429
-            ? '请求过于频繁，请稍后再试'
-            : res.error.message || '发送失败',
+            ? { key: 'forgot.errTooMany' }
+            : res.error.message
+              ? { raw: res.error.message }
+              : { key: 'forgot.errFailed' },
         );
         return;
       }
       setSent(true);
     } catch (err: any) {
-      setError(err?.message || '发送失败');
+      setError(
+        err?.message ? { raw: err.message } : { key: 'forgot.errFailed' },
+      );
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+    <div className="relative min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
+      <div className="absolute right-4 top-4">
+        <LanguageSwitcher />
+      </div>
+
       <div className="w-full max-w-sm">
         <div className="mb-8 flex justify-center">
           <BrandMark variant="stack" />
         </div>
         <h2 className="mb-4 text-center text-base font-medium text-gray-800 dark:text-gray-200">
-          找回密码
+          {t('forgot.title')}
         </h2>
         <form
           onSubmit={submit}
@@ -50,38 +63,34 @@ export default function ForgotPasswordPage() {
           {sent ? (
             <>
               <p className="text-sm text-green-600">
-                如果该邮箱已注册，重置链接已发送至 {email}，请查收邮件。
+                {t('forgot.sent', { email })}
               </p>
-              <p className="text-xs text-gray-400">
-                没收到？请检查垃圾邮件，或稍后重试。链接 1 小时内有效。
-              </p>
+              <p className="text-xs text-gray-400">{t('forgot.hint')}</p>
             </>
           ) : (
             <>
-              <p className="text-sm text-gray-500">
-                输入注册邮箱，我们会发送一封重置密码的邮件。
-              </p>
+              <p className="text-sm text-gray-500">{t('forgot.intro')}</p>
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="邮箱"
+                placeholder={t('forgot.emailPlaceholder')}
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
               />
-              {error && <p className="text-sm text-red-500">{error}</p>}
+              {error && <p className="text-sm text-red-500">{msg(error)}</p>}
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full rounded-md bg-brand-700 text-white py-2 text-sm font-medium hover:bg-brand-800 disabled:opacity-60"
               >
-                {loading ? '发送中…' : '发送重置邮件'}
+                {loading ? t('forgot.sending') : t('forgot.send')}
               </button>
             </>
           )}
           <div className="text-center">
             <Link to="/login" className="text-sm text-brand-700 hover:underline">
-              返回登录
+              {t('forgot.backToLogin')}
             </Link>
           </div>
         </form>

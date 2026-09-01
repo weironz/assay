@@ -91,16 +91,52 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 - 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `1.1.0`）
 - 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
 
-### 更新镜像（在开发机构建并推送）
+### 发版（GitHub Actions 自动完成）
+
+推送**只跑测试**（类型检查 + 编译 + 整栈冒烟测试），不会自动发版。
+发版一律手动触发，跑完整流水线：**测试 → 构建镜像 → 双仓库推送 → 部署 → 健康校验**，
+健康校验失败自动回滚到上一版本。
+
+```bash
+gh workflow run ci-cd.yml                          # 发版并部署
+gh workflow run ci-cd.yml -f image_tag=1.3.0       # 指定版本号
+gh workflow run ci-cd.yml -f skip_deploy=true      # 只推镜像不部署
+gh run watch                                       # 跟踪进度
+```
+
+镜像同时推送到两处：
+
+| 仓库 | 地址 | 用途 |
+|---|---|---|
+| 阿里云 ACR | `registry.cn-shenzhen.aliyuncs.com/willspace/assay-{api,web}` | 生产服务器拉取（国内，秒级） |
+| Docker Hub | `willdockerhub/assay-{api,web}` | 对外分发 |
+
+生产 `docker-compose.yaml` 默认从 ACR 拉取；想改用 Docker Hub 就在 `.env` 里加 `REGISTRY=willdockerhub`。
+
+需要的 GitHub Secrets：`DOCKERHUB_USERNAME` `DOCKERHUB_TOKEN` `ACR_URL` `ACR_USERNAME` `ACR_PASSWORD`
+`DEPLOY_HOST` `DEPLOY_USER` `DEPLOY_SSH_KEY` `DEPLOY_KNOWN_HOSTS` `DEPLOY_PUBLIC_URL`。
+
+手动构建（应急用）：
 
 ```bash
 docker build -t willdockerhub/assay-api:latest ./apps/api
 docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" ./apps/web
-docker push willdockerhub/assay-api:latest && docker push willdockerhub/assay-web:latest
 # 服务器上： docker compose pull && docker compose up -d
 ```
 
+## 镜像体积
+
+| 镜像 | 说明 | 体积 |
+|---|---|---|
+| `assay-web` | 前端静态文件 + Nginx（Bun 1.4.0 构建，nginx alpine-slim） | **20.7 MB** |
+| `assay-api` | NestJS 服务（Node 运行时 + Prisma 引擎） | **651 MB** |
+
 生产环境务必修改：`POSTGRES_PASSWORD`、`S3_ACCESS_KEY/SECRET_KEY`、`AUTH_SECRET`、`ADMIN_PASSWORD`。
+
+## 国际化
+
+界面支持四种语言，默认英文，用户选择保存在浏览器：English / 简体中文 / 繁體中文 / ไทย。
+切换器在登录页右上角与登录后顶部导航栏右侧。
 
 ## 当前进度
 

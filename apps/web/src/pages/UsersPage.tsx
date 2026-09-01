@@ -1,6 +1,8 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
+import { type Msg, useMsg } from '../lib/messages';
 
 interface UserRow {
   id: string;
@@ -17,6 +19,8 @@ interface Role {
 }
 
 export default function UsersPage() {
+  const { t } = useTranslation();
+  const showMsg = useMsg();
   const qc = useQueryClient();
   const { data: users } = useQuery<UserRow[]>({
     queryKey: ['users'],
@@ -33,7 +37,7 @@ export default function UsersPage() {
     password: '',
     roleNames: [] as string[],
   });
-  const [msg, setMsg] = useState('');
+  const [msg, setMsg] = useState<Msg>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [editRoles, setEditRoles] = useState<string[]>([]);
 
@@ -42,9 +46,14 @@ export default function UsersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
       setForm({ email: '', name: '', password: '', roleNames: [] });
-      setMsg('创建成功');
+      setMsg({ key: 'users.created' });
     },
-    onError: (e: any) => setMsg(e?.response?.data?.message || '创建失败'),
+    onError: (e: any) =>
+      setMsg(
+        e?.response?.data?.message
+          ? { raw: e.response.data.message }
+          : { key: 'users.errCreateFailed' },
+      ),
   });
 
   const toggleMut = useMutation({
@@ -69,7 +78,8 @@ export default function UsersPage() {
       qc.invalidateQueries({ queryKey: ['users'] });
       setEditing(null);
     },
-    onError: (e: any) => alert(e?.response?.data?.message || '保存失败'),
+    onError: (e: any) =>
+      alert(e?.response?.data?.message || t('users.errSaveFailed')),
   });
 
   const openEdit = (u: UserRow) => {
@@ -82,18 +92,20 @@ export default function UsersPage() {
     );
 
   const resetPwd = (u: UserRow) => {
-    const pwd = prompt(`为「${u.name}」设置新密码（≥6 位）：`);
+    const pwd = prompt(t('users.resetPrompt', { name: u.name }));
     if (!pwd) return;
-    if (pwd.length < 6) return alert('密码至少 6 位');
+    if (pwd.length < 6) return alert(t('users.errPasswordTooShort'));
     api
       .post(`/users/${u.id}/reset-password`, { newPassword: pwd })
-      .then(() => alert('密码已重置'))
-      .catch((e) => alert(e?.response?.data?.message || '重置失败'));
+      .then(() => alert(t('users.passwordReset')))
+      .catch((e) =>
+        alert(e?.response?.data?.message || t('users.errResetFailed')),
+      );
   };
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    setMsg('');
+    setMsg(null);
     createMut.mutate();
   };
 
@@ -107,7 +119,7 @@ export default function UsersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">用户管理</h1>
+      <h1 className="text-xl font-semibold">{t('users.title')}</h1>
 
       {/* 新建用户 */}
       <form
@@ -115,7 +127,8 @@ export default function UsersPage() {
         className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
       >
         <input
-          placeholder="邮箱"
+          placeholder={t('users.emailPlaceholder')}
+          aria-label={t('users.emailPlaceholder')}
           type="email"
           required
           value={form.email}
@@ -123,14 +136,16 @@ export default function UsersPage() {
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
         />
         <input
-          placeholder="姓名"
+          placeholder={t('users.namePlaceholder')}
+          aria-label={t('users.namePlaceholder')}
           required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
         />
         <input
-          placeholder="初始密码(≥6位)"
+          placeholder={t('users.passwordPlaceholder')}
+          aria-label={t('users.passwordPlaceholder')}
           type="password"
           required
           value={form.password}
@@ -142,10 +157,10 @@ export default function UsersPage() {
           disabled={createMut.isPending || form.roleNames.length === 0}
           className="rounded-md bg-brand-700 text-white py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
         >
-          新建用户
+          {t('users.create')}
         </button>
         <div className="md:col-span-4 flex flex-wrap gap-3 text-sm">
-          <span className="text-gray-500">角色：</span>
+          <span className="text-gray-500">{t('users.rolesLabel')}</span>
           {roles?.map((r) => (
             <label key={r.id} className="flex items-center gap-1">
               <input
@@ -158,7 +173,9 @@ export default function UsersPage() {
             </label>
           ))}
         </div>
-        {msg && <p className="md:col-span-4 text-sm text-gray-500">{msg}</p>}
+        {msg && (
+          <p className="md:col-span-4 text-sm text-gray-500">{showMsg(msg)}</p>
+        )}
       </form>
 
       {/* 用户列表 */}
@@ -166,11 +183,11 @@ export default function UsersPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
-              <th className="text-left px-4 py-2">姓名</th>
-              <th className="text-left px-4 py-2">邮箱</th>
-              <th className="text-left px-4 py-2">角色</th>
-              <th className="text-left px-4 py-2">状态</th>
-              <th className="text-right px-4 py-2">操作</th>
+              <th className="text-left px-4 py-2">{t('common.name')}</th>
+              <th className="text-left px-4 py-2">{t('common.email')}</th>
+              <th className="text-left px-4 py-2">{t('common.roles')}</th>
+              <th className="text-left px-4 py-2">{t('common.status')}</th>
+              <th className="text-right px-4 py-2">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -185,12 +202,12 @@ export default function UsersPage() {
                 <td className="px-4 py-2">
                   <span
                     className={
-                      u.status === 'ACTIVE'
-                        ? 'text-green-600'
-                        : 'text-gray-400'
+                      u.status === 'ACTIVE' ? 'text-green-600' : 'text-gray-400'
                     }
                   >
-                    {u.status === 'ACTIVE' ? '正常' : '已禁用'}
+                    {u.status === 'ACTIVE'
+                      ? t('users.statusActive')
+                      : t('users.statusDisabled')}
                   </span>
                 </td>
                 <td className="px-4 py-2 text-right space-x-3">
@@ -198,25 +215,27 @@ export default function UsersPage() {
                     onClick={() => openEdit(u)}
                     className="text-brand-700 hover:underline"
                   >
-                    编辑角色
+                    {t('users.editRoles')}
                   </button>
                   <button
                     onClick={() => toggleMut.mutate(u)}
                     className="text-brand-700 hover:underline"
                   >
-                    {u.status === 'ACTIVE' ? '禁用' : '启用'}
+                    {u.status === 'ACTIVE'
+                      ? t('users.disable')
+                      : t('users.enable')}
                   </button>
                   <button
                     onClick={() => resetPwd(u)}
                     className="text-amber-600 hover:underline"
                   >
-                    重置密码
+                    {t('users.resetPassword')}
                   </button>
                   <button
                     onClick={() => delMut.mutate(u.id)}
                     className="text-red-500 hover:underline"
                   >
-                    删除
+                    {t('common.delete')}
                   </button>
                 </td>
               </tr>
@@ -236,7 +255,7 @@ export default function UsersPage() {
             className="w-full max-w-sm rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 space-y-4"
           >
             <h2 className="text-lg font-semibold">
-              编辑角色 · {editing.name}
+              {t('users.editRolesTitle', { name: editing.name })}
             </h2>
             <div className="space-y-2">
               {roles?.map((r) => (
@@ -254,21 +273,23 @@ export default function UsersPage() {
               ))}
             </div>
             {editRoles.length === 0 && (
-              <p className="text-xs text-amber-600">至少选择一个角色</p>
+              <p className="text-xs text-amber-600">
+                {t('users.atLeastOneRole')}
+              </p>
             )}
             <div className="flex gap-2 justify-end pt-1">
               <button
                 onClick={() => setEditing(null)}
                 className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm"
               >
-                取消
+                {t('common.cancel')}
               </button>
               <button
                 onClick={() => roleMut.mutate()}
                 disabled={roleMut.isPending || editRoles.length === 0}
                 className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
               >
-                保存
+                {t('common.save')}
               </button>
             </div>
           </div>

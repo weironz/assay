@@ -187,7 +187,7 @@ const th: Resource = {
     attachments: 'ไฟล์แนบ',
     addAttachment: '+ อัปโหลด',
     noAttachments: 'ไม่มีไฟล์แนบ',
-    history: 'ประวัติการดำเนินการ ({{count}})',
+    history: 'ประวัติการดำเนินการ ({{n}})',
   },
 
   historyAction: {
@@ -225,6 +225,7 @@ const th: Resource = {
 
   queues: {
     title: 'จัดการคิว',
+    colName: 'ชื่อ',
     namePlaceholder: 'ชื่อคิว',
     descriptionPlaceholder: 'คำอธิบาย (ไม่บังคับ)',
     create: 'สร้างคิว',

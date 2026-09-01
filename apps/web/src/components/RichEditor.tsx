@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
@@ -18,14 +19,20 @@ function Btn({
   onClick,
   active,
   label,
+  title,
 }: {
   onClick: () => void;
   active?: boolean;
   label: string;
+  /** Accessible name — B / I / H1 mean nothing to a screen reader */
+  title: string;
 }) {
   return (
     <button
       type="button"
+      title={title}
+      aria-label={title}
+      aria-pressed={!!active}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}
       className={`px-2 py-0.5 text-xs rounded ${
@@ -46,6 +53,7 @@ export default function RichEditor({
   minHeight = 100,
   onUploadImage,
 }: Props) {
+  const { t } = useTranslation();
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const uploadRef = useRef(onUploadImage);
@@ -59,7 +67,7 @@ export default function RichEditor({
       const url = await up(file);
       editorRef.current?.chain().focus().setImage({ src: url }).run();
     } catch {
-      alert('图片上传失败');
+      alert(t('editor.errUploadFailed'));
     }
   };
 
@@ -110,24 +118,24 @@ export default function RichEditor({
   return (
     <div className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
       <div className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-700 p-1">
-        <Btn label="B" active={editor.isActive('bold')}
+        <Btn label="B" title={t('editor.bold')} active={editor.isActive('bold')}
           onClick={() => editor.chain().focus().toggleBold().run()} />
-        <Btn label="I" active={editor.isActive('italic')}
+        <Btn label="I" title={t('editor.italic')} active={editor.isActive('italic')}
           onClick={() => editor.chain().focus().toggleItalic().run()} />
-        <Btn label="H1" active={editor.isActive('heading', { level: 1 })}
+        <Btn label="H1" title={t('editor.heading1')} active={editor.isActive('heading', { level: 1 })}
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} />
-        <Btn label="H2" active={editor.isActive('heading', { level: 2 })}
+        <Btn label="H2" title={t('editor.heading2')} active={editor.isActive('heading', { level: 2 })}
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} />
-        <Btn label="• 列表" active={editor.isActive('bulletList')}
+        <Btn label={t('editor.bulletList')} title={t('editor.bulletList')} active={editor.isActive('bulletList')}
           onClick={() => editor.chain().focus().toggleBulletList().run()} />
-        <Btn label="1. 列表" active={editor.isActive('orderedList')}
+        <Btn label={t('editor.orderedList')} title={t('editor.orderedList')} active={editor.isActive('orderedList')}
           onClick={() => editor.chain().focus().toggleOrderedList().run()} />
-        <Btn label="引用" active={editor.isActive('blockquote')}
+        <Btn label={t('editor.quote')} title={t('editor.quote')} active={editor.isActive('blockquote')}
           onClick={() => editor.chain().focus().toggleBlockquote().run()} />
-        <Btn label="代码块" active={editor.isActive('codeBlock')}
+        <Btn label={t('editor.codeBlock')} title={t('editor.codeBlock')} active={editor.isActive('codeBlock')}
           onClick={() => editor.chain().focus().toggleCodeBlock().run()} />
         {onUploadImage && (
-          <Btn label="🖼 图片"
+          <Btn label={t('editor.image')} title={t('editor.image')}
             onClick={() => fileRef.current?.click()} />
         )}
         <input

@@ -187,7 +187,7 @@ const zhTW: Resource = {
     attachments: '附件',
     addAttachment: '+ 上傳',
     noAttachments: '目前沒有附件',
-    history: '操作紀錄（{{count}}）',
+    history: '操作紀錄（{{n}}）',
   },
 
   historyAction: {
@@ -225,6 +225,7 @@ const zhTW: Resource = {
 
   queues: {
     title: '佇列管理',
+    colName: '名稱',
     namePlaceholder: '佇列名稱',
     descriptionPlaceholder: '描述（選填）',
     create: '新增佇列',

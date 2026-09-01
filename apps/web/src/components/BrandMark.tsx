@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Greenstor 品牌锁定组合：官方 logo │ 工单系统
@@ -12,6 +13,7 @@ export default function BrandMark({
   /** bar：侧边栏横排；stack：登录页竖排放大 */
   variant?: 'bar' | 'stack';
 }) {
+  const { t } = useTranslation();
   const lockup = (w: number) => (
     <>
       <img
@@ -38,7 +40,7 @@ export default function BrandMark({
         <div className="flex items-center gap-3">
           <span className="h-px w-6 bg-gray-300 dark:bg-gray-700" />
           <span className="text-sm tracking-[0.32em] text-ink-soft dark:text-gray-400">
-            工单系统
+            {t('brand.subtitle')}
           </span>
           <span className="h-px w-6 bg-gray-300 dark:bg-gray-700" />
         </div>
@@ -50,7 +52,7 @@ export default function BrandMark({
     <Link
       to="/dashboard"
       className="flex items-center gap-2.5"
-      aria-label="Greenstor 工单系统"
+      aria-label={t('brand.ariaHome')}
     >
       {lockup(116)}
       <span
@@ -58,7 +60,7 @@ export default function BrandMark({
         className="h-4 w-px shrink-0 bg-gray-300 dark:bg-gray-700"
       />
       <span className="whitespace-nowrap text-[13px] tracking-[0.14em] text-ink-soft dark:text-gray-400">
-        工单系统
+        {t('brand.subtitle')}
       </span>
     </Link>
   );

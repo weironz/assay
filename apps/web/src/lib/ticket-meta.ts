@@ -1,13 +1,24 @@
-export const STATUS_LABEL: Record<string, string> = {
-  NEW: '待处理',
-  ASSIGNED: '已指派',
-  IN_PROGRESS: '处理中',
-  PENDING: '挂起',
-  RESOLVED: '待验收',
-  CLOSED: '已关闭',
-  REOPENED: '重新打开',
-  CANCELLED: '已取消',
-};
+import type { TFunction } from 'i18next';
+
+/** Workflow states, in the order they should appear in filters/charts */
+export const STATUS_KEYS = [
+  'NEW',
+  'ASSIGNED',
+  'IN_PROGRESS',
+  'PENDING',
+  'RESOLVED',
+  'CLOSED',
+  'REOPENED',
+  'CANCELLED',
+] as const;
+
+/**
+ * Labels come from i18n rather than a frozen Record, so every caller has to
+ * pass the active `t`. Unknown values (a status the API adds later) fall back
+ * to the raw enum instead of rendering an empty cell.
+ */
+export const statusLabel = (t: TFunction, status: string) =>
+  t(`status.${status}`, { defaultValue: status });
 
 /**
  * 状态配色遵循一条规则：颜色标记「需要有人动手的事」，不标记「已经结束的事」。
@@ -32,12 +43,10 @@ export const STATUS_COLOR: Record<string, string> = {
   CANCELLED: 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500',
 };
 
-export const PRIORITY_LABEL: Record<string, string> = {
-  LOW: '低',
-  MEDIUM: '中',
-  HIGH: '高',
-  URGENT: '紧急',
-};
+export const PRIORITY_KEYS = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+
+export const priorityLabel = (t: TFunction, priority: string) =>
+  t(`priority.${priority}`, { defaultValue: priority });
 
 /** 优先级同理：只有高/紧急值得用颜色喊人，低/中保持中性 */
 export const PRIORITY_COLOR: Record<string, string> = {
@@ -63,12 +72,10 @@ export function slaRailColor(
   return 'var(--color-brand-400)'; // 时间充裕
 }
 
-export const ACTION_LABEL: Record<string, string> = {
-  start: '开始处理',
-  hold: '挂起',
-  resume: '恢复处理',
-  resolve: '提交处理结果',
-  close: '验收关闭',
-  reopen: '重新打开',
-  cancel: '取消工单',
-};
+/** Workflow transition buttons offered by the API (`availableActions`) */
+export const actionLabel = (t: TFunction, action: string) =>
+  t(`ticketAction.${action}`, { defaultValue: action });
+
+/** Audit-history verbs */
+export const historyActionLabel = (t: TFunction, action: string) =>
+  t(`historyAction.${action}`, { defaultValue: action });

@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
 
 interface Queue {
@@ -9,6 +10,7 @@ interface Queue {
 }
 
 export default function QueuesPage() {
+  const { t } = useTranslation();
   const qc = useQueryClient();
   const { data: queues } = useQuery<Queue[]>({
     queryKey: ['queues'],
@@ -35,21 +37,23 @@ export default function QueuesPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">队列管理</h1>
+      <h1 className="text-xl font-semibold">{t('queues.title')}</h1>
 
       <form
         onSubmit={submit}
         className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 flex gap-3 items-end"
       >
         <input
-          placeholder="队列名称"
+          placeholder={t('queues.namePlaceholder')}
+          aria-label={t('queues.namePlaceholder')}
           required
           value={form.name}
           onChange={(e) => setForm({ ...form, name: e.target.value })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
         />
         <input
-          placeholder="描述（可选）"
+          placeholder={t('queues.descriptionPlaceholder')}
+          aria-label={t('queues.descriptionPlaceholder')}
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
           className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
@@ -59,7 +63,7 @@ export default function QueuesPage() {
           disabled={createMut.isPending}
           className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
         >
-          新建队列
+          {t('queues.create')}
         </button>
       </form>
 
@@ -67,9 +71,9 @@ export default function QueuesPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
-              <th className="text-left px-4 py-2">名称</th>
-              <th className="text-left px-4 py-2">描述</th>
-              <th className="text-right px-4 py-2">操作</th>
+              <th className="text-left px-4 py-2">{t('queues.colName')}</th>
+              <th className="text-left px-4 py-2">{t('common.description')}</th>
+              <th className="text-right px-4 py-2">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
@@ -85,7 +89,7 @@ export default function QueuesPage() {
                     onClick={() => delMut.mutate(q.id)}
                     className="text-red-500 hover:underline"
                   >
-                    删除
+                    {t('common.delete')}
                   </button>
                 </td>
               </tr>

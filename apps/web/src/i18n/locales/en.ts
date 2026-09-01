@@ -199,7 +199,7 @@ const en = {
     attachments: 'Attachments',
     addAttachment: '+ Upload',
     noAttachments: 'No attachments',
-    history: 'Activity ({{count}})',
+    history: 'Activity ({{n}})',
   },
 
   historyAction: {
@@ -237,6 +237,7 @@ const en = {
 
   queues: {
     title: 'Queues',
+    colName: 'Name',
     namePlaceholder: 'Queue name',
     descriptionPlaceholder: 'Description (optional)',
     create: 'Create queue',

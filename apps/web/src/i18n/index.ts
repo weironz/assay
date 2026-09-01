@@ -56,13 +56,17 @@ i18n
     react: { useSuspense: false },
   });
 
-/** Keep <html lang> in step so screen readers and CSS :lang() stay correct */
-function syncDocumentLang(lng: string) {
+/**
+ * Keep <html lang> in step (screen readers, CSS :lang(), font fallback) and
+ * translate the browser-tab title along with the UI.
+ */
+function syncDocument(lng: string) {
   document.documentElement.lang = localeOf(lng);
+  document.title = `Greenstor ${i18n.t('brand.subtitle')}`;
 }
 
-i18n.on('languageChanged', syncDocumentLang);
-syncDocumentLang(i18n.language);
+i18n.on('languageChanged', syncDocument);
+syncDocument(i18n.language);
 
 /** BCP 47 tag for Intl APIs; falls back to the default language's tag */
 export function localeOf(lng?: string): string {

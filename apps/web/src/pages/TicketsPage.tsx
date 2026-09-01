@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useDateFormat } from '../i18n/format';
 import {
   useTickets,
   useQueues,
@@ -10,16 +12,20 @@ import {
   TicketQuery,
 } from '../features/tickets/api';
 import {
-  STATUS_LABEL,
+  STATUS_KEYS,
   STATUS_COLOR,
-  PRIORITY_LABEL,
+  PRIORITY_KEYS,
   PRIORITY_COLOR,
+  statusLabel,
+  priorityLabel,
   slaRailColor,
 } from '../lib/ticket-meta';
 import { useAuth } from '../stores/auth';
 import SlaBadge from '../components/SlaBadge';
 
 export default function TicketsPage() {
+  const { t } = useTranslation();
+  const fmt = useDateFormat();
   const has = useAuth((s) => s.has);
   const isAdmin = useAuth((s) => s.hasRole('admin'));
   const [q, setQ] = useState<TicketQuery>({ page: 1, pageSize: 20 });
@@ -37,7 +43,7 @@ export default function TicketsPage() {
     setQ({ ...filter, page: 1, pageSize: 20 });
 
   const saveCurrent = () => {
-    const name = prompt('保存当前筛选为视图，输入名称：');
+    const name = prompt(t('tickets.savePrompt'));
     if (!name?.trim()) return;
     const { page: _p, pageSize: _s, ...filter } = q;
     saveView.mutate({ name: name.trim(), filter });
@@ -48,13 +54,13 @@ export default function TicketsPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">工单</h1>
+        <h1 className="text-xl font-semibold">{t('tickets.title')}</h1>
         {has('ticket:create') && (
           <Link
             to="/tickets/new"
             className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800"
           >
-            + 新建工单
+            {t('tickets.new')}
           </Link>
         )}
       </div>
@@ -65,7 +71,7 @@ export default function TicketsPage() {
           onClick={() => applyView({})}
           className="text-xs px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
-          全部
+          {t('tickets.filterAll')}
         </button>
         {views?.map((v) => (
           <span
@@ -76,7 +82,8 @@ export default function TicketsPage() {
             <button
               onClick={() => delView.mutate(v.id)}
               className="opacity-0 group-hover:opacity-100 text-brand-400 hover:text-red-500"
-              title="删除视图"
+              title={t('tickets.deleteView')}
+              aria-label={t('tickets.deleteView')}
             >
               ×
             </button>
@@ -86,14 +93,15 @@ export default function TicketsPage() {
           onClick={saveCurrent}
           className="text-xs px-3 py-1 rounded-full border border-dashed border-gray-300 dark:border-gray-700 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
-          ★ 保存当前筛选
+          {t('tickets.saveView')}
         </button>
       </div>
 
       {/* 筛选栏 */}
       <div className="flex flex-wrap gap-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-3">
         <input
-          placeholder="搜索标题 / 工单号"
+          placeholder={t('tickets.searchPlaceholder')}
+          aria-label={t('tickets.searchPlaceholder')}
           value={q.keyword ?? ''}
           onChange={(e) => set({ keyword: e.target.value || undefined })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
@@ -103,10 +111,10 @@ export default function TicketsPage() {
           onChange={(e) => set({ status: e.target.value || undefined })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
         >
-          <option value="">全部状态</option>
-          {Object.entries(STATUS_LABEL).map(([k, v]) => (
+          <option value="">{t('tickets.allStatuses')}</option>
+          {STATUS_KEYS.map((k) => (
             <option key={k} value={k}>
-              {v}
+              {statusLabel(t, k)}
             </option>
           ))}
         </select>
@@ -115,10 +123,10 @@ export default function TicketsPage() {
           onChange={(e) => set({ priority: e.target.value || undefined })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
         >
-          <option value="">全部优先级</option>
-          {Object.entries(PRIORITY_LABEL).map(([k, v]) => (
+          <option value="">{t('tickets.allPriorities')}</option>
+          {PRIORITY_KEYS.map((k) => (
             <option key={k} value={k}>
-              {v}
+              {priorityLabel(t, k)}
             </option>
           ))}
         </select>
@@ -127,7 +135,7 @@ export default function TicketsPage() {
           onChange={(e) => set({ queueId: e.target.value || undefined })}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
         >
-          <option value="">全部队列</option>
+          <option value="">{t('tickets.allQueues')}</option>
           {queues?.map((qu: any) => (
             <option key={qu.id} value={qu.id}>
               {qu.name}
@@ -141,89 +149,85 @@ export default function TicketsPage() {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">工单号</th>
-              <th className="w-full px-4 py-2 text-left font-medium">标题</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">状态</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">SLA</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">优先级</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">处理人</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">提单人</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">创建时间</th>
-              {isAdmin && <th className="whitespace-nowrap px-4 py-2 text-right font-medium">操作</th>}
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colTicketNo')}</th>
+              <th className="w-full px-4 py-2 text-left font-medium">{t('tickets.colTitle')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colStatus')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colSla')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colPriority')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colAssignee')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colRequester')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colCreatedAt')}</th>
+              {isAdmin && <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{t('common.actions')}</th>}
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
                 <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-400">
-                  加载中…
+                  {t('common.loading')}
                 </td>
               </tr>
             )}
-            {data?.items.map((t) => (
+            {data?.items.map((ticket) => (
               <tr
-                key={t.id}
+                key={ticket.id}
                 className="border-t border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50"
               >
                 <td
                   className="sla-rail whitespace-nowrap py-2 pl-4 pr-3"
                   style={
                     {
-                      '--rail': slaRailColor(t.slaDueAt, t.status),
+                      '--rail': slaRailColor(ticket.slaDueAt, ticket.status),
                     } as React.CSSProperties
                   }
                 >
                   <Link
-                    to={`/tickets/${t.id}`}
+                    to={`/tickets/${ticket.id}`}
                     className="font-mono text-xs text-gray-500 hover:text-brand-700 dark:text-gray-400"
                   >
-                    {t.ticketNo}
+                    {ticket.ticketNo}
                   </Link>
                 </td>
                 <td className="px-4 py-2">
                   <Link
-                    to={`/tickets/${t.id}`}
+                    to={`/tickets/${ticket.id}`}
                     className="font-medium text-gray-800 hover:text-brand-700 dark:text-gray-100 dark:hover:text-brand-400"
                   >
-                    {t.title}
+                    {ticket.title}
                   </Link>
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span
-                    className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs ${STATUS_COLOR[t.status]}`}
+                    className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs ${STATUS_COLOR[ticket.status]}`}
                   >
-                    {STATUS_LABEL[t.status]}
+                    {statusLabel(t, ticket.status)}
                   </span>
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
-                  <SlaBadge slaDueAt={t.slaDueAt} status={t.status} />
+                  <SlaBadge slaDueAt={ticket.slaDueAt} status={ticket.status} />
                 </td>
-                <td className={`whitespace-nowrap px-4 py-2 text-sm ${PRIORITY_COLOR[t.priority]}`}>
-                  {PRIORITY_LABEL[t.priority]}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
-                  {t.assignee?.name ?? '—'}
+                <td className={`whitespace-nowrap px-4 py-2 text-sm ${PRIORITY_COLOR[ticket.priority]}`}>
+                  {priorityLabel(t, ticket.priority)}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
-                  {t.requester?.name}
+                  {ticket.assignee?.name ?? t('common.empty')}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
+                  {ticket.requester?.name}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-400">
-                  {new Date(t.createdAt).toLocaleString('zh-CN', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {fmt.compact(ticket.createdAt)}
                 </td>
                 {isAdmin && (
                   <td className="whitespace-nowrap px-4 py-2 text-right">
                     <button
                       onClick={() => {
-                        if (confirm(`确认删除工单 ${t.ticketNo}？`)) del.mutate(t.id);
+                        if (confirm(t('tickets.confirmDelete', { no: ticket.ticketNo })))
+                          del.mutate(ticket.id);
                       }}
                       className="text-red-500 text-xs hover:underline"
                     >
-                      删除
+                      {t('common.delete')}
                     </button>
                   </td>
                 )}
@@ -232,7 +236,7 @@ export default function TicketsPage() {
             {data && data.items.length === 0 && (
               <tr>
                 <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-400">
-                  暂无工单
+                  {t('tickets.empty')}
                 </td>
               </tr>
             )}
@@ -244,21 +248,25 @@ export default function TicketsPage() {
       {data && data.total > 0 && (
         <div className="flex items-center justify-end gap-3 text-sm">
           <span className="text-gray-400">
-            共 {data.total} 条 · 第 {q.page}/{totalPages} 页
+            {t('tickets.pagination', {
+              total: data.total,
+              page: q.page ?? 1,
+              pages: totalPages,
+            })}
           </span>
           <button
             disabled={(q.page ?? 1) <= 1}
             onClick={() => setQ((p) => ({ ...p, page: (p.page ?? 1) - 1 }))}
             className="px-3 py-1 rounded border border-gray-300 dark:border-gray-700 disabled:opacity-40"
           >
-            上一页
+            {t('tickets.prev')}
           </button>
           <button
             disabled={(q.page ?? 1) >= totalPages}
             onClick={() => setQ((p) => ({ ...p, page: (p.page ?? 1) + 1 }))}
             className="px-3 py-1 rounded border border-gray-300 dark:border-gray-700 disabled:opacity-40"
           >
-            下一页
+            {t('tickets.next')}
           </button>
         </div>
       )}

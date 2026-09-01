@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useDateFormat } from '../i18n/format';
 import {
   useUnreadCount,
   useNotifications,
@@ -8,6 +10,8 @@ import {
 } from '../features/notifications/api';
 
 export default function NotificationBell() {
+  const { t } = useTranslation();
+  const fmt = useDateFormat();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { data: unread = 0 } = useUnreadCount();
@@ -28,7 +32,8 @@ export default function NotificationBell() {
       <button
         onClick={() => setOpen((o) => !o)}
         className="relative text-gray-500 hover:text-gray-800 dark:hover:text-gray-200"
-        title="通知"
+        title={t('notifications.open')}
+        aria-label={t('notifications.open')}
       >
         <span className="text-lg">🔔</span>
         {unread > 0 && (
@@ -43,17 +48,19 @@ export default function NotificationBell() {
           <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
           <div className="absolute right-0 mt-2 w-80 max-h-96 overflow-auto z-20 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-lg">
             <div className="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-800">
-              <span className="text-sm font-medium">通知</span>
+              <span className="text-sm font-medium">
+                {t('notifications.title')}
+              </span>
               <button
                 onClick={() => markAll.mutate()}
                 className="text-xs text-brand-700 hover:underline"
               >
-                全部已读
+                {t('notifications.markAllRead')}
               </button>
             </div>
             {!list?.length && (
               <p className="px-3 py-6 text-center text-sm text-gray-400">
-                暂无通知
+                {t('notifications.empty')}
               </p>
             )}
             <ul>
@@ -79,7 +86,7 @@ export default function NotificationBell() {
                         </p>
                       )}
                       <p className="text-[10px] text-gray-400 mt-0.5">
-                        {new Date(n.createdAt).toLocaleString()}
+                        {fmt.dateTime(n.createdAt)}
                       </p>
                     </div>
                   </div>
