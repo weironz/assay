@@ -138,6 +138,7 @@ const zhCN: Resource = {
     allQueues: '全部队列',
     colTicketNo: '工单号',
     colTitle: '标题',
+    colCategory: '分类',
     colStatus: '状态',
     colSla: 'SLA',
     colPriority: '优先级',

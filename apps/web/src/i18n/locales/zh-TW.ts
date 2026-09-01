@@ -138,6 +138,7 @@ const zhTW: Resource = {
     allQueues: '全部佇列',
     colTicketNo: '工單編號',
     colTitle: '標題',
+    colCategory: '分類',
     colStatus: '狀態',
     colSla: 'SLA',
     colPriority: '優先順序',

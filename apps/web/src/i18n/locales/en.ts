@@ -149,6 +149,7 @@ const en = {
     allQueues: 'All queues',
     colTicketNo: 'Ticket',
     colTitle: 'Title',
+    colCategory: 'Category',
     colStatus: 'Status',
     colSla: 'SLA',
     colPriority: 'Priority',

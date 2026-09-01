@@ -153,6 +153,7 @@ export default function TicketsPage() {
             <tr>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colTicketNo')}</th>
               <th className="w-full px-4 py-2 text-left font-medium">{t('tickets.colTitle')}</th>
+              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colCategory')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colStatus')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colSla')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colPriority')}</th>
@@ -165,7 +166,7 @@ export default function TicketsPage() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={isAdmin ? 10 : 9} className="px-4 py-8 text-center text-gray-400">
                   {t('common.loading')}
                 </td>
               </tr>
@@ -197,6 +198,9 @@ export default function TicketsPage() {
                   >
                     {ticket.title}
                   </Link>
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
+                  {ticket.category?.name ?? t('common.empty')}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span
@@ -237,7 +241,7 @@ export default function TicketsPage() {
             ))}
             {data && data.items.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 9 : 8} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={isAdmin ? 10 : 9} className="px-4 py-8 text-center text-gray-400">
                   {t('tickets.empty')}
                 </td>
               </tr>

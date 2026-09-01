@@ -138,6 +138,7 @@ const th: Resource = {
     allQueues: 'ทุกคิว',
     colTicketNo: 'เลขที่ทิกเก็ต',
     colTitle: 'หัวข้อ',
+    colCategory: 'หมวดหมู่',
     colStatus: 'สถานะ',
     colSla: 'SLA',
     colPriority: 'ความสำคัญ',
