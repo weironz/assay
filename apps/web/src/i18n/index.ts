@@ -20,7 +20,10 @@ export const LANGUAGES: LanguageOption[] = [
   { code: 'en', label: 'English', locale: 'en' },
   { code: 'zh-CN', label: '简体中文', locale: 'zh-CN' },
   { code: 'zh-TW', label: '繁體中文', locale: 'zh-TW' },
-  { code: 'th', label: 'ไทย', locale: 'th-TH' },
+  // 强制公历：泰语默认走佛历，2026 会显示成 2569，而工单号本身是
+  // WO-20260709-0002 这种公历编号，两者并排会直接打架；跨语言协作时
+  // 大家讨论的也该是同一个日期。想恢复泰国本地习惯就改回 'th-TH'。
+  { code: 'th', label: 'ไทย', locale: 'th-TH-u-ca-gregory' },
 ];
 
 export const DEFAULT_LANGUAGE = 'en';
