@@ -1,0 +1,337 @@
+/**
+ * English — the reference locale.
+ *
+ * The shape of this object is the source of truth for every other locale
+ * (see `Resource` in ../index.ts), so adding a key here makes TypeScript
+ * demand it everywhere else.
+ */
+const en = {
+  common: {
+    loading: 'Loading…',
+    save: 'Save',
+    cancel: 'Cancel',
+    edit: 'Edit',
+    delete: 'Delete',
+    remove: 'Remove',
+    back: 'Back',
+    upload: 'Upload',
+    submitting: 'Submitting…',
+    processing: 'Processing…',
+    notSpecified: 'Not specified',
+    empty: '—',
+    actions: 'Actions',
+    name: 'Name',
+    email: 'Email',
+    roles: 'Roles',
+    status: 'Status',
+    description: 'Description',
+  },
+
+  language: {
+    label: 'Language',
+    select: 'Select language',
+  },
+
+  theme: {
+    toLight: 'Switch to light theme',
+    toDark: 'Switch to dark theme',
+  },
+
+  brand: {
+    subtitle: 'Ticket System',
+    ariaHome: 'Greenstor Ticket System — home',
+  },
+
+  nav: {
+    dashboard: 'Dashboard',
+    tickets: 'Tickets',
+    users: 'Users',
+    queues: 'Queues',
+    profile: 'Profile',
+    signOut: 'Sign out',
+    noAccess: 'You do not have permission to view this page.',
+  },
+
+  notifications: {
+    title: 'Notifications',
+    open: 'Notifications',
+    markAllRead: 'Mark all read',
+    empty: 'No notifications',
+  },
+
+  auth: {
+    tabLogin: 'Sign in',
+    tabRegister: 'Sign up',
+    email: 'Email',
+    name: 'Name',
+    namePlaceholder: 'What should we call you?',
+    password: 'Password',
+    confirmPassword: 'Confirm password',
+    rememberMe: 'Remember me',
+    forgotPassword: 'Forgot password?',
+    submitLogin: 'Sign in',
+    submitRegister: 'Create account',
+    resendVerification: 'Resend verification email',
+    verifiedInfo: 'Your email has been verified. Please sign in.',
+    verificationSent:
+      'A verification email has been sent to {{email}}. Open the link in it to finish verification, then sign in.',
+    verificationResent:
+      'The verification email has been sent again to {{email}}. Please check your inbox.',
+    errTooManyLogin: 'Too many sign-in attempts. Please try again later.',
+    errEmailNotVerified:
+      'Your email address is not verified yet. Please complete email verification first.',
+    errInvalidCredentials: 'Incorrect email or password.',
+    errSessionFailed: 'Could not establish a session.',
+    errLoginFailed: 'Sign-in failed.',
+    errTooManyRegister: 'Too many sign-up attempts. Please try again later.',
+    errUserExists:
+      'That email is already registered. Sign in, or reset your password.',
+    errRegisterFailed: 'Sign-up failed.',
+    errPasswordTooShort: 'Password must be at least 6 characters.',
+    errPasswordMismatch: 'The two passwords do not match.',
+    errSendFailed: 'Could not send the email. Please try again later.',
+  },
+
+  forgot: {
+    title: 'Reset your password',
+    intro: 'Enter your registered email and we will send you a reset link.',
+    emailPlaceholder: 'Email',
+    send: 'Send reset email',
+    sending: 'Sending…',
+    sent:
+      'If {{email}} is registered, a reset link has been sent to it. Please check your inbox.',
+    hint:
+      'Nothing arrived? Check your spam folder, or try again later. The link is valid for 1 hour.',
+    errTooMany: 'Too many requests. Please try again later.',
+    errFailed: 'Could not send the email.',
+    backToLogin: 'Back to sign in',
+  },
+
+  reset: {
+    title: 'Set a new password',
+    missingToken:
+      'The reset token is missing. Please open this page from the link in your email.',
+    done: '✓ Your password has been reset. Redirecting to sign in…',
+    newPassword: 'New password (at least 6 characters)',
+    confirmPassword: 'Confirm new password',
+    submit: 'Reset password',
+    errInvalidToken:
+      'This link is invalid or has expired. Please request a new reset email.',
+    errFailed: 'Could not reset the password.',
+  },
+
+  dashboard: {
+    title: 'Dashboard',
+    welcome: 'Welcome, {{name}} ({{roles}})',
+    total: 'Total tickets',
+    open: 'Open',
+    myTodo: 'My queue',
+    unassigned: 'Unassigned',
+    overdue: 'Overdue',
+    unread: 'Unread notifications',
+    distribution: 'Open tickets by status',
+  },
+
+  tickets: {
+    title: 'Tickets',
+    new: '+ New ticket',
+    filterAll: 'All',
+    saveView: '★ Save current filter',
+    savePrompt: 'Save the current filter as a view. Name it:',
+    deleteView: 'Delete view',
+    searchPlaceholder: 'Search title or ticket number',
+    allStatuses: 'All statuses',
+    allPriorities: 'All priorities',
+    allQueues: 'All queues',
+    colTicketNo: 'Ticket',
+    colTitle: 'Title',
+    colStatus: 'Status',
+    colSla: 'SLA',
+    colPriority: 'Priority',
+    colAssignee: 'Assignee',
+    colRequester: 'Requester',
+    colCreatedAt: 'Created',
+    empty: 'No tickets',
+    confirmDelete: 'Delete ticket {{no}}?',
+    pagination: '{{total}} total · page {{page}} of {{pages}}',
+    prev: 'Previous',
+    next: 'Next',
+  },
+
+  ticketNew: {
+    title: 'New ticket',
+    fieldTitle: 'Title *',
+    fieldBody:
+      'Description * (rich text; Markdown shortcuts work: # heading, **bold**, - list)',
+    bodyPlaceholder:
+      'Describe the issue in detail… (paste a screenshot or drag an image in)',
+    attachments: 'Attachments',
+    addFile: '+ Upload file',
+    priority: 'Priority',
+    type: 'Type',
+    category: 'Category',
+    queue: 'Queue',
+    submit: 'Create ticket',
+    errBodyRequired: 'Please enter a description.',
+    errCreateFailed: 'Could not create the ticket.',
+  },
+
+  ticketDetail: {
+    back: '← Back',
+    selectAssignee: 'Select an assignee…',
+    assign: 'Assign',
+    internalTag: 'Internal note',
+    internalCheckbox: 'Internal note (not visible to the requester)',
+    replyPlaceholder: 'Write a reply… (Markdown shortcuts and images supported)',
+    addInternalNote: 'Add internal note',
+    reply: 'Reply',
+    metaStatus: 'Status',
+    metaPriority: 'Priority',
+    metaRequester: 'Requester',
+    metaAssignee: 'Assignee',
+    metaQueue: 'Queue',
+    metaType: 'Type',
+    metaCategory: 'Category',
+    metaSlaRemaining: 'SLA remaining',
+    metaSlaDue: 'SLA due',
+    metaCreatedAt: 'Created',
+    unassigned: 'Unassigned',
+    attachments: 'Attachments',
+    addAttachment: '+ Upload',
+    noAttachments: 'No attachments',
+    history: 'Activity ({{count}})',
+  },
+
+  historyAction: {
+    CREATE: 'created the ticket',
+    ASSIGN: 'assigned it',
+    TRANSITION: 'changed the status',
+    MESSAGE: 'replied / added a note',
+    UPDATE: 'edited the ticket',
+    ATTACH: 'added an attachment',
+  },
+
+  users: {
+    title: 'Users',
+    emailPlaceholder: 'Email',
+    namePlaceholder: 'Full name',
+    passwordPlaceholder: 'Initial password (min. 6)',
+    create: 'Create user',
+    rolesLabel: 'Roles:',
+    created: 'User created.',
+    errCreateFailed: 'Could not create the user.',
+    statusActive: 'Active',
+    statusDisabled: 'Disabled',
+    editRoles: 'Edit roles',
+    disable: 'Disable',
+    enable: 'Enable',
+    resetPassword: 'Reset password',
+    resetPrompt: 'Set a new password for “{{name}}” (at least 6 characters):',
+    errPasswordTooShort: 'Password must be at least 6 characters.',
+    passwordReset: 'The password has been reset.',
+    errResetFailed: 'Could not reset the password.',
+    errSaveFailed: 'Could not save.',
+    editRolesTitle: 'Edit roles · {{name}}',
+    atLeastOneRole: 'Select at least one role.',
+  },
+
+  queues: {
+    title: 'Queues',
+    namePlaceholder: 'Queue name',
+    descriptionPlaceholder: 'Description (optional)',
+    create: 'Create queue',
+  },
+
+  profile: {
+    title: 'Profile',
+    avatarSection: 'Avatar and details',
+    avatarAlt: 'Avatar',
+    changeAvatar: 'Change avatar',
+    avatarHint: 'PNG, JPG, GIF or WEBP, up to 2 MB.',
+    avatarUpdated: 'Avatar updated.',
+    errAvatarFailed: 'Could not upload the avatar.',
+    nameLabel: 'Full name',
+    errNameRequired: 'Name cannot be empty.',
+    saved: 'Your details have been saved.',
+    errSaveFailed: 'Could not save.',
+    emailLabel: 'Email:',
+    verified: 'Verified',
+    unverified: 'Not verified',
+    rolesLabel: 'Roles:',
+    saveProfile: 'Save details',
+    changePassword: 'Change password',
+    currentPassword: 'Current password',
+    newPassword: 'New password (at least 6 characters)',
+    confirmPassword: 'Confirm new password',
+    errPasswordTooShort: 'The new password must be at least 6 characters.',
+    errPasswordMismatch: 'The two new passwords do not match.',
+    errWrongPassword:
+      'Could not change the password — your current password may be incorrect.',
+    passwordChanged:
+      'Password changed. Sessions on your other devices have been signed out.',
+    errChangeFailed: 'Could not change the password.',
+    confirmChange: 'Change password',
+    deleteAccount: 'Delete account',
+    deleteWarning:
+      'Deleting removes your account and sign-in credentials permanently; this cannot be undone.',
+    deleteWarning2:
+      'Note: if the account has any tickets or replies, audit rules prevent deletion — ask an administrator to disable it instead.',
+    deleteStart: 'Delete my account',
+    deletePasswordPlaceholder: 'Enter your current password to confirm',
+    deleteConfirm: 'Permanently delete',
+    errDeleteFailed: 'Could not delete the account.',
+  },
+
+  editor: {
+    bold: 'Bold',
+    italic: 'Italic',
+    heading1: 'Heading 1',
+    heading2: 'Heading 2',
+    bulletList: '• List',
+    orderedList: '1. List',
+    quote: 'Quote',
+    codeBlock: 'Code',
+    image: '🖼 Image',
+    errUploadFailed: 'Image upload failed.',
+  },
+
+  sla: {
+    title: 'SLA time remaining',
+    overdue: 'Overdue by {{time}}',
+    remaining: '{{time}} left',
+    durMinutes: '{{m}} min',
+    durHours: '{{h}} h',
+    durHoursMinutes: '{{h}} h {{m}} min',
+    durDaysHours: '{{d}} d {{h}} h',
+  },
+
+  status: {
+    NEW: 'New',
+    ASSIGNED: 'Assigned',
+    IN_PROGRESS: 'In Progress',
+    PENDING: 'Pending',
+    RESOLVED: 'Resolved',
+    CLOSED: 'Closed',
+    REOPENED: 'Reopened',
+    CANCELLED: 'Cancelled',
+  },
+
+  priority: {
+    LOW: 'Low',
+    MEDIUM: 'Medium',
+    HIGH: 'High',
+    URGENT: 'Urgent',
+  },
+
+  ticketAction: {
+    start: 'Start work',
+    hold: 'Put on hold',
+    resume: 'Resume work',
+    resolve: 'Submit resolution',
+    close: 'Accept & close',
+    reopen: 'Reopen',
+    cancel: 'Cancel ticket',
+  },
+};
+
+export default en;

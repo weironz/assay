@@ -1,7 +1,9 @@
 // 工单管理系统数据模型
 // 详见 docs/01-设计文档.md 第 3 节
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // 只生成运行环境（alpine/musl）需要的查询引擎，不打包其它平台的副本
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
 }
 
 datasource db {

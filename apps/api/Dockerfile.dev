@@ -24,4 +24,4 @@ EXPOSE 3000
 
 # 启动前用 db push 同步表结构（P0 便捷方式），再热更新启动
 # 正式迁移文件在后续阶段用 `prisma migrate dev` 生成
-CMD ["sh", "-c", "pnpm prisma db push --skip-generate && pnpm db:seed || true; pnpm start:dev"]
+CMD ["sh", "-c", "pnpm prisma db push --skip-generate && pnpm db:seed:dev || true; pnpm start:dev"]
