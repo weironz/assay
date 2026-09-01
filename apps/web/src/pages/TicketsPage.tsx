@@ -145,8 +145,10 @@ export default function TicketsPage() {
       </div>
 
       {/* 列表 */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
-        <table className="w-full text-sm">
+      {/* overflow-x-auto 而非 hidden：列名长度随语言变化（"处理人" vs
+          "ผู้รับผิดชอบ"），窄屏下应可横向滚动而不是把右侧列裁掉 */}
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-x-auto">
+        <table className="w-full min-w-[64rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colTicketNo')}</th>

@@ -179,8 +179,8 @@ export default function UsersPage() {
       </form>
 
       {/* 用户列表 */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-hidden">
-        <table className="w-full text-sm">
+      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-x-auto">
+        <table className="w-full min-w-[48rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
               <th className="text-left px-4 py-2">{t('common.name')}</th>

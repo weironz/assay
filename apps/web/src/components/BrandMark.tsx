@@ -20,14 +20,14 @@ export default function BrandMark({
         src="/brand/greenstor-lockup.png"
         alt="Greenstor"
         width={w}
-        className="dark:hidden"
+        className="shrink-0 dark:hidden"
         style={{ width: w, height: 'auto' }}
       />
       <img
         src="/brand/greenstor-lockup-dark.png"
         alt="Greenstor"
         width={w}
-        className="hidden dark:block"
+        className="hidden shrink-0 dark:block"
         style={{ width: w, height: 'auto' }}
       />
     </>
@@ -48,18 +48,21 @@ export default function BrandMark({
     );
   }
 
+  // 侧栏只有 240px，而副标题长度随语言变化（"工单系统" 4 字 vs
+  // "Ticket System" 13 字符）。字号/字距按最长的语言收紧，并允许副标题
+  // 收缩省略——宁可截断说明文字，也不能挤掉品牌 lockup。
   return (
     <Link
       to="/dashboard"
-      className="flex items-center gap-2.5"
+      className="flex min-w-0 items-center gap-2"
       aria-label={t('brand.ariaHome')}
     >
-      {lockup(116)}
+      {lockup(100)}
       <span
         aria-hidden
         className="h-4 w-px shrink-0 bg-gray-300 dark:bg-gray-700"
       />
-      <span className="whitespace-nowrap text-[13px] tracking-[0.14em] text-ink-soft dark:text-gray-400">
+      <span className="truncate text-[11px] tracking-[0.08em] text-ink-soft dark:text-gray-400">
         {t('brand.subtitle')}
       </span>
     </Link>

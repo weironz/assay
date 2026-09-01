@@ -425,7 +425,15 @@ export default function TicketDetailPage() {
                     </span>
                     <span>
                       <b>{h.user.name}</b> {historyActionLabel(t, h.action)}
-                      {h.newValue ? `: ${h.newValue}` : ''}
+                      {h.newValue
+                        ? `: ${
+                            // 这两类记录的 newValue 是状态枚举，翻译后再显示；
+                            // 其余（如指派记录里的用户 id）原样透出
+                            h.action === 'TRANSITION' || h.action === 'CREATE'
+                              ? statusLabel(t, h.newValue)
+                              : h.newValue
+                          }`
+                        : ''}
                     </span>
                   </li>
                 ))}

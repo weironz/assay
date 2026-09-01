@@ -11,8 +11,9 @@
 ```
 apps/api   NestJS 后端（Prisma / 存储抽象 / 健康检查）
 apps/web   React 前端（Vite / Tailwind v4 / TanStack Query）
-docker-compose.dev.yml   开发环境：pg + redis + rustfs + adminer + api + web（本地构建、热更新）
-docker-compose.yaml      生产环境：拉取 Docker Hub 镜像 + Nginx 单域名
+docker-compose.dev.yml     开发环境：pg + redis + rustfs + adminer + mailpit + api + web（热更新）
+docker-compose.yaml        独立部署模板：直接暴露端口，CI 冒烟测试也用这份
+docker-compose.traefik.yaml 生产实际在跑的那份（Traefik 路由 + 自动证书）
 ```
 
 ## 快速开始（开发环境一键拉起）
@@ -111,7 +112,12 @@ gh run watch                                       # 跟踪进度
 | 阿里云 ACR | `registry.cn-shenzhen.aliyuncs.com/willspace/assay-{api,web}` | 生产服务器拉取（国内，秒级） |
 | Docker Hub | `willdockerhub/assay-{api,web}` | 对外分发 |
 
-生产 `docker-compose.yaml` 默认从 ACR 拉取；想改用 Docker Hub 就在 `.env` 里加 `REGISTRY=willdockerhub`。
+生产默认从 ACR 拉取；想改用 Docker Hub 就在 `.env` 里加 `REGISTRY=willdockerhub`。
+
+> **改 compose 要当心**：流水线只做 `docker compose pull && up -d`（只换镜像），
+> 不会自动同步 compose 文件——这是有意为之。生产用的是 `docker-compose.traefik.yaml`
+> 那套卷名（`pg-data` 等），而 `docker-compose.yaml` 用的是 `*-prod` 卷名；
+> 拿后者覆盖服务器会挂载一组空卷，看起来就像数据全没了。同步前务必先 diff。
 
 需要的 GitHub Secrets：`DOCKERHUB_USERNAME` `DOCKERHUB_TOKEN` `ACR_URL` `ACR_USERNAME` `ACR_PASSWORD`
 `DEPLOY_HOST` `DEPLOY_USER` `DEPLOY_SSH_KEY` `DEPLOY_KNOWN_HOSTS` `DEPLOY_PUBLIC_URL`。

@@ -1,0 +1,100 @@
+# 生产环境实际使用的 compose（服务器 /data/assay/docker-compose.yaml 的副本）
+#
+# 与同目录 docker-compose.yaml 的区别：
+#   - web 不暴露端口，改由 Traefik 按域名路由并签发证书（外部网络 traefik-network）
+#   - 数据卷名为 pg-data / redis-data / rustfs-data（生产数据就在这几个卷里）
+#
+# ⚠️ 不要用 docker-compose.yaml 覆盖服务器上的这份：那份用的是 *-prod 卷名，
+#    覆盖后 compose 会挂载一组空卷，看起来就像数据全没了。
+#    改动 compose 请先 diff，确认卷名与网络一致再同步。
+#
+# 部署流水线只做 `docker compose pull && up -d`（只换镜像），不会自动同步本文件。
+
+name: assay
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-assay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-assay}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assay}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  rustfs:
+    image: rustfs/rustfs:latest
+    restart: always
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - rustfs-data:/data
+    networks: [internal]
+
+  api:
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-api:${IMAGE_TAG:-latest}
+    restart: always
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-assay}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://rustfs:9000
+      AUTH_BASE_URL: ${PUBLIC_URL:?}
+      AUTH_TRUST_ORIGINS: ${PUBLIC_URL}
+      APP_URL: ${PUBLIC_URL}
+    networks: [internal]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rustfs: {condition: service_started}
+
+  web:
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-web:${IMAGE_TAG:-latest}
+    restart: always
+    networks: [internal, traefik-network]
+    depends_on: [api]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-network"
+      - "traefik.http.routers.assay.rule=Host(`assay.cloudcele.com`)"
+      - "traefik.http.routers.assay.entrypoints=websecure"
+      - "traefik.http.routers.assay.tls=true"
+      - "traefik.http.routers.assay.tls.certresolver=letsencrypt"
+      - "traefik.http.services.assay.loadbalancer.server.port=80"
+
+networks:
+  internal:
+  traefik-network:
+    external: true
+
+volumes:
+  pg-data:
+  redis-data:
+  rustfs-data:
