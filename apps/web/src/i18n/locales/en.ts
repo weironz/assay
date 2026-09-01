@@ -20,6 +20,7 @@ const en = {
     submitting: 'Submitting…',
     processing: 'Processing…',
     notSpecified: 'Not specified',
+    pleaseSelect: 'Please select',
     optional: '(optional)',
     empty: '—',
     actions: 'Actions',
@@ -196,13 +197,18 @@ const en = {
   },
   ticketNew: {
     title: 'New ticket',
-    fieldTitle: 'Title *',
-    fieldBody:
-      'Description * (rich text; Markdown shortcuts work: # heading, **bold**, - list)',
-    bodyPlaceholder:
-      'Describe the issue in detail… (paste a screenshot or drag an image in)',
+    fieldTitle: 'Title',
+    fieldBody: 'Description (rich text; Markdown shortcuts work: # heading, **bold**, - list)',
+    bodyPlaceholder: 'Describe your problem — you can paste or drag images straight in',
     attachments: 'Attachments',
-    addFile: '+ Upload file',
+    addFile: 'Add attachment',
+    attachmentHint: 'Supports {{exts}}. Up to {{mb}} MB per file, {{max}} files in total.',
+    errFile: {
+      ext: '{{name}}: this file type is not supported.',
+      size: '{{name}}: larger than {{mb}} MB.',
+      count: '{{name}}: skipped, {{max}} attachments is the limit.',
+      upload: '{{name}}: upload failed, please try again.',
+    },
     priority: 'Priority',
     type: 'Type',
     category: 'Category',

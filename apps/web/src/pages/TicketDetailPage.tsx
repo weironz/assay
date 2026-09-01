@@ -24,6 +24,7 @@ import {
   actionLabel,
   historyActionLabel,
 } from '../lib/ticket-meta';
+import { ACCEPT_ATTR } from '../lib/attachments';
 import { positionLabel, timePhrase } from '../lib/contact';
 import { renderHtml } from '../lib/sanitize';
 import { useAuth } from '../stores/auth';
@@ -89,7 +90,7 @@ export default function TicketDetailPage() {
     );
   };
   const uploadImg = async (file: File) =>
-    attachmentUrl(await uploadAttachment(id, file));
+    attachmentUrl(await uploadAttachment(id, file, undefined, 'inline'));
 
   const plain = reply.replace(/<[^>]*>/g, '').trim();
 
@@ -301,7 +302,7 @@ export default function TicketDetailPage() {
               placeholder={t('ticketDetail.replyPlaceholder')}
               onChange={setReply}
               onUploadImage={async (file) => {
-                const a = await uploadAttachment(id, file);
+                const a = await uploadAttachment(id, file, undefined, 'inline');
                 return attachmentUrl(a);
               }}
             />
@@ -439,6 +440,7 @@ export default function TicketDetailPage() {
                 type="file"
                 multiple
                 hidden
+                accept={ACCEPT_ATTR}
                 onChange={(e) => uploadFiles(e.target.files)}
               />
             </div>

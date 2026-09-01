@@ -1,9 +1,10 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
+import Placeholder from '@tiptap/extension-placeholder';
 
 interface Props {
   onChange: (html: string) => void;
@@ -54,20 +55,27 @@ export default function RichEditor({
   onUploadImage,
 }: Props) {
   const { t } = useTranslation();
+  const [dragging, setDragging] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const editorRef = useRef<Editor | null>(null);
   const uploadRef = useRef(onUploadImage);
   uploadRef.current = onUploadImage;
+  // 编辑器只初始化一次，而占位符会随语言切换变化，所以走 ref 读最新值
+  const placeholderRef = useRef(placeholder);
+  placeholderRef.current = placeholder;
 
   // 上传图片并在光标处插入
   const uploadAndInsert = async (file: File) => {
     const up = uploadRef.current;
     if (!up) return;
     try {
+      setUploadError(null);
       const url = await up(file);
       editorRef.current?.chain().focus().setImage({ src: url }).run();
     } catch {
-      alert(t('editor.errUploadFailed'));
+      // 原先用 alert：它会阻塞整个页面，用户还得先点掉才能继续写单子
+      setUploadError(t('editor.errUploadFailed'));
     }
   };
 
@@ -75,11 +83,22 @@ export default function RichEditor({
   const imagesFrom = (list?: FileList | null) =>
     list ? Array.from(list).filter((f) => f.type.startsWith('image/')) : [];
 
+  /**
+   * 拖的是不是文件。dragover 阶段读不到 files（浏览器出于安全不暴露），
+   * 只能看 types 里有没有 'Files'——拖选中的文字时就不该亮高亮。
+   */
+  const hasFiles = (e: React.DragEvent) =>
+    Array.from(e.dataTransfer.types).includes('Files');
+
   const editor = useEditor({
     extensions: [
       StarterKit,
       Image,
       Link.configure({ openOnClick: false }),
+      // 占位符必须由扩展渲染：它负责给空段落加 is-editor-empty 和
+      // data-placeholder，CSS 的 attr(data-placeholder) 才取得到值。
+      // 之前把 data-placeholder 挂在外层容器上，attr() 读不到，占位符从来没显示过。
+      Placeholder.configure({ placeholder: () => placeholderRef.current ?? '' }),
     ],
     content,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
@@ -93,16 +112,9 @@ export default function RichEditor({
         }
         return false;
       },
-      // 拖拽图片进编辑器 → 自动上传插入
-      handleDrop: (_v, event) => {
-        const imgs = imagesFrom((event as DragEvent).dataTransfer?.files);
-        if (imgs.length && uploadRef.current) {
-          event.preventDefault();
-          imgs.forEach((f) => uploadAndInsert(f));
-          return true;
-        }
-        return false;
-      },
+      // 拖拽不在这里处理，见下方 onDrop：ProseMirror 的 handleDrop 依赖
+      // posAtCoords 解析出文档位置，落在空编辑器下方的大片空白时解析不出来，
+      // 回调根本不触发——表现就是「有时能拖有时不能」。改在容器上接。
     },
   });
   editorRef.current = editor;
@@ -116,7 +128,29 @@ export default function RichEditor({
   };
 
   return (
-    <div className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800">
+    <div
+      onDragOver={(e) => {
+        if (!uploadRef.current || !hasFiles(e)) return;
+        e.preventDefault(); // 不拦默认行为浏览器会直接打开图片
+        e.dataTransfer.dropEffect = 'copy';
+        if (!dragging) setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        // 只在真正离开整个编辑器时收起高亮，在子元素间移动不算
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!uploadRef.current || !hasFiles(e)) return;
+        e.preventDefault();
+        setDragging(false);
+        imagesFrom(e.dataTransfer.files).forEach((f) => uploadAndInsert(f));
+      }}
+      className={`rounded-md border bg-white dark:bg-gray-800 ${
+        dragging
+          ? 'border-brand-600 ring-2 ring-brand-500/30'
+          : 'border-gray-300 dark:border-gray-700'
+      }`}
+    >
       <div className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-700 p-1">
         <Btn label="B" title={t('editor.bold')} active={editor.isActive('bold')}
           onClick={() => editor.chain().focus().toggleBold().run()} />
@@ -150,8 +184,12 @@ export default function RichEditor({
         editor={editor}
         className="tiptap px-3 py-2 text-sm overflow-auto"
         style={{ minHeight, maxHeight: 520 }}
-        data-placeholder={placeholder}
       />
+      {uploadError && (
+        <p className="border-t border-gray-200 px-3 py-1.5 text-xs text-red-500 dark:border-gray-700">
+          {uploadError}
+        </p>
+      )}
     </div>
   );
 }

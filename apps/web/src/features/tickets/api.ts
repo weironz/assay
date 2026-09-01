@@ -18,23 +18,34 @@ export const attachmentUrl = (a: Attachment | string) =>
   API_BASE + (typeof a === 'string' ? a : a.url);
 
 /** 上传附件（含内联图片），返回记录；图片用 attachmentUrl(rec.url) 作 src */
+/**
+ * 上传的两种用途：inline 是正文里插的图（放宽到任意图片格式，截图常是 webp），
+ * attachment 是显式添加的附件（受扩展名白名单约束）。服务端按 kind 分别校验。
+ */
+export type UploadKind = 'inline' | 'attachment';
+
 export async function uploadAttachment(
   ticketId: string,
   file: File,
   messageId?: string,
+  kind: UploadKind = 'attachment',
 ): Promise<Attachment> {
   const fd = new FormData();
   fd.append('file', file);
-  const q = messageId ? `?messageId=${messageId}` : '';
-  const { data } = await api.post(`/tickets/${ticketId}/attachments${q}`, fd);
+  const q = new URLSearchParams({ kind });
+  if (messageId) q.set('messageId', messageId);
+  const { data } = await api.post(`/tickets/${ticketId}/attachments?${q}`, fd);
   return data as Attachment;
 }
 
 /** 草稿上传：建单前上传（ticketId 暂空），提交时用 attachmentIds 关联 */
-export async function uploadDraft(file: File): Promise<Attachment> {
+export async function uploadDraft(
+  file: File,
+  kind: UploadKind = 'attachment',
+): Promise<Attachment> {
   const fd = new FormData();
   fd.append('file', file);
-  const { data } = await api.post('/uploads', fd);
+  const { data } = await api.post(`/uploads?kind=${kind}`, fd);
   return data as Attachment;
 }
 

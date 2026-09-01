@@ -13,6 +13,13 @@ import {
   Attachment,
 } from '../features/tickets/api';
 import { PRIORITY_KEYS, priorityLabel } from '../lib/ticket-meta';
+import {
+  ACCEPT_ATTR,
+  EXT_LIST_TEXT,
+  MAX_ATTACHMENTS,
+  MAX_ATTACHMENT_MB,
+  screenFiles,
+} from '../lib/attachments';
 import { contactSummary, type TicketContact } from '../lib/contact';
 import ContactDialog from '../components/ContactDialog';
 import RichEditor from '../components/RichEditor';
@@ -21,6 +28,13 @@ import { type Msg, useMsg } from '../lib/messages';
 
 /** 分类下拉里「自定义」那一项的哨兵值，不会提交给接口 */
 const CUSTOM_CATEGORY = '__custom__';
+
+/** 必填标记。红色星号是通用约定，比在文案里手写 " *" 更醒目也更好统一 */
+const Req = () => (
+  <span className="text-red-500" aria-hidden>
+    *
+  </span>
+);
 
 export default function NewTicketPage() {
   const { t } = useTranslation();
@@ -37,7 +51,7 @@ export default function NewTicketPage() {
   const [form, setForm] = useState({
     title: '',
     body: '',
-    priority: 'MEDIUM',
+    priority: '',
     categoryId: '',
     categoryName: '',
     typeId: '',
@@ -47,7 +61,11 @@ export default function NewTicketPage() {
     serialNumber: '',
   });
   const [error, setError] = useState<Msg>(null);
+  // 正文内联图片与显式附件分开存：数量上限只约束后者，
+  // 否则粘 6 张截图就把「最多 5 个附件」占满了
+  const [inlineDrafts, setInlineDrafts] = useState<Attachment[]>([]);
   const [drafts, setDrafts] = useState<Attachment[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   // 联系方式：带出用户上次存的默认值，没存过就是空
@@ -66,16 +84,35 @@ export default function NewTicketPage() {
 
   // 编辑器内插图：上传草稿并记录 id
   const uploadImg = async (file: File) => {
-    const a = await uploadDraft(file);
-    setDrafts((d) => [...d, a]);
+    const a = await uploadDraft(file, 'inline');
+    setInlineDrafts((d) => [...d, a]);
     return attachmentUrl(a);
   };
 
   const addFiles = async (files: FileList | null) => {
     if (!files?.length) return;
-    for (const f of Array.from(files)) {
-      const a = await uploadDraft(f);
-      setDrafts((d) => [...d, a]);
+    const { accepted, rejected } = screenFiles(Array.from(files), drafts.length);
+    // 逐条说明为什么被拒，笼统一句「上传失败」等于让用户自己猜
+    setFileError(
+      rejected.length
+        ? rejected
+            .map((r) =>
+              t(`ticketNew.errFile.${r.code}`, {
+                name: r.fileName,
+                max: MAX_ATTACHMENTS,
+                mb: MAX_ATTACHMENT_MB,
+              }),
+            )
+            .join('\n')
+        : null,
+    );
+    for (const f of accepted) {
+      try {
+        const a = await uploadDraft(f, 'attachment');
+        setDrafts((d) => [...d, a]);
+      } catch {
+        setFileError(t('ticketNew.errFile.upload', { name: f.name }));
+      }
     }
   };
 
@@ -104,7 +141,7 @@ export default function NewTicketPage() {
         serialNumber: form.serialNumber.trim() || undefined,
         contact: contact ?? undefined,
         saveContactAsDefault: contact ? saveContactAsDefault : undefined,
-        attachmentIds: drafts.map((d) => d.id),
+        attachmentIds: [...inlineDrafts, ...drafts].map((d) => d.id),
       };
       const created = await createMut.mutateAsync(payload);
       navigate(`/tickets/${created.id}`);
@@ -128,7 +165,7 @@ export default function NewTicketPage() {
       >
         <div>
           <label className="block text-sm text-gray-500 mb-1">
-            {t('ticketNew.fieldTitle')}
+            <Req /> {t('ticketNew.fieldTitle')}
           </label>
           <input
             required
@@ -139,7 +176,7 @@ export default function NewTicketPage() {
         </div>
         <div>
           <label className="block text-sm text-gray-500 mb-1">
-            {t('ticketNew.fieldBody')}
+            <Req /> {t('ticketNew.fieldBody')}
           </label>
           <RichEditor
             placeholder={t('ticketNew.bodyPlaceholder')}
@@ -149,27 +186,43 @@ export default function NewTicketPage() {
           />
         </div>
 
-        {/* 附件 */}
+        {/* 附件：按钮 + 右侧规则说明。说明文字由 lib/attachments 的常量拼出，
+            改限制时文案自动跟着变，不会出现「写着支持却传不上」 */}
         <div>
-          <div className="flex items-center gap-3 mb-1">
-            <label className="text-sm text-gray-500">
-              {t('ticketNew.attachments')}
-            </label>
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
+              disabled={drafts.length >= MAX_ATTACHMENTS}
               onClick={() => fileRef.current?.click()}
-              className="text-xs text-brand-700 hover:underline"
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:border-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-200"
             >
+              <span aria-hidden>⬆</span>
               {t('ticketNew.addFile')}
             </button>
+            <p className="min-w-0 flex-1 text-xs leading-relaxed text-gray-400">
+              {t('ticketNew.attachmentHint', {
+                exts: EXT_LIST_TEXT,
+                mb: MAX_ATTACHMENT_MB,
+                max: MAX_ATTACHMENTS,
+              })}
+            </p>
             <input
               ref={fileRef}
               type="file"
               multiple
               hidden
-              onChange={(e) => addFiles(e.target.files)}
+              accept={ACCEPT_ATTR}
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = ''; // 允许再次选同一个文件
+              }}
             />
           </div>
+          {fileError && (
+            <p className="mt-2 whitespace-pre-line text-xs text-red-500">
+              {fileError}
+            </p>
+          )}
           {drafts.length > 0 && (
             <ul className="text-xs space-y-1">
               {drafts.map((a) => (
@@ -190,15 +243,19 @@ export default function NewTicketPage() {
           )}
         </div>
         <div className="grid grid-cols-2 gap-4">
+          {/* 优先级与类型必选：不给默认值，逼用户自己判断。
+              留个默认「中」等于大家都不填，SLA 就失去意义了 */}
           <div>
             <label className="block text-sm text-gray-500 mb-1">
-              {t('ticketNew.priority')}
+              <Req /> {t('ticketNew.priority')}
             </label>
             <select
+              required
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
               className={inputCls}
             >
+              <option value="">{t('common.pleaseSelect')}</option>
               {PRIORITY_KEYS.map((k) => (
                 <option key={k} value={k}>
                   {priorityLabel(t, k)}
@@ -208,14 +265,15 @@ export default function NewTicketPage() {
           </div>
           <div>
             <label className="block text-sm text-gray-500 mb-1">
-              {t('ticketNew.type')}
+              <Req /> {t('ticketNew.type')}
             </label>
             <select
+              required
               value={form.typeId}
               onChange={(e) => setForm({ ...form, typeId: e.target.value })}
               className={inputCls}
             >
-              <option value="">{t('common.notSpecified')}</option>
+              <option value="">{t('common.pleaseSelect')}</option>
               {types?.map((item: any) => (
                 <option key={item.id} value={item.id}>
                   {item.name}

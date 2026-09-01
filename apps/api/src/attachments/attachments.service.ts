@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ForbiddenException,
   Inject,
   Injectable,
@@ -7,6 +8,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
+import { ALLOWED_EXTS, extOf, isInlineImage } from './limits';
 
 @Injectable()
 export class AttachmentsService {
@@ -38,18 +40,41 @@ export class AttachmentsService {
     return `tickets/${ticketId}/${Date.now()}-${rand}-${safe}`;
   }
 
+  /**
+   * 类型校验。kind=inline 是正文里粘贴/拖进来的图片，只要求是图片格式——
+   * 截图常常是 webp/gif，用附件白名单去挡会把粘贴功能整个废掉。
+   * 其余走显式附件的白名单。
+   */
+  private assertAllowed(file: Express.Multer.File, kind?: string) {
+    if (!file) throw new BadRequestException('未收到文件');
+    if (kind === 'inline') {
+      if (!isInlineImage(file.mimetype)) {
+        throw new BadRequestException('内联插图仅支持图片格式');
+      }
+      return;
+    }
+    if (!ALLOWED_EXTS.includes(extOf(file.originalname))) {
+      throw new BadRequestException(
+        `不支持的文件格式，仅支持：${ALLOWED_EXTS.join('、')}`,
+      );
+    }
+  }
+
   async upload(
     user: AuthUser,
     ticketId: string,
     file: Express.Multer.File,
     messageId?: string,
+    kind?: string,
   ) {
+    this.assertAllowed(file, kind);
     await this.assertCanView(user, ticketId);
     return this.store(user, file, ticketId, messageId);
   }
 
   /** 草稿上传：建单前上传（图片/附件），ticketId 暂为 null，提交时再关联 */
-  async uploadDraft(user: AuthUser, file: Express.Multer.File) {
+  async uploadDraft(user: AuthUser, file: Express.Multer.File, kind?: string) {
+    this.assertAllowed(file, kind);
     return this.store(user, file, null);
   }
 
