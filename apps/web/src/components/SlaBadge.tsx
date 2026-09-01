@@ -30,6 +30,20 @@ function fmt(t: TFunction, ms: number): string {
 export default function SlaBadge({ slaDueAt, status }: Props) {
   const { t } = useTranslation();
   if (!slaDueAt || DONE.includes(status)) return null;
+
+  // 挂起期间时钟是停的（恢复时才把暂停时长补回截止时刻）。这时候接着倒计时
+  // 会显示一个越来越小、但其实不会真的到期的数字，纯属误导。
+  if (status === 'PENDING') {
+    return (
+      <span
+        className="inline-block rounded bg-gray-100 px-2 py-0.5 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
+        title={t('sla.pausedHint')}
+      >
+        {t('sla.paused')}
+      </span>
+    );
+  }
+
   const diff = new Date(slaDueAt).getTime() - Date.now();
 
   let cls: string;

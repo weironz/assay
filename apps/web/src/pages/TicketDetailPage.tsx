@@ -409,6 +409,27 @@ export default function TicketDetailPage() {
                 </span>
               </Meta>
             )}
+            {/* 首次响应：已响应就显示时间，未响应显示时限（超时标红），
+                让处理人一眼看到「还欠一个回复」 */}
+            <Meta label={t('ticketDetail.metaFirstResponse')}>
+              {ticket.firstResponseAt ? (
+                fmt.dateTime(ticket.firstResponseAt)
+              ) : ticket.firstResponseDueAt ? (
+                <span
+                  className={
+                    new Date(ticket.firstResponseDueAt) < new Date()
+                      ? 'text-red-600 dark:text-red-400'
+                      : ''
+                  }
+                >
+                  {t('ticketDetail.responseDue', {
+                    time: fmt.dateTime(ticket.firstResponseDueAt),
+                  })}
+                </span>
+              ) : (
+                t('common.empty')
+              )}
+            </Meta>
             <Meta label={t('ticketDetail.metaSlaRemaining')}>
               <SlaBadge slaDueAt={ticket.slaDueAt} status={ticket.status} />
               {!ticket.slaDueAt && t('common.empty')}
@@ -487,7 +508,8 @@ export default function TicketDetailPage() {
                       {fmt.dateTime(h.createdAt)}
                     </span>
                     <span>
-                      <b>{h.user.name}</b> {historyActionLabel(t, h.action)}
+                      <b>{h.user?.name ?? t('ticketDetail.systemActor')}</b>{' '}
+                      {historyActionLabel(t, h.action)}
                       {h.newValue
                         ? `: ${
                             // 这两类记录的 newValue 是状态枚举，翻译后再显示；

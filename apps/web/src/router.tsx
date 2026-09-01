@@ -11,6 +11,7 @@ import NewTicketPage from './pages/NewTicketPage';
 import TicketDetailPage from './pages/TicketDetailPage';
 import UsersPage from './pages/UsersPage';
 import QueuesPage from './pages/QueuesPage';
+import SlaPage from './pages/SlaPage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
@@ -35,6 +36,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute permission="user:manage">
             <UsersPage />
+          </ProtectedRoute>
+        ),
+      },
+      {
+        path: 'sla',
+        element: (
+          <ProtectedRoute permission="queue:manage">
+            <SlaPage />
           </ProtectedRoute>
         ),
       },

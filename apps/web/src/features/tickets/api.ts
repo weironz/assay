@@ -86,6 +86,7 @@ export interface TicketDetail extends TicketListItem {
   availableActions: string[];
   type: { id: string; name: string } | null;
   firstResponseAt: string | null;
+  firstResponseDueAt: string | null;
   contact: TicketContact | null;
   datacenter: { id: string; name: string } | null;
   cluster: { id: string; name: string } | null;
@@ -197,11 +198,30 @@ export const useQueues = () =>
     queryFn: async () => (await api.get('/queues')).data,
   });
 
+export interface TicketType {
+  id: string;
+  name: string;
+  /** 首次响应时限（分钟） */
+  slaResponseMin: number;
+  /** 解决时限（分钟） */
+  slaResolveMin: number;
+}
+
 export const useTypes = () =>
   useQuery({
     queryKey: ['ticket-types'],
-    queryFn: async () => (await api.get('/ticket-types')).data,
+    queryFn: async () => (await api.get('/ticket-types')).data as TicketType[],
   });
+
+/** 改 SLA 只影响之后新建的工单，在跑的工单截止时刻不变（见后端注释） */
+export function useUpdateType() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, ...patch }: Partial<TicketType> & { id: string }) =>
+      (await api.patch(`/ticket-types/${id}`, patch)).data as TicketType,
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ticket-types'] }),
+  });
+}
 
 export const useCategories = () =>
   useQuery({
@@ -249,7 +269,8 @@ export interface HistoryEntry {
   oldValue: string | null;
   newValue: string | null;
   createdAt: string;
-  user: { id: string; name: string };
+  /** 为空表示系统自动操作（如 SLA 超时升级优先级） */
+  user: { id: string; name: string } | null;
 }
 
 export const useHistory = (ticketId: string) =>

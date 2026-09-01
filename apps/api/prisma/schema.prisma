@@ -273,8 +273,17 @@ model Ticket {
   serialNumber    String?      @map("serial_number")
   priority        Priority     @default(MEDIUM)
   status          TicketStatus @default(NEW)
-  slaDueAt        DateTime?    @map("sla_due_at")
-  firstResponseAt DateTime?    @map("first_response_at")
+  // ===== SLA 计时 =====
+  // 计时从「建单」起算，不是从接手起算：没人接手恰恰是最该告警的情况。
+  // 挂起期间不计时——挂起意味着与用户达成一致在等外部条件，这段时间
+  // 不该算在处理时长里。实现方式是恢复时把暂停时长加回到两个截止时刻上。
+  slaDueAt           DateTime? @map("sla_due_at")
+  firstResponseDueAt DateTime? @map("first_response_due_at")
+  firstResponseAt    DateTime? @map("first_response_at")
+  /** 当前这次挂起的开始时刻；非挂起状态为空 */
+  holdStartedAt      DateTime? @map("hold_started_at")
+  /** 累计挂起毫秒数，供报表算「真实处理时长」用 */
+  holdMs             Int       @default(0) @map("hold_ms")
   // 提单人的联系方式，选填。结构见 TicketContactDto：
   // { position?, phone, callTime, smsTime, emails[] }。
   // 时间/职位存的是枚举键而非展示文案——四种语言下文案会变，键不会
@@ -347,7 +356,8 @@ model TicketAttachment {
 model TicketHistory {
   id        String        @id @default(cuid())
   ticketId  String        @map("ticket_id")
-  userId    String        @map("user_id")
+  /** 为空表示系统自动操作（如 SLA 超时自动升级优先级），界面显示为「系统」 */
+  userId    String?       @map("user_id")
   action    HistoryAction
   field     String?
   oldValue  String?       @map("old_value")
@@ -355,7 +365,7 @@ model TicketHistory {
   createdAt DateTime      @default(now()) @map("created_at")
 
   ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id])
+  user   User?  @relation(fields: [userId], references: [id])
 
   @@index([ticketId])
   @@map("ticket_history")

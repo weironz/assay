@@ -21,6 +21,7 @@ const MENU: MenuItem[] = [
   { to: '/tickets', labelKey: 'nav.tickets' },
   { to: '/users', labelKey: 'nav.users', permission: 'user:manage' },
   { to: '/queues', labelKey: 'nav.queues', permission: 'queue:manage' },
+  { to: '/sla', labelKey: 'nav.sla', permission: 'queue:manage' },
 ];
 
 /** lg 断点，与下面所有 lg: 类保持一致 */

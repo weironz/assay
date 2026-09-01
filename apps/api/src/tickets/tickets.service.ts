@@ -37,6 +37,12 @@ function normalizeContact(
   };
 }
 
+/**
+ * 工单没设类型时的兜底时限。类型的 SLA 可由管理员在界面上配置，
+ * 这里只是防止「没类型 = 没有任何 SLA 监控」。
+ */
+const FALLBACK_SLA = { responseMin: 60, resolveMin: 1440 };
+
 /** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
 const AUTHOR_SELECT = {
   id: true,
@@ -145,6 +151,20 @@ export class TicketsService {
     throw new Error('unreachable');
   }
 
+  /**
+   * 取该类型的 SLA 时限。没设类型时用兜底值——宁可给个保守时限，
+   * 也不要让工单彻底脱离 SLA 监控悄悄躺着。
+   */
+  private async slaOf(typeId: string | null) {
+    const type = typeId
+      ? await this.prisma.ticketType.findUnique({ where: { id: typeId } })
+      : null;
+    return {
+      responseMin: type?.slaResponseMin ?? FALLBACK_SLA.responseMin,
+      resolveMin: type?.slaResolveMin ?? FALLBACK_SLA.resolveMin,
+    };
+  }
+
   // ---------- 建单 ----------
   async create(user: AuthUser, dto: CreateTicketDto) {
     const categoryId = await this.resolveCategoryId(
@@ -176,6 +196,19 @@ export class TicketsService {
         },
       },
     }));
+    // SLA 从建单起算：一直没人接手才是最该告警的情况，
+    // 从「开始处理」起算的话这种单永远不会超时
+    const sla = await this.slaOf(dto.typeId ?? null);
+    const base = ticket.createdAt.getTime();
+    const firstResponseDueAt = new Date(base + sla.responseMin * 60_000);
+    const slaDueAt = new Date(base + sla.resolveMin * 60_000);
+    await this.prisma.ticket.update({
+      where: { id: ticket.id },
+      data: { firstResponseDueAt, slaDueAt },
+    });
+    await this.sla.schedule(ticket.id, 'response', firstResponseDueAt);
+    await this.sla.schedule(ticket.id, 'resolve', slaDueAt);
+
     await this.history(ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
     // 勾了「设为默认」才写用户档案；没勾就不动，免得覆盖上次存好的
     if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
@@ -338,26 +371,51 @@ export class TicketsService {
     const to = this.workflow.resolveTransition(action, ticket.status, user, ticket);
 
     const data: Prisma.TicketUpdateInput = { status: to };
-    let slaDueAt: Date | null = null;
-    // 进入处理中：按类型 SLA 计算解决时限
-    if (to === 'IN_PROGRESS') {
-      const type = ticket.typeId
-        ? await this.prisma.ticketType.findUnique({ where: { id: ticket.typeId } })
-        : null;
-      const mins = type?.slaResolveMin ?? 1440;
-      slaDueAt = new Date(Date.now() + mins * 60_000);
-      data.slaDueAt = slaDueAt;
+    const now = new Date();
+    // 计时起点在建单，这里只负责「暂停/恢复/重开」三种对时钟的影响
+    let responseDue = ticket.firstResponseDueAt;
+    let resolveDue = ticket.slaDueAt;
+    let reschedule = false;
+
+    if (to === 'PENDING') {
+      // 挂起：记下暂停起点，把两个到期任务撤掉，时钟就停了
+      data.holdStartedAt = now;
+      await this.sla.cancel(id);
+    } else if (ticket.status === 'PENDING' && ticket.holdStartedAt) {
+      // 恢复：把这段暂停时长整体加回到两个截止时刻上，等价于时钟从未走过
+      const paused = now.getTime() - ticket.holdStartedAt.getTime();
+      data.holdStartedAt = null;
+      data.holdMs = { increment: paused };
+      if (responseDue && !ticket.firstResponseAt) {
+        responseDue = new Date(responseDue.getTime() + paused);
+        data.firstResponseDueAt = responseDue;
+      }
+      if (resolveDue) {
+        resolveDue = new Date(resolveDue.getTime() + paused);
+        data.slaDueAt = resolveDue;
+      }
+      reschedule = true;
+    } else if (to === 'REOPENED') {
+      // 重开：旧的解决时限早就过期了，继续用它等于永远超时。按类型重新给一档
+      const sla = await this.slaOf(ticket.typeId);
+      resolveDue = new Date(now.getTime() + sla.resolveMin * 60_000);
+      data.slaDueAt = resolveDue;
+      reschedule = true;
     }
-    if (to === 'CLOSED') data.closedAt = new Date();
+
+    if (to === 'CLOSED') data.closedAt = now;
 
     await this.prisma.ticket.update({ where: { id }, data });
     await this.history(id, user.id, 'TRANSITION', 'status', ticket.status, to);
 
     // SLA 任务调度 / 取消
-    if (to === 'IN_PROGRESS' && slaDueAt) {
-      await this.sla.schedule(id, slaDueAt);
-    } else if (['RESOLVED', 'CLOSED', 'CANCELLED'].includes(to)) {
+    if (['RESOLVED', 'CLOSED', 'CANCELLED'].includes(to)) {
       await this.sla.cancel(id);
+    } else if (reschedule) {
+      if (!ticket.firstResponseAt) {
+        await this.sla.schedule(id, 'response', responseDue);
+      }
+      await this.sla.schedule(id, 'resolve', resolveDue);
     }
 
     // 状态变更通知
@@ -411,12 +469,13 @@ export class TicketsService {
     });
     await this.history(id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
-    // 首次由非提单人发出的公开回复 → 记 first_response
+    // 首次由非提单人发出的公开回复 → 记 first_response，并撤掉响应超时任务
     if (!ticket.firstResponseAt && !isInternal && ticket.requesterId !== user.id) {
       await this.prisma.ticket.update({
         where: { id },
         data: { firstResponseAt: new Date() },
       });
+      await this.sla.cancel(id, 'response');
     }
 
     // 通知对方
