@@ -21,13 +21,17 @@ import {
   slaRailColor,
 } from '../lib/ticket-meta';
 import { useAuth } from '../stores/auth';
+import { useCopy } from '../lib/use-copy';
 import SlaBadge from '../components/SlaBadge';
+import Toast from '../components/Toast';
 
 export default function TicketsPage() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
   const has = useAuth((s) => s.has);
   const isAdmin = useAuth((s) => s.hasRole('admin'));
+  const userId = useAuth((s) => s.user?.id);
+  const { copy, copied } = useCopy();
   const [q, setQ] = useState<TicketQuery>({ page: 1, pageSize: 20 });
   const { data, isLoading } = useTickets(q);
   const { data: queues } = useQueues();
@@ -53,6 +57,7 @@ export default function TicketsPage() {
 
   return (
     <div className="space-y-4">
+      <Toast show={copied} message={t('tickets.copied')} />
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">{t('tickets.title')}</h1>
         {has('ticket:create') && (
@@ -160,13 +165,13 @@ export default function TicketsPage() {
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colAssignee')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colRequester')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colCreatedAt')}</th>
-              {isAdmin && <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{t('common.actions')}</th>}
+              <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{t('common.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={isAdmin ? 10 : 9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   {t('common.loading')}
                 </td>
               </tr>
@@ -184,17 +189,23 @@ export default function TicketsPage() {
                     } as React.CSSProperties
                   }
                 >
-                  <Link
-                    to={`/tickets/${ticket.id}`}
-                    className="font-mono text-xs text-gray-500 hover:text-brand-700 dark:text-gray-400"
+                  {/* 工单号点击复制：报障时最常做的动作就是把单号发给别人 */}
+                  <button
+                    type="button"
+                    onClick={() => copy(ticket.ticketNo)}
+                    title={t('tickets.copyTicketNo')}
+                    aria-label={t('tickets.copyTicketNo')}
+                    className="font-mono text-xs text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
                   >
                     {ticket.ticketNo}
-                  </Link>
+                  </button>
                 </td>
                 <td className="px-4 py-2">
+                  {/* 蓝色是「可点进详情」的通用暗示，绿色是品牌色、在这里会和
+                      状态标签抢注意力，所以链接单独用蓝 */}
                   <Link
                     to={`/tickets/${ticket.id}`}
-                    className="font-medium text-gray-800 hover:text-brand-700 dark:text-gray-100 dark:hover:text-brand-400"
+                    className="font-medium text-sky-600 hover:underline dark:text-sky-400"
                   >
                     {ticket.title}
                   </Link>
@@ -224,24 +235,31 @@ export default function TicketsPage() {
                 <td className="whitespace-nowrap px-4 py-2 text-xs text-gray-400">
                   {fmt.compact(ticket.createdAt)}
                 </td>
-                {isAdmin && (
-                  <td className="whitespace-nowrap px-4 py-2 text-right">
+                <td className="whitespace-nowrap px-4 py-2 text-right">
+                  <Link
+                    to={`/tickets/${ticket.id}`}
+                    className="text-xs text-sky-600 hover:underline dark:text-sky-400"
+                  >
+                    {t('common.view')}
+                  </Link>
+                  {/* 管理员可删任意工单，提单人可删自己的 */}
+                  {(isAdmin || ticket.requester?.id === userId) && (
                     <button
                       onClick={() => {
                         if (confirm(t('tickets.confirmDelete', { no: ticket.ticketNo })))
                           del.mutate(ticket.id);
                       }}
-                      className="text-red-500 text-xs hover:underline"
+                      className="ml-3 text-red-500 text-xs hover:underline"
                     >
                       {t('common.delete')}
                     </button>
-                  </td>
-                )}
+                  )}
+                </td>
               </tr>
             ))}
             {data && data.items.length === 0 && (
               <tr>
-                <td colSpan={isAdmin ? 10 : 9} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                   {t('tickets.empty')}
                 </td>
               </tr>

@@ -467,12 +467,13 @@ export class TicketsService {
     return updated;
   }
 
-  // ---------- 删除（仅管理员）----------
+  // ---------- 删除（管理员 / 提单人本人）----------
   async remove(user: AuthUser, id: string) {
-    if (!user.roles.includes('admin')) {
-      throw new ForbiddenException('仅管理员可删除工单');
+    const ticket = await this.loadOrThrow(id);
+    // 提单人可以撤掉自己提的单；别人的单只有管理员能删
+    if (!user.roles.includes('admin') && ticket.requesterId !== user.id) {
+      throw new ForbiddenException('只能删除自己提交的工单');
     }
-    await this.loadOrThrow(id);
     await this.sla.cancel(id);
     // 级联删除消息/历史/附件记录/标签（附件对象暂留存储，可后续清理）
     await this.prisma.ticket.delete({ where: { id } });

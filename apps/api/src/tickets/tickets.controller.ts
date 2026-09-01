@@ -82,7 +82,7 @@ export class TicketsController {
   @Delete(':id')
   @RequirePermissions('ticket:read')
   remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    return this.tickets.remove(user, id); // 服务内再校验 admin
+    return this.tickets.remove(user, id); // 服务内再校验：admin 或提单人本人
   }
 
   @Get(':id/messages')
