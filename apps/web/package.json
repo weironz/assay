@@ -17,7 +17,7 @@
     "@tiptap/react": "^2.10.0",
     "@tiptap/starter-kit": "^2.10.0",
     "axios": "^1.7.9",
-    "better-auth": "^1.2.9",
+    "better-auth": "1.6.23",
     "dompurify": "^3.2.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
