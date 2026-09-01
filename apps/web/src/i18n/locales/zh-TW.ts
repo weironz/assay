@@ -121,11 +121,14 @@ const zhTW: Resource = {
     welcome: '歡迎，{{name}}（{{roles}}）',
     total: '工單總數',
     open: '進行中',
+    done: '已完成',
     myTodo: '我的待辦',
     unassigned: '未指派',
     overdue: '已逾時',
     unread: '未讀通知',
-    distribution: '進行中工單狀態分佈',
+    distribution: '工單狀態分布',
+    groupOpen: '進行中',
+    groupClosed: '已結束',
   },
 
   tickets: {

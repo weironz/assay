@@ -121,11 +121,14 @@ const th: Resource = {
     welcome: 'ยินดีต้อนรับ {{name}} ({{roles}})',
     total: 'ทิกเก็ตทั้งหมด',
     open: 'กำลังดำเนินการ',
+    done: 'เสร็จสิ้น',
     myTodo: 'งานของฉัน',
     unassigned: 'ยังไม่ได้มอบหมาย',
     overdue: 'เกินกำหนด',
     unread: 'การแจ้งเตือนที่ยังไม่อ่าน',
-    distribution: 'สถานะของทิกเก็ตที่ยังเปิดอยู่',
+    distribution: 'ทิกเก็ตตามสถานะ',
+    groupOpen: 'กำลังดำเนินการ',
+    groupClosed: 'สิ้นสุดแล้ว',
   },
 
   tickets: {

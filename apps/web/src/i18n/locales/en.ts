@@ -132,11 +132,14 @@ const en = {
     welcome: 'Welcome, {{name}} ({{roles}})',
     total: 'Total tickets',
     open: 'Open',
+    done: 'Completed',
     myTodo: 'My queue',
     unassigned: 'Unassigned',
     overdue: 'Overdue',
     unread: 'Unread notifications',
-    distribution: 'Open tickets by status',
+    distribution: 'Tickets by status',
+    groupOpen: 'In progress',
+    groupClosed: 'Finished',
   },
 
   tickets: {

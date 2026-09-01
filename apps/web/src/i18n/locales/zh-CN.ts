@@ -121,11 +121,14 @@ const zhCN: Resource = {
     welcome: '欢迎，{{name}}（{{roles}}）',
     total: '工单总数',
     open: '进行中',
+    done: '已完成',
     myTodo: '我的待办',
     unassigned: '未分派',
     overdue: '已超时',
     unread: '未读通知',
-    distribution: '进行中工单状态分布',
+    distribution: '工单状态分布',
+    groupOpen: '进行中',
+    groupClosed: '已结束',
   },
 
   tickets: {
