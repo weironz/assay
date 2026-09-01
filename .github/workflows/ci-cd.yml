@@ -81,6 +81,9 @@ jobs:
 
       - name: 校验 Prisma schema
         working-directory: apps/api
+        # validate 会解析 datasource 里的 env()，需要变量存在；这里不连库，给个占位即可
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
         run: pnpm prisma validate
 
       - name: 编译
