@@ -231,6 +231,10 @@ jobs:
             ${{ env.HUB_API }}:${{ steps.meta.outputs.tag }}
             ${{ secrets.ACR_URL }}/assay-api:latest
             ${{ secrets.ACR_URL }}/assay-api:${{ steps.meta.outputs.tag }}
+          # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
+          # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=api
           cache-to: type=gha,scope=api,mode=max
 
@@ -245,6 +249,10 @@ jobs:
             ${{ env.HUB_WEB }}:${{ steps.meta.outputs.tag }}
             ${{ secrets.ACR_URL }}/assay-web:latest
             ${{ secrets.ACR_URL }}/assay-web:${{ steps.meta.outputs.tag }}
+          # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
+          # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
