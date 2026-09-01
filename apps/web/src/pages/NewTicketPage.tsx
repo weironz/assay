@@ -11,13 +11,20 @@ import {
   Attachment,
 } from '../features/tickets/api';
 import { PRIORITY_KEYS, priorityLabel } from '../lib/ticket-meta';
+import { contactSummary, type TicketContact } from '../lib/contact';
+import ContactDialog from '../components/ContactDialog';
 import RichEditor from '../components/RichEditor';
+import { useAuth } from '../stores/auth';
 import { type Msg, useMsg } from '../lib/messages';
+
+/** 分类下拉里「自定义」那一项的哨兵值，不会提交给接口 */
+const CUSTOM_CATEGORY = '__custom__';
 
 export default function NewTicketPage() {
   const { t } = useTranslation();
   const msg = useMsg();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const createMut = useCreateTicket();
   const { data: queues } = useQueues();
   const { data: types } = useTypes();
@@ -27,13 +34,23 @@ export default function NewTicketPage() {
     title: '',
     body: '',
     priority: 'MEDIUM',
-    typeId: '',
     categoryId: '',
+    categoryName: '',
+    typeId: '',
     queueId: '',
   });
   const [error, setError] = useState<Msg>(null);
   const [drafts, setDrafts] = useState<Attachment[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 联系方式：带出用户上次存的默认值，没存过就是空
+  const [contact, setContact] = useState<TicketContact | null>(
+    user?.defaultContact ?? null,
+  );
+  const [saveContactAsDefault, setSaveContactAsDefault] = useState(
+    !!user?.defaultContact,
+  );
+  const [contactOpen, setContactOpen] = useState(false);
 
   // 编辑器内插图：上传草稿并记录 id
   const uploadImg = async (file: File) => {
@@ -57,12 +74,21 @@ export default function NewTicketPage() {
       setError({ key: 'ticketNew.errBodyRequired' });
       return;
     }
+    const custom = form.categoryId === CUSTOM_CATEGORY;
+    if (custom && !form.categoryName.trim()) {
+      setError({ key: 'ticketNew.errCategoryNameRequired' });
+      return;
+    }
     try {
       const payload = {
         ...form,
         typeId: form.typeId || undefined,
-        categoryId: form.categoryId || undefined,
+        // 自定义分类走 categoryName，服务端负责查重后建；哨兵值不能外泄到接口
+        categoryId: custom ? undefined : form.categoryId || undefined,
+        categoryName: custom ? form.categoryName.trim() : undefined,
         queueId: form.queueId || undefined,
+        contact: contact ?? undefined,
+        saveContactAsDefault: contact ? saveContactAsDefault : undefined,
         attachmentIds: drafts.map((d) => d.id),
       };
       const created = await createMut.mutateAsync(payload);
@@ -197,7 +223,22 @@ export default function NewTicketPage() {
                   {c.name}
                 </option>
               ))}
+              <option value={CUSTOM_CATEGORY}>
+                {t('ticketNew.categoryCustom')}
+              </option>
             </select>
+            {form.categoryId === CUSTOM_CATEGORY && (
+              <input
+                autoFocus
+                maxLength={60}
+                value={form.categoryName}
+                onChange={(e) =>
+                  setForm({ ...form, categoryName: e.target.value })
+                }
+                placeholder={t('ticketNew.categoryCustomPlaceholder')}
+                className={`${inputCls} mt-2`}
+              />
+            )}
           </div>
           <div>
             <label className="block text-sm text-gray-500 mb-1">
@@ -215,6 +256,35 @@ export default function NewTicketPage() {
                 </option>
               ))}
             </select>
+          </div>
+          {/* 联系方式：只读摘要 + 编辑按钮，具体字段在弹窗里填。整体选填 */}
+          <div className="col-span-2">
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.contact')}
+              <span className="ml-1 text-xs text-gray-400">
+                {t('common.optional')}
+              </span>
+            </label>
+            <button
+              type="button"
+              onClick={() => setContactOpen(true)}
+              className={`${inputCls} flex items-center justify-between gap-2 text-left hover:border-brand-600`}
+            >
+              <span
+                className={
+                  contact
+                    ? 'truncate text-gray-800 dark:text-gray-200'
+                    : 'truncate text-gray-400'
+                }
+              >
+                {contact
+                  ? contactSummary(t, contact)
+                  : t('ticketNew.contactPlaceholder')}
+              </span>
+              <span aria-hidden className="shrink-0 text-gray-400">
+                ✎
+              </span>
+            </button>
           </div>
         </div>
         {error && <p className="text-sm text-red-500">{msg(error)}</p>}
@@ -237,6 +307,19 @@ export default function NewTicketPage() {
           </button>
         </div>
       </form>
+
+      {contactOpen && (
+        <ContactDialog
+          value={contact}
+          defaultSaveAsDefault={saveContactAsDefault}
+          onClose={() => setContactOpen(false)}
+          onSubmit={(c, asDefault) => {
+            setContact(c);
+            setSaveContactAsDefault(asDefault);
+            setContactOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

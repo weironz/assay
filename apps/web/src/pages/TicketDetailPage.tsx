@@ -24,9 +24,11 @@ import {
   actionLabel,
   historyActionLabel,
 } from '../lib/ticket-meta';
+import { positionLabel, timePhrase } from '../lib/contact';
 import { renderHtml } from '../lib/sanitize';
 import { useAuth } from '../stores/auth';
 import { useDateFormat } from '../i18n/format';
+import Avatar from '../components/Avatar';
 import RichEditor from '../components/RichEditor';
 import SlaBadge from '../components/SlaBadge';
 
@@ -205,30 +207,42 @@ export default function TicketDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* 中栏 */}
         <div className="lg:col-span-2 space-y-3">
-          <div className="space-y-3">
-            {ticket.messages.map((m) => {
+          {/* 会话流：整段往来是一张卡，每条之间只用发丝线分隔。
+              逐条独立描边会把一次对话切成一堆互不相干的方块，读起来费劲。 */}
+          <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+            {ticket.messages.map((m, i) => {
               const canEditMsg = m.author.id === user?.id || isSupervisorOrAdmin;
               const editing = editingMsgId === m.id;
               return (
-                <div
+                <article
                   key={m.id}
-                  className={`rounded-lg border p-3 ${
-                    m.isInternal
-                      ? 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40'
-                      : 'border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900'
+                  className={`flex gap-3 p-4 ${
+                    i > 0 ? 'border-t border-gray-100 dark:border-gray-800' : ''
+                  } ${
+                    // 内部备注只用淡黄底做区分，不再加边框——它已经在卡内了
+                    m.isInternal ? 'bg-amber-50/70 dark:bg-amber-950/20' : ''
                   }`}
                 >
-                  <div className="flex items-center justify-between text-xs mb-2">
-                    <span className="font-medium text-gray-700 dark:text-gray-300">
-                      {m.author.name}
+                  <Avatar
+                    name={m.author.name}
+                    email={m.author.email}
+                    image={m.author.image}
+                    size={36}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <header className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
+                      <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                        {m.author.name}
+                      </span>
+                      <span className="min-w-0 truncate text-gray-400">
+                        {m.author.email}
+                      </span>
                       {m.isInternal && (
-                        <span className="ml-2 text-amber-600">
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/60 dark:text-amber-300">
                           {t('ticketDetail.internalTag')}
                         </span>
                       )}
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="text-gray-400">
+                      <span className="ml-auto shrink-0 text-gray-400">
                         {fmt.dateTime(m.createdAt)}
                       </span>
                       {canEditMsg && !editing && (
@@ -237,45 +251,45 @@ export default function TicketDetailPage() {
                             setMsgDraft(m.body);
                             setEditingMsgId(m.id);
                           }}
-                          className="text-brand-700 hover:underline"
+                          className="shrink-0 text-brand-700 hover:underline"
                         >
                           {t('common.edit')}
                         </button>
                       )}
-                    </span>
-                  </div>
-                  {editing ? (
-                    <div className="space-y-2">
-                      <RichEditor
-                        content={m.body}
-                        minHeight={80}
-                        onChange={setMsgDraft}
-                        onUploadImage={uploadImg}
-                      />
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => setEditingMsgId(null)}
-                          className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm"
-                        >
-                          {t('common.cancel')}
-                        </button>
-                        <button
-                          onClick={saveMsg}
-                          disabled={updateMessage.isPending}
-                          className="rounded-md bg-brand-700 text-white px-3 py-1 text-sm hover:bg-brand-800 disabled:opacity-50"
-                        >
-                          {t('common.save')}
-                        </button>
+                    </header>
+                    {editing ? (
+                      <div className="space-y-2">
+                        <RichEditor
+                          content={m.body}
+                          minHeight={80}
+                          onChange={setMsgDraft}
+                          onUploadImage={uploadImg}
+                        />
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setEditingMsgId(null)}
+                            className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm"
+                          >
+                            {t('common.cancel')}
+                          </button>
+                          <button
+                            onClick={saveMsg}
+                            disabled={updateMessage.isPending}
+                            className="rounded-md bg-brand-700 text-white px-3 py-1 text-sm hover:bg-brand-800 disabled:opacity-50"
+                          >
+                            {t('common.save')}
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    /* 服务端已消毒；此处再经 DOMPurify 二次消毒后渲染 */
-                    <div
-                      className="rich text-sm text-gray-800 dark:text-gray-200"
-                      dangerouslySetInnerHTML={renderHtml(m.body)}
-                    />
-                  )}
-                </div>
+                    ) : (
+                      /* 服务端已消毒；此处再经 DOMPurify 二次消毒后渲染 */
+                      <div
+                        className="rich text-sm text-gray-800 dark:text-gray-200"
+                        dangerouslySetInnerHTML={renderHtml(m.body)}
+                      />
+                    )}
+                  </div>
+                </article>
               );
             })}
           </div>
@@ -335,6 +349,35 @@ export default function TicketDetailPage() {
             <Meta label={t('ticketDetail.metaRequester')}>
               {ticket.requester?.name}
             </Meta>
+            {/* 选填项，没填就不占位——空行只会稀释这块信息的密度。
+                处理人要照着这个打电话，所以逐项列出而不是挤成一行摘要 */}
+            {ticket.contact && (
+              <Meta label={t('ticketDetail.metaContact')}>
+                <span className="inline-block space-y-0.5 text-right">
+                  <span className="block break-all font-medium">
+                    {ticket.contact.phone}
+                  </span>
+                  {ticket.contact.position && (
+                    <span className="block text-xs text-gray-400">
+                      {positionLabel(t, ticket.contact.position)}
+                    </span>
+                  )}
+                  <span className="block text-xs text-gray-400">
+                    {timePhrase(t, ticket.contact.callTime, 'call')}
+                    {' · '}
+                    {timePhrase(t, ticket.contact.smsTime, 'sms')}
+                  </span>
+                  {ticket.contact.emails.map((addr) => (
+                    <span
+                      key={addr}
+                      className="block break-all text-xs text-gray-400"
+                    >
+                      {addr}
+                    </span>
+                  ))}
+                </span>
+              </Meta>
+            )}
             <Meta label={t('ticketDetail.metaAssignee')}>
               {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
             </Meta>

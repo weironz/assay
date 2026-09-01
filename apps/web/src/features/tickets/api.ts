@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../lib/api';
+import type { TicketContact } from '../../lib/contact';
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000') + '/api';
@@ -60,7 +61,13 @@ export interface TicketMessage {
   isInternal: boolean;
   contentType: string;
   createdAt: string;
-  author: { id: string; name: string };
+  author: {
+    id: string;
+    name: string;
+    email: string;
+    /** 头像相对路径，未设置时前端退化为姓名首字母 */
+    image: string | null;
+  };
 }
 
 export interface TicketDetail extends TicketListItem {
@@ -68,6 +75,7 @@ export interface TicketDetail extends TicketListItem {
   availableActions: string[];
   type: { id: string; name: string } | null;
   firstResponseAt: string | null;
+  contact: TicketContact | null;
 }
 
 export interface TicketQuery {
@@ -108,7 +116,11 @@ export function useCreateTicket() {
       priority?: string;
       typeId?: string;
       categoryId?: string;
+      /** 下拉里没有合适分类时的自填名称，服务端负责去重/新建 */
+      categoryName?: string;
       queueId?: string;
+      contact?: TicketContact;
+      saveContactAsDefault?: boolean;
       attachmentIds?: string[];
     }) => (await api.post('/tickets', body)).data as TicketDetail,
   });

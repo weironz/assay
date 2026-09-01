@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { api } from '../lib/api';
+import type { TicketContact } from '../lib/contact';
 
 export interface AuthUser {
   id: string;
@@ -9,6 +10,8 @@ export interface AuthUser {
   image: string | null;
   emailVerified: boolean;
   status: string;
+  /** 上次勾选「设为默认」存下的联系方式，建单时预填 */
+  defaultContact: TicketContact | null;
   roles: string[];
   permissions: string[];
 }

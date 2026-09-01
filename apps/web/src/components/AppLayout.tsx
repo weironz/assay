@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../stores/auth';
 import { signOut } from '../lib/auth-client';
-import { absUrl } from '../lib/api';
+import Avatar from './Avatar';
 import BrandMark from './BrandMark';
 import NotificationBell from './NotificationBell';
 import ThemeToggle from './ThemeToggle';
@@ -36,7 +36,8 @@ export default function AppLayout() {
   return (
     <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
       {/* 左侧导航 */}
-      <aside className="w-60 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col">
+      {/* 256px 而非 240：品牌 lockup + 副标题在英文/泰语下装不进 240，见 BrandMark */}
+      <aside className="w-64 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 flex flex-col">
         <div className="h-14 flex items-center px-4 border-b border-gray-200 dark:border-gray-800">
           <BrandMark />
         </div>
@@ -79,23 +80,13 @@ export default function AppLayout() {
             className="flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-brand-700 dark:hover:text-brand-400"
             title={t('nav.profile')}
           >
-            {user?.image ? (
-              <img
-                src={absUrl(user.image)}
-                alt=""
-                className="w-7 h-7 rounded-full object-cover border border-gray-200 dark:border-gray-700"
-              />
-            ) : (
-              <span className="w-7 h-7 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-medium">
-                {(user?.name || user?.email || '?').slice(0, 1).toUpperCase()}
-              </span>
-            )}
-            <span>
-              {user?.name}
-              <span className="ml-2 text-xs text-gray-400">
-                [{user?.roles.join(', ')}]
-              </span>
-            </span>
+            <Avatar
+              name={user?.name}
+              email={user?.email}
+              image={user?.image}
+              size={28}
+            />
+            <span>{user?.name}</span>
           </NavLink>
           <button
             onClick={logout}

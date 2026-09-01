@@ -5,10 +5,13 @@ import {
   IsOptional,
   IsString,
   Max,
+  MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { TicketContactDto } from './contact';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 
@@ -32,9 +35,28 @@ export class CreateTicketDto {
   @IsString()
   categoryId?: string;
 
+  /**
+   * 下拉里没有合适分类时由提单人自填。与 categoryId 二选一，两者同时给出时
+   * 以 categoryId 为准（下拉是受控数据，自由文本是兜底）。
+   */
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  categoryName?: string;
+
   @IsOptional()
   @IsString()
   queueId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TicketContactDto)
+  contact?: TicketContactDto;
+
+  /** 勾选后把这份联系方式存到用户档案，下次建单自动带出 */
+  @IsOptional()
+  @IsBoolean()
+  saveContactAsDefault?: boolean;
 
   @IsOptional()
   @IsString({ each: true })
@@ -61,6 +83,11 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   queueId?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => TicketContactDto)
+  contact?: TicketContactDto;
 }
 
 export class AssignDto {

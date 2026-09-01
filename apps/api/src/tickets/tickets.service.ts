@@ -18,6 +18,32 @@ import {
   ListTicketsQuery,
   UpdateTicketDto,
 } from './dto';
+import { TicketContactDto } from './contact';
+
+/**
+ * 联系方式落库前收敛一次：去掉首尾空格、丢掉空的邮件行。
+ * 前端「添加邮件地址」允许留空行，不清掉就会把 "" 存进去。
+ */
+function normalizeContact(
+  contact?: TicketContactDto,
+): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  if (!contact?.phone?.trim()) return Prisma.JsonNull;
+  return {
+    ...(contact.position ? { position: contact.position } : {}),
+    phone: contact.phone.trim(),
+    callTime: contact.callTime,
+    smsTime: contact.smsTime,
+    emails: (contact.emails ?? []).map((e) => e.trim()).filter(Boolean),
+  };
+}
+
+/** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
+const AUTHOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  image: true,
+} as const;
 
 @Injectable()
 export class TicketsService {
@@ -73,9 +99,33 @@ export class TicketsService {
     return ticket.requesterId === user.id || ticket.assigneeId === user.id;
   }
 
+  /**
+   * 分类落库：下拉选中的 id 优先；否则拿自填的名字去找已有分类，找不到才新建。
+   * 忽略大小写和首尾空格做匹配——不去重的话分类表很快会长出
+   *「网络」「网络 」「网络」三条同义项，筛选和报表就没法用了。
+   */
+  private async resolveCategoryId(
+    categoryId?: string,
+    categoryName?: string,
+  ): Promise<string | undefined> {
+    if (categoryId) return categoryId;
+    const name = categoryName?.trim();
+    if (!name) return undefined;
+    const existing = await this.prisma.category.findFirst({
+      where: { name: { equals: name, mode: 'insensitive' } },
+    });
+    if (existing) return existing.id;
+    const created = await this.prisma.category.create({ data: { name } });
+    return created.id;
+  }
+
   // ---------- 建单 ----------
   async create(user: AuthUser, dto: CreateTicketDto) {
     const ticketNo = await this.genTicketNo();
+    const categoryId = await this.resolveCategoryId(
+      dto.categoryId,
+      dto.categoryName,
+    );
     const ticket = await this.prisma.ticket.create({
       data: {
         ticketNo,
@@ -83,8 +133,9 @@ export class TicketsService {
         requesterId: user.id,
         priority: (dto.priority as any) ?? 'MEDIUM',
         typeId: dto.typeId,
-        categoryId: dto.categoryId,
+        categoryId,
         queueId: dto.queueId,
+        contact: normalizeContact(dto.contact),
         status: 'NEW',
         messages: {
           create: {
@@ -98,6 +149,13 @@ export class TicketsService {
       },
     });
     await this.history(ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
+    // 勾了「设为默认」才写用户档案；没勾就不动，免得覆盖上次存好的
+    if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { defaultContact: normalizeContact(dto.contact) },
+      });
+    }
     // 关联建单前上传的草稿附件（仅本人、仍未挂单的）
     if (dto.attachmentIds?.length) {
       await this.prisma.ticketAttachment.updateMany({
@@ -160,7 +218,7 @@ export class TicketsService {
         category: true,
         tags: { include: { tag: true } },
         messages: {
-          include: { author: { select: { id: true, name: true } } },
+          include: { author: { select: AUTHOR_SELECT } },
           orderBy: { createdAt: 'asc' },
         },
       },
@@ -193,6 +251,8 @@ export class TicketsService {
         typeId: dto.typeId,
         categoryId: dto.categoryId,
         queueId: dto.queueId,
+        // 清空联系方式要能落库，所以显式区分「没传」和「传了空值」
+        contact: dto.contact === undefined ? undefined : normalizeContact(dto.contact),
       },
     });
     await this.history(id, user.id, 'UPDATE', 'fields', null, JSON.stringify(dto));
@@ -311,7 +371,7 @@ export class TicketsService {
         contentType: dto.contentType ?? 'text/html',
         body: cleanHtml(dto.body),
       },
-      include: { author: { select: { id: true, name: true } } },
+      include: { author: { select: AUTHOR_SELECT } },
     });
     await this.history(id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
@@ -365,7 +425,7 @@ export class TicketsService {
     const updated = await this.prisma.ticketMessage.update({
       where: { id: messageId },
       data: { body: cleanHtml(dto.body) },
-      include: { author: { select: { id: true, name: true } } },
+      include: { author: { select: AUTHOR_SELECT } },
     });
     await this.history(ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
     return updated;

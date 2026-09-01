@@ -47,6 +47,7 @@ export class AuthService {
       image: user.image,
       emailVerified: user.emailVerified,
       status: user.status,
+      defaultContact: (user.defaultContact as AuthUser['defaultContact']) ?? null,
       roles,
       permissions,
     };
