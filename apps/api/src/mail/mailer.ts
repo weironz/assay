@@ -49,12 +49,20 @@ export function appUrl(): string {
 
 // ---------- 阿里云 DirectMail ----------
 
-/** 阿里云 RPC 风格签名要求的百分号编码 */
+/**
+ * 阿里云 RPC 风格签名要求的百分号编码：
+ * 除 A-Za-z0-9-_.~ 外一律编码。
+ * 注意 encodeURIComponent 不会编码 ! ' ( ) *，必须手动补上，
+ * 否则正文里只要出现单引号（如 CSS 的 'Segoe UI'）签名就会不匹配。
+ */
 function percentEncode(s: string): string {
   return encodeURIComponent(s)
     .replace(/\+/g, '%20')
-    .replace(/\*/g, '%2A')
-    .replace(/%7E/g, '~');
+    .replace(/%7E/g, '~')
+    .replace(
+      /[!'()*]/g,
+      (c) => '%' + c.charCodeAt(0).toString(16).toUpperCase(),
+    );
 }
 
 async function sendViaAliyun(
