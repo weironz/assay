@@ -49,6 +49,20 @@ export class CreateTicketDto {
   queueId?: string;
 
   @IsOptional()
+  @IsString()
+  datacenterId?: string;
+
+  @IsOptional()
+  @IsString()
+  clusterId?: string;
+
+  /** 设备序列号，允许一次填多台（前端提示逗号分隔），故留长一些 */
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  serialNumber?: string;
+
+  @IsOptional()
   @ValidateNested()
   @Type(() => TicketContactDto)
   contact?: TicketContactDto;
@@ -83,6 +97,19 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   queueId?: string;
+
+  @IsOptional()
+  @IsString()
+  datacenterId?: string;
+
+  @IsOptional()
+  @IsString()
+  clusterId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  serialNumber?: string;
 
   @IsOptional()
   @ValidateNested()

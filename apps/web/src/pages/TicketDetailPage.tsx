@@ -390,6 +390,24 @@ export default function TicketDetailPage() {
             <Meta label={t('ticketDetail.metaCategory')}>
               {ticket.category?.name ?? t('common.empty')}
             </Meta>
+            {/* IDC 定位信息：填了才显示，没填不占位 */}
+            {ticket.datacenter && (
+              <Meta label={t('ticketDetail.metaDatacenter')}>
+                {ticket.datacenter.name}
+              </Meta>
+            )}
+            {ticket.cluster && (
+              <Meta label={t('ticketDetail.metaCluster')}>
+                {ticket.cluster.name}
+              </Meta>
+            )}
+            {ticket.serialNumber && (
+              <Meta label={t('ticketDetail.metaSerialNumber')}>
+                <span className="break-all font-mono text-xs">
+                  {ticket.serialNumber}
+                </span>
+              </Meta>
+            )}
             <Meta label={t('ticketDetail.metaSlaRemaining')}>
               <SlaBadge slaDueAt={ticket.slaDueAt} status={ticket.status} />
               {!ticket.slaDueAt && t('common.empty')}

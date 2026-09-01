@@ -214,6 +214,28 @@ model Category {
   @@map("categories")
 }
 
+// ============ IDC 资产定位：机房 / 集群 ============
+// 做成表而不是写死在前端：机房和集群会随业务扩，加一个不该要一次发版。
+model Datacenter {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  clusters Cluster[]
+  tickets  Ticket[]
+
+  @@map("datacenters")
+}
+
+model Cluster {
+  id           String  @id @default(cuid())
+  name         String  @unique
+  datacenterId String? @map("datacenter_id")
+
+  datacenter Datacenter? @relation(fields: [datacenterId], references: [id])
+  tickets    Ticket[]
+
+  @@map("clusters")
+}
+
 model Tag {
   id    String @id @default(cuid())
   name  String @unique
@@ -245,6 +267,10 @@ model Ticket {
   queueId         String?      @map("queue_id")
   typeId          String?      @map("type_id")
   categoryId      String?      @map("category_id")
+  // IDC 算力租赁场景的定位信息，三项都选填：机房 / 集群 / 设备序列号
+  datacenterId    String?      @map("datacenter_id")
+  clusterId       String?      @map("cluster_id")
+  serialNumber    String?      @map("serial_number")
   priority        Priority     @default(MEDIUM)
   status          TicketStatus @default(NEW)
   slaDueAt        DateTime?    @map("sla_due_at")
@@ -260,9 +286,11 @@ model Ticket {
 
   requester User        @relation("Requester", fields: [requesterId], references: [id])
   assignee  User?       @relation("Assignee", fields: [assigneeId], references: [id])
-  queue     Queue?      @relation(fields: [queueId], references: [id])
-  type      TicketType? @relation(fields: [typeId], references: [id])
-  category  Category?   @relation(fields: [categoryId], references: [id])
+  queue      Queue?      @relation(fields: [queueId], references: [id])
+  type       TicketType? @relation(fields: [typeId], references: [id])
+  category   Category?   @relation(fields: [categoryId], references: [id])
+  datacenter Datacenter? @relation(fields: [datacenterId], references: [id])
+  cluster    Cluster?    @relation(fields: [clusterId], references: [id])
 
   messages    TicketMessage[]
   attachments TicketAttachment[]

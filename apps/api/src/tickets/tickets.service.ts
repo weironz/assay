@@ -61,10 +61,15 @@ export class TicketsService {
       d.getDate(),
     ).padStart(2, '0')}`;
     const prefix = `WO-${ymd}-`;
-    const countToday = await this.prisma.ticket.count({
+    // 取当天最大编号 +1，而不是数当天条数：删掉任意一张单都会让计数回退，
+    // 下一张新单就会撞上已存在的编号。序号补零到 4 位，字典序即数字序。
+    const last = await this.prisma.ticket.findFirst({
       where: { ticketNo: { startsWith: prefix } },
+      orderBy: { ticketNo: 'desc' },
+      select: { ticketNo: true },
     });
-    return `${prefix}${String(countToday + 1).padStart(4, '0')}`;
+    const seq = last ? Number(last.ticketNo.slice(prefix.length)) + 1 : 1;
+    return `${prefix}${String(seq).padStart(4, '0')}`;
   }
 
   private history(
@@ -119,14 +124,34 @@ export class TicketsService {
     return created.id;
   }
 
+  /**
+   * 编号是「读当天最大值 + 1」，两个请求挨得足够近就会读到同一个值。
+   * 唯一索引会挡住后一个，这里重取编号再试；连撞 5 次就不是并发问题了，抛出去。
+   */
+  private async createWithTicketNo(
+    build: (ticketNo: string) => Prisma.TicketCreateArgs,
+  ) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        return await this.prisma.ticket.create(build(await this.genTicketNo()));
+      } catch (e) {
+        const dup =
+          e instanceof Prisma.PrismaClientKnownRequestError &&
+          e.code === 'P2002' &&
+          String(e.meta?.target ?? '').includes('ticket_no');
+        if (!dup || attempt === 4) throw e;
+      }
+    }
+    throw new Error('unreachable');
+  }
+
   // ---------- 建单 ----------
   async create(user: AuthUser, dto: CreateTicketDto) {
-    const ticketNo = await this.genTicketNo();
     const categoryId = await this.resolveCategoryId(
       dto.categoryId,
       dto.categoryName,
     );
-    const ticket = await this.prisma.ticket.create({
+    const ticket = await this.createWithTicketNo((ticketNo) => ({
       data: {
         ticketNo,
         title: dto.title,
@@ -135,6 +160,9 @@ export class TicketsService {
         typeId: dto.typeId,
         categoryId,
         queueId: dto.queueId,
+        datacenterId: dto.datacenterId,
+        clusterId: dto.clusterId,
+        serialNumber: dto.serialNumber?.trim() || null,
         contact: normalizeContact(dto.contact),
         status: 'NEW',
         messages: {
@@ -147,7 +175,7 @@ export class TicketsService {
           },
         },
       },
-    });
+    }));
     await this.history(ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
     // 勾了「设为默认」才写用户档案；没勾就不动，免得覆盖上次存好的
     if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
@@ -216,6 +244,8 @@ export class TicketsService {
         queue: true,
         type: true,
         category: true,
+        datacenter: true,
+        cluster: true,
         tags: { include: { tag: true } },
         messages: {
           include: { author: { select: AUTHOR_SELECT } },
@@ -251,6 +281,12 @@ export class TicketsService {
         typeId: dto.typeId,
         categoryId: dto.categoryId,
         queueId: dto.queueId,
+        datacenterId: dto.datacenterId,
+        clusterId: dto.clusterId,
+        serialNumber:
+          dto.serialNumber === undefined
+            ? undefined
+            : dto.serialNumber.trim() || null,
         // 清空联系方式要能落库，所以显式区分「没传」和「传了空值」
         contact: dto.contact === undefined ? undefined : normalizeContact(dto.contact),
       },

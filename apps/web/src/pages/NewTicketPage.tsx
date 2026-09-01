@@ -6,6 +6,8 @@ import {
   useQueues,
   useTypes,
   useCategories,
+  useDatacenters,
+  useClusters,
   uploadDraft,
   attachmentUrl,
   Attachment,
@@ -29,6 +31,8 @@ export default function NewTicketPage() {
   const { data: queues } = useQueues();
   const { data: types } = useTypes();
   const { data: categories } = useCategories();
+  const { data: datacenters } = useDatacenters();
+  const { data: clusters } = useClusters();
 
   const [form, setForm] = useState({
     title: '',
@@ -38,6 +42,9 @@ export default function NewTicketPage() {
     categoryName: '',
     typeId: '',
     queueId: '',
+    datacenterId: '',
+    clusterId: '',
+    serialNumber: '',
   });
   const [error, setError] = useState<Msg>(null);
   const [drafts, setDrafts] = useState<Attachment[]>([]);
@@ -51,6 +58,11 @@ export default function NewTicketPage() {
     !!user?.defaultContact,
   );
   const [contactOpen, setContactOpen] = useState(false);
+
+  // 选了机房就只列该机房下的集群；没选则全列（还没有归属的集群也要能选到）
+  const visibleClusters = form.datacenterId
+    ? clusters?.filter((c) => c.datacenterId === form.datacenterId)
+    : clusters;
 
   // 编辑器内插图：上传草稿并记录 id
   const uploadImg = async (file: File) => {
@@ -87,6 +99,9 @@ export default function NewTicketPage() {
         categoryId: custom ? undefined : form.categoryId || undefined,
         categoryName: custom ? form.categoryName.trim() : undefined,
         queueId: form.queueId || undefined,
+        datacenterId: form.datacenterId || undefined,
+        clusterId: form.clusterId || undefined,
+        serialNumber: form.serialNumber.trim() || undefined,
         contact: contact ?? undefined,
         saveContactAsDefault: contact ? saveContactAsDefault : undefined,
         attachmentIds: drafts.map((d) => d.id),
@@ -257,6 +272,63 @@ export default function NewTicketPage() {
               ))}
             </select>
           </div>
+          {/* IDC 资产定位，三项都选填 */}
+          <div>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.datacenter')}
+            </label>
+            <select
+              value={form.datacenterId}
+              onChange={(e) =>
+                setForm({
+                  ...form,
+                  datacenterId: e.target.value,
+                  // 换机房后原集群多半不属于新机房了，清掉比留个错值好
+                  clusterId: '',
+                })
+              }
+              className={inputCls}
+            >
+              <option value="">{t('common.notSpecified')}</option>
+              {datacenters?.map((d) => (
+                <option key={d.id} value={d.id}>
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.cluster')}
+            </label>
+            <select
+              value={form.clusterId}
+              onChange={(e) => setForm({ ...form, clusterId: e.target.value })}
+              className={inputCls}
+            >
+              <option value="">{t('common.notSpecified')}</option>
+              {visibleClusters?.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-sm text-gray-500 mb-1">
+              {t('ticketNew.serialNumber')}
+            </label>
+            <input
+              maxLength={200}
+              value={form.serialNumber}
+              onChange={(e) =>
+                setForm({ ...form, serialNumber: e.target.value })
+              }
+              placeholder={t('ticketNew.serialNumberPlaceholder')}
+              className={inputCls}
+            />
+          </div>
+
           {/* 联系方式：只读摘要 + 编辑按钮，具体字段在弹窗里填。整体选填 */}
           <div className="col-span-2">
             <label className="block text-sm text-gray-500 mb-1">

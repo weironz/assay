@@ -104,20 +104,39 @@ async function main() {
     });
   }
 
-  // 示例分类树（仅当没有分类时创建，保证幂等）
-  const catCount = await prisma.category.count();
-  if (catCount === 0) {
-    const it = await prisma.category.create({ data: { name: 'IT 支持' } });
-    await prisma.category.createMany({
-      data: [
-        { name: '网络', parentId: it.id },
-        { name: '账号权限', parentId: it.id },
-        { name: '软件安装', parentId: it.id },
-      ],
+  // 分类：按名字逐个补齐，而不是「表空才建」。
+  // 老库不会因为已有分类就永远拿不到新增项——这批 IDC 分类就是这么加进去的。
+  // 只增不删：删分类会连带影响已挂在上面的历史工单，得由人工决定。
+  const ensureCategory = async (name: string, parentId?: string) => {
+    const found = await prisma.category.findFirst({ where: { name } });
+    if (found) return found;
+    return prisma.category.create({ data: { name, parentId } });
+  };
+
+  const it = await ensureCategory('IT 支持');
+  for (const name of ['网络', '账号权限', '软件安装']) {
+    await ensureCategory(name, it.id);
+  }
+  // IDC 算力租赁场景的报障对象
+  for (const name of ['IB 网络', '以太网网络', 'GPU 卡', 'B300']) {
+    await ensureCategory(name);
+  }
+
+  // 机房与集群
+  const dz = await prisma.datacenter.upsert({
+    where: { name: 'datazone' },
+    update: {},
+    create: { name: 'datazone' },
+  });
+  for (const name of ['BKK-CL01', 'BKK-CL02']) {
+    await prisma.cluster.upsert({
+      where: { name },
+      update: {},
+      create: { name, datacenterId: dz.id },
     });
   }
 
-  console.log('✅ Seed 完成：权限/角色/admin/默认队列/类型/分类');
+  console.log('✅ Seed 完成：权限/角色/admin/默认队列/类型/分类/机房集群');
 }
 
 main()

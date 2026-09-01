@@ -76,6 +76,9 @@ export interface TicketDetail extends TicketListItem {
   type: { id: string; name: string } | null;
   firstResponseAt: string | null;
   contact: TicketContact | null;
+  datacenter: { id: string; name: string } | null;
+  cluster: { id: string; name: string } | null;
+  serialNumber: string | null;
 }
 
 export interface TicketQuery {
@@ -119,6 +122,9 @@ export function useCreateTicket() {
       /** 下拉里没有合适分类时的自填名称，服务端负责去重/新建 */
       categoryName?: string;
       queueId?: string;
+      datacenterId?: string;
+      clusterId?: string;
+      serialNumber?: string;
       contact?: TicketContact;
       saveContactAsDefault?: boolean;
       attachmentIds?: string[];
@@ -190,6 +196,24 @@ export const useCategories = () =>
   useQuery({
     queryKey: ['categories'],
     queryFn: async () => (await api.get('/categories')).data,
+  });
+
+export const useDatacenters = () =>
+  useQuery({
+    queryKey: ['datacenters'],
+    queryFn: async () =>
+      (await api.get('/datacenters')).data as { id: string; name: string }[],
+  });
+
+export const useClusters = () =>
+  useQuery({
+    queryKey: ['clusters'],
+    queryFn: async () =>
+      (await api.get('/clusters')).data as {
+        id: string;
+        name: string;
+        datacenterId: string | null;
+      }[],
   });
 
 export const useAssignees = () =>

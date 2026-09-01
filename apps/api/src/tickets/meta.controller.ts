@@ -57,6 +57,17 @@ export class MetaController {
     return this.prisma.ticketType.findMany({ orderBy: { name: 'asc' } });
   }
 
+  @Get('datacenters')
+  datacenters() {
+    return this.prisma.datacenter.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  /** 带 datacenterId 供前端按所选机房过滤集群 */
+  @Get('clusters')
+  clusters() {
+    return this.prisma.cluster.findMany({ orderBy: { name: 'asc' } });
+  }
+
   /** 可指派的处理人（handler/admin 角色），供指派下拉使用（登录可见） */
   @Get('assignees')
   async assignees() {
