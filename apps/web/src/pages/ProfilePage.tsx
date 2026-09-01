@@ -130,7 +130,7 @@ export default function ProfilePage() {
               className="w-16 h-16 rounded-full object-cover border border-gray-200 dark:border-gray-700"
             />
           ) : (
-            <div className="w-16 h-16 rounded-full bg-blue-600 text-white flex items-center justify-center text-xl font-medium">
+            <div className="w-16 h-16 rounded-full bg-brand-700 text-white flex items-center justify-center text-xl font-medium">
               {initial}
             </div>
           )}
@@ -182,7 +182,7 @@ export default function ProfilePage() {
           <button
             type="submit"
             disabled={busy}
-            className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+            className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
           >
             保存资料
           </button>
@@ -229,7 +229,7 @@ export default function ProfilePage() {
         <button
           type="submit"
           disabled={busy}
-          className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+          className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
         >
           确认修改
         </button>

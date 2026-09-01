@@ -116,7 +116,7 @@ export default function TicketDetailPage() {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3">
-        <Link to="/tickets" className="text-sm text-blue-600 hover:underline">
+        <Link to="/tickets" className="text-sm text-brand-700 hover:underline">
           ← 返回
         </Link>
         <span className="font-mono text-xs text-gray-400">{t.ticketNo}</span>
@@ -134,7 +134,7 @@ export default function TicketDetailPage() {
           />
           <button
             onClick={saveTitle}
-            className="rounded-md bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700"
+            className="rounded-md bg-brand-700 text-white px-3 py-1.5 text-sm hover:bg-brand-800"
           >
             保存
           </button>
@@ -154,7 +154,7 @@ export default function TicketDetailPage() {
                 setTitleDraft(t.title);
                 setEditingTitle(true);
               }}
-              className="text-xs text-blue-600 hover:underline"
+              className="text-xs text-brand-700 hover:underline"
             >
               编辑
             </button>
@@ -169,7 +169,7 @@ export default function TicketDetailPage() {
             key={a}
             disabled={transition.isPending}
             onClick={() => transition.mutate({ id, arg: a })}
-            className="rounded-md border border-blue-600 text-blue-600 px-3 py-1.5 text-sm hover:bg-blue-600 hover:text-white disabled:opacity-50"
+            className="rounded-md border border-brand-600 text-brand-700 px-3 py-1.5 text-sm hover:bg-brand-700 hover:text-white disabled:opacity-50"
           >
             {ACTION_LABEL[a] ?? a}
           </button>
@@ -189,7 +189,7 @@ export default function TicketDetailPage() {
             <button
               disabled={!assigneeId || assign.isPending}
               onClick={() => assign.mutate({ id, arg: { assigneeId } })}
-              className="rounded-md bg-blue-600 text-white px-3 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-50"
+              className="rounded-md bg-brand-700 text-white px-3 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
             >
               指派
             </button>
@@ -228,7 +228,7 @@ export default function TicketDetailPage() {
                             setMsgDraft(m.body);
                             setEditingMsgId(m.id);
                           }}
-                          className="text-blue-600 hover:underline"
+                          className="text-brand-700 hover:underline"
                         >
                           编辑
                         </button>
@@ -253,7 +253,7 @@ export default function TicketDetailPage() {
                         <button
                           onClick={saveMsg}
                           disabled={updateMessage.isPending}
-                          className="rounded-md bg-blue-600 text-white px-3 py-1 text-sm hover:bg-blue-700 disabled:opacity-50"
+                          className="rounded-md bg-brand-700 text-white px-3 py-1 text-sm hover:bg-brand-800 disabled:opacity-50"
                         >
                           保存
                         </button>
@@ -298,7 +298,7 @@ export default function TicketDetailPage() {
               <button
                 disabled={addMessage.isPending || !plain}
                 onClick={submitReply}
-                className="rounded-md bg-blue-600 text-white px-4 py-1.5 text-sm hover:bg-blue-700 disabled:opacity-50"
+                className="rounded-md bg-brand-700 text-white px-4 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
               >
                 {internal ? '添加内部备注' : '回复'}
               </button>
@@ -338,7 +338,7 @@ export default function TicketDetailPage() {
               <span className="text-gray-500">附件</span>
               <button
                 onClick={() => fileRef.current?.click()}
-                className="text-blue-600 text-xs hover:underline"
+                className="text-brand-700 text-xs hover:underline"
               >
                 + 上传
               </button>
@@ -358,7 +358,7 @@ export default function TicketDetailPage() {
                       href={attachmentUrl(a)}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-blue-600 hover:underline break-all"
+                      className="text-brand-700 hover:underline break-all"
                     >
                       {a.fileName}
                     </a>

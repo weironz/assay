@@ -14,16 +14,22 @@ function StatCard({
   tone?: 'default' | 'warn' | 'danger' | 'primary';
   to?: string;
 }) {
-  const toneCls = {
-    default: 'text-gray-900 dark:text-gray-100',
-    primary: 'text-blue-600',
-    warn: 'text-amber-600',
-    danger: 'text-red-600',
-  }[tone];
+  // 零值不着色：颜色只用来标记「有事要处理」，0 个待办不是需要注意的事
+  const toneCls =
+    value === 0
+      ? 'text-gray-300 dark:text-gray-600'
+      : {
+          default: 'text-gray-900 dark:text-gray-100',
+          primary: 'text-brand-700 dark:text-brand-400',
+          warn: 'text-amber-600',
+          danger: 'text-red-600',
+        }[tone];
   const body = (
-    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 hover:shadow-sm transition">
+    <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 transition hover:border-brand-300 dark:hover:border-brand-800">
       <div className="text-sm text-gray-500">{label}</div>
-      <div className={`text-3xl font-semibold mt-1 ${toneCls}`}>{value}</div>
+      <div className={`mt-1 text-3xl font-semibold tabular-nums ${toneCls}`}>
+        {value}
+      </div>
     </div>
   );
   return to ? <Link to={to}>{body}</Link> : body;
@@ -70,19 +76,26 @@ export default function DashboardPage() {
                 return (
                   <div key={s} className="flex items-center gap-3">
                     <span
-                      className={`w-20 text-xs px-2 py-0.5 rounded text-center ${STATUS_COLOR[s]}`}
+                      className={`w-20 whitespace-nowrap rounded px-2 py-0.5 text-center text-xs ${STATUS_COLOR[s]}`}
                     >
                       {STATUS_LABEL[s]}
                     </span>
-                    <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded h-5 overflow-hidden">
+                    {/* 常态分布不该用饱和色喊人：条形压成淡品牌绿，读数交给右侧数字 */}
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                       <div
-                        className="h-full bg-blue-500/70 rounded flex items-center justify-end pr-2"
-                        style={{ width: `${(n / maxCount) * 100}%`, minWidth: n ? 24 : 0 }}
-                      >
-                        {n > 0 && <span className="text-[10px] text-white">{n}</span>}
-                      </div>
+                        className="h-full rounded-full bg-brand-300 transition-[width] duration-500 dark:bg-brand-800"
+                        style={{ width: `${(n / maxCount) * 100}%` }}
+                      />
                     </div>
-                    <span className="w-8 text-right text-sm text-gray-500">{n}</span>
+                    <span
+                      className={`w-8 text-right text-sm tabular-nums ${
+                        n === 0
+                          ? 'text-gray-300 dark:text-gray-600'
+                          : 'text-gray-700 dark:text-gray-200'
+                      }`}
+                    >
+                      {n}
+                    </span>
                   </div>
                 );
               })}

@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { authClient, signIn } from '../lib/auth-client';
+import BrandMark from '../components/BrandMark';
 import { useAuth } from '../stores/auth';
 
 type Tab = 'login' | 'register';
@@ -120,11 +121,8 @@ export default function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
       <div className="w-full max-w-sm">
-        <div className="text-center mb-8">
-          <h1 className="text-2xl font-semibold text-gray-900 dark:text-gray-100">
-            工单管理系统
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Assay Ticket System</p>
+        <div className="mb-9 flex justify-center">
+          <BrandMark variant="stack" />
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
@@ -139,7 +137,7 @@ export default function LoginPage() {
                 }}
                 className={`py-3 font-medium transition ${
                   tab === t
-                    ? 'text-blue-600 border-b-2 border-blue-600'
+                    ? 'text-brand-700 border-b-2 border-brand-600'
                     : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                 }`}
               >
@@ -224,7 +222,7 @@ export default function LoginPage() {
                 </label>
                 <Link
                   to="/forgot-password"
-                  className="text-blue-600 hover:underline"
+                  className="text-brand-700 hover:underline"
                 >
                   忘记密码？
                 </Link>
@@ -237,7 +235,7 @@ export default function LoginPage() {
               <button
                 type="button"
                 onClick={resendVerify}
-                className="text-sm text-blue-600 hover:underline"
+                className="text-sm text-brand-700 hover:underline"
               >
                 重新发送验证邮件
               </button>
@@ -246,7 +244,7 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-md bg-blue-600 text-white py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+              className="w-full rounded-md bg-brand-700 text-white py-2 text-sm font-medium hover:bg-brand-800 disabled:opacity-60"
             >
               {loading
                 ? '处理中…'

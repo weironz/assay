@@ -46,7 +46,7 @@ export default function NotificationBell() {
               <span className="text-sm font-medium">通知</span>
               <button
                 onClick={() => markAll.mutate()}
-                className="text-xs text-blue-600 hover:underline"
+                className="text-xs text-brand-700 hover:underline"
               >
                 全部已读
               </button>
@@ -67,7 +67,7 @@ export default function NotificationBell() {
                 >
                   <div className="flex items-start gap-2">
                     {!n.isRead && (
-                      <span className="mt-1.5 w-2 h-2 rounded-full bg-blue-500 shrink-0" />
+                      <span className="mt-1.5 w-2 h-2 rounded-full bg-brand-500 shrink-0" />
                     )}
                     <div className="min-w-0">
                       <p className="text-sm text-gray-800 dark:text-gray-200 truncate">

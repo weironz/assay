@@ -140,7 +140,7 @@ export default function UsersPage() {
         <button
           type="submit"
           disabled={createMut.isPending || form.roleNames.length === 0}
-          className="rounded-md bg-blue-600 text-white py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+          className="rounded-md bg-brand-700 text-white py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
         >
           新建用户
         </button>
@@ -196,13 +196,13 @@ export default function UsersPage() {
                 <td className="px-4 py-2 text-right space-x-3">
                   <button
                     onClick={() => openEdit(u)}
-                    className="text-blue-600 hover:underline"
+                    className="text-brand-700 hover:underline"
                   >
                     编辑角色
                   </button>
                   <button
                     onClick={() => toggleMut.mutate(u)}
-                    className="text-blue-600 hover:underline"
+                    className="text-brand-700 hover:underline"
                   >
                     {u.status === 'ACTIVE' ? '禁用' : '启用'}
                   </button>
@@ -266,7 +266,7 @@ export default function UsersPage() {
               <button
                 onClick={() => roleMut.mutate()}
                 disabled={roleMut.isPending || editRoles.length === 0}
-                className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+                className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
               >
                 保存
               </button>

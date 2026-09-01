@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { authClient } from '../lib/auth-client';
+import BrandMark from '../components/BrandMark';
 
 export default function ResetPasswordPage() {
   const [params] = useSearchParams();
@@ -47,9 +48,12 @@ export default function ResetPasswordPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
       <div className="w-full max-w-sm">
-        <h1 className="text-2xl font-semibold text-center mb-8 text-gray-900 dark:text-gray-100">
+        <div className="mb-8 flex justify-center">
+          <BrandMark variant="stack" />
+        </div>
+        <h2 className="mb-4 text-center text-base font-medium text-gray-800 dark:text-gray-200">
           设置新密码
-        </h1>
+        </h2>
         <form
           onSubmit={submit}
           className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 p-6 space-y-4"
@@ -86,14 +90,14 @@ export default function ResetPasswordPage() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full rounded-md bg-blue-600 text-white py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-60"
+                className="w-full rounded-md bg-brand-700 text-white py-2 text-sm font-medium hover:bg-brand-800 disabled:opacity-60"
               >
                 {loading ? '提交中…' : '确认重置'}
               </button>
             </>
           )}
           <div className="text-center">
-            <Link to="/login" className="text-sm text-blue-600 hover:underline">
+            <Link to="/login" className="text-sm text-brand-700 hover:underline">
               返回登录
             </Link>
           </div>

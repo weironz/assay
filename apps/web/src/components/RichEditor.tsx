@@ -30,7 +30,7 @@ function Btn({
       onClick={onClick}
       className={`px-2 py-0.5 text-xs rounded ${
         active
-          ? 'bg-blue-600 text-white'
+          ? 'bg-brand-700 text-white'
           : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
       }`}
     >

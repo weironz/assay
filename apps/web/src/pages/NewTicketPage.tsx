@@ -106,7 +106,7 @@ export default function NewTicketPage() {
             <button
               type="button"
               onClick={() => fileRef.current?.click()}
-              className="text-xs text-blue-600 hover:underline"
+              className="text-xs text-brand-700 hover:underline"
             >
               + 上传文件
             </button>
@@ -203,7 +203,7 @@ export default function NewTicketPage() {
           <button
             type="submit"
             disabled={createMut.isPending}
-            className="rounded-md bg-blue-600 text-white px-5 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+            className="rounded-md bg-brand-700 text-white px-5 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
           >
             {createMut.isPending ? '提交中…' : '提交工单'}
           </button>

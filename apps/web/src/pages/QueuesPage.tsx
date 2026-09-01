@@ -57,7 +57,7 @@ export default function QueuesPage() {
         <button
           type="submit"
           disabled={createMut.isPending}
-          className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+          className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
         >
           新建队列
         </button>

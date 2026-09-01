@@ -21,13 +21,13 @@ export default function SlaBadge({ slaDueAt, status }: Props) {
   let cls: string;
   let text: string;
   if (diff < 0) {
-    cls = 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300';
+    cls = 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300 font-medium';
     text = `超时 ${fmt(-diff)}`;
   } else if (diff < 2 * 3600_000) {
-    cls = 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300';
+    cls = 'bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300';
     text = `剩 ${fmt(diff)}`;
   } else {
-    cls = 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300';
+    cls = 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300';
     text = `剩 ${fmt(diff)}`;
   }
   return (

@@ -3,11 +3,67 @@
 /* 深色模式由 html.dark 类控制（支持手动切换），而非仅跟随系统 */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* ============================================================
+   Greenstor 品牌色
+   brand-500 与 ink 直接取自官方 logo 的像素值，不是估色：
+     #42B341  图标绿      #464647  GREENSTOR 字标炭灰
+   注意：logo 绿配白字对比度仅 2.7:1，不足以承载文字，
+   因此按钮填充用 brand-700（白字 5.15:1，达 WCAG AA），
+   logo 原色 brand-500 只用于指示器、图标、焦点环等不承载文字处。
+   ============================================================ */
+@theme {
+  --color-brand-50: #f1f9f1;
+  --color-brand-100: #ddf0dd;
+  --color-brand-200: #bce2bc;
+  --color-brand-300: #92cf92;
+  --color-brand-400: #66bf66;
+  --color-brand-500: #42b341; /* ← 官方 logo 图标绿 */
+  --color-brand-600: #369438;
+  --color-brand-700: #2c7a2e; /* ← 按钮填充：白字达标 */
+  --color-brand-800: #245f26;
+  --color-brand-900: #1e4e20;
+  --color-brand-950: #0d2a0f;
+
+  --color-ink: #464647; /* ← 官方 logo 字标炭灰 */
+  --color-ink-soft: #657180; /* ← 官网正文次要灰蓝 */
+}
+
 :root {
   color-scheme: light dark;
 }
 .dark {
   color-scheme: dark;
+}
+
+/* 原生控件（复选框/单选/进度条）跟随品牌色，否则会露出浏览器默认蓝 */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'],
+progress {
+  accent-color: var(--color-brand-600);
+}
+
+/* 键盘焦点统一走品牌绿，鼠标点击不显示 */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-brand-500);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* SLA 状态导轨：借用机架设备指示灯的语言——
+   一列细窄的色条，让整屏工单里"时间告急的那几条"能被一眼扫到。
+   它编码时间压力，与状态标签（工作流阶段）分属两个信息通道，不重复。 */
+.sla-rail {
+  position: relative;
+}
+.sla-rail::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--rail, transparent);
 }
 
 body {
