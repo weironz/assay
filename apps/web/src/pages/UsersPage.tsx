@@ -34,6 +34,8 @@ export default function UsersPage() {
     roleNames: [] as string[],
   });
   const [msg, setMsg] = useState('');
+  const [editing, setEditing] = useState<UserRow | null>(null);
+  const [editRoles, setEditRoles] = useState<string[]>([]);
 
   const createMut = useMutation({
     mutationFn: async () => (await api.post('/users', form)).data,
@@ -59,6 +61,25 @@ export default function UsersPage() {
     mutationFn: async (id: string) => (await api.delete(`/users/${id}`)).data,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
   });
+
+  const roleMut = useMutation({
+    mutationFn: async () =>
+      (await api.patch(`/users/${editing!.id}`, { roleNames: editRoles })).data,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      setEditing(null);
+    },
+    onError: (e: any) => alert(e?.response?.data?.message || '保存失败'),
+  });
+
+  const openEdit = (u: UserRow) => {
+    setEditing(u);
+    setEditRoles(u.roles);
+  };
+  const toggleEditRole = (name: string) =>
+    setEditRoles((r) =>
+      r.includes(name) ? r.filter((x) => x !== name) : [...r, name],
+    );
 
   const resetPwd = (u: UserRow) => {
     const pwd = prompt(`为「${u.name}」设置新密码（≥6 位）：`);
@@ -174,6 +195,12 @@ export default function UsersPage() {
                 </td>
                 <td className="px-4 py-2 text-right space-x-3">
                   <button
+                    onClick={() => openEdit(u)}
+                    className="text-blue-600 hover:underline"
+                  >
+                    编辑角色
+                  </button>
+                  <button
                     onClick={() => toggleMut.mutate(u)}
                     className="text-blue-600 hover:underline"
                   >
@@ -197,6 +224,56 @@ export default function UsersPage() {
           </tbody>
         </table>
       </div>
+
+      {/* 编辑角色弹窗 */}
+      {editing && (
+        <div
+          className="fixed inset-0 z-30 flex items-center justify-center bg-black/40"
+          onClick={() => setEditing(null)}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 space-y-4"
+          >
+            <h2 className="text-lg font-semibold">
+              编辑角色 · {editing.name}
+            </h2>
+            <div className="space-y-2">
+              {roles?.map((r) => (
+                <label key={r.id} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={editRoles.includes(r.name)}
+                    onChange={() => toggleEditRole(r.name)}
+                  />
+                  {r.name}
+                  {r.description ? (
+                    <span className="text-gray-400">（{r.description}）</span>
+                  ) : null}
+                </label>
+              ))}
+            </div>
+            {editRoles.length === 0 && (
+              <p className="text-xs text-amber-600">至少选择一个角色</p>
+            )}
+            <div className="flex gap-2 justify-end pt-1">
+              <button
+                onClick={() => setEditing(null)}
+                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => roleMut.mutate()}
+                disabled={roleMut.isPending || editRoles.length === 0}
+                className="rounded-md bg-blue-600 text-white px-4 py-2 text-sm hover:bg-blue-700 disabled:opacity-60"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

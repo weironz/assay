@@ -6,8 +6,8 @@ import { useAuth } from '../stores/auth';
 export default function LoginPage() {
   const navigate = useNavigate();
   const fetchMe = useAuth((s) => s.fetchMe);
-  const [email, setEmail] = useState('admin@example.com');
-  const [password, setPassword] = useState('admin12345');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -81,9 +81,6 @@ export default function LoginPage() {
           >
             {loading ? '登录中…' : '登录'}
           </button>
-          <p className="text-xs text-gray-400 text-center">
-            默认管理员：admin@example.com / admin12345
-          </p>
         </form>
       </div>
     </div>
