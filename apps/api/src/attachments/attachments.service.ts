@@ -5,6 +5,8 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { createReadStream } from 'fs';
+import { unlink } from 'fs/promises';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
@@ -85,11 +87,17 @@ export class AttachmentsService {
     messageId?: string,
   ) {
     const objectKey = this.buildKey(ticketId ?? 'draft', file.originalname);
-    await this.storage.put({
-      key: objectKey,
-      body: file.buffer,
-      contentType: file.mimetype,
-    });
+    // multer 已把文件落到临时盘（见 controller 的 diskStorage），这里以流转存，
+    // 内存占用与文件大小无关。无论成败都要删临时文件，否则磁盘会被慢慢吃光。
+    try {
+      await this.storage.putStream({
+        key: objectKey,
+        body: createReadStream(file.path),
+        contentType: file.mimetype,
+      });
+    } finally {
+      await unlink(file.path).catch(() => undefined);
+    }
     const rec = await this.prisma.ticketAttachment.create({
       data: {
         ticketId,
@@ -120,8 +128,9 @@ export class AttachmentsService {
     if (!rec) throw new NotFoundException('附件不存在');
     // 草稿附件(ticketId 为空)：登录用户即可访问；已挂工单的按工单可见性校验
     if (rec.ticketId) await this.assertCanView(user, rec.ticketId);
-    const body = await this.storage.get(rec.objectKey);
-    return { rec, body };
+    // 返回流而不是 Buffer：512MB 的附件整包读进内存下载一次就够呛
+    const stream = await this.storage.getStream(rec.objectKey);
+    return { rec, stream };
   }
 
   /** 将草稿附件关联到新建的工单（仅本人上传的草稿） */

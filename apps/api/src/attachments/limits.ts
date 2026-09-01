@@ -6,14 +6,21 @@
  */
 
 /**
- * 单个附件上限。整条链路目前是「整包进内存」：multer 缓冲到内存 →
- * StorageDriver.put 收 Buffer → 下载 res.send(Buffer)。调到 GB 级会 OOM，
- * 要支持超大文件得先改流式上传。改这里要同步改：
+ * 单个附件上限。
+ *
+ * 整条链路是流式的：multer 落临时盘 → 以流分片传给对象存储 → 下载直接转发流。
+ * 内存占用与文件大小无关（约 32MB/并发），所以这个数受限的是**磁盘**而不是内存：
+ * 上传期间临时文件会占盘，N 个并发 ≈ N × 上限。生产 /data 约 24G 可用。
+ *
+ * 改这里要同步改：
  * - apps/web/src/lib/attachments.ts 的 MAX_ATTACHMENT_MB
  * - apps/web/nginx.conf 的 client_max_body_size
  */
-export const MAX_ATTACHMENT_MB = 100;
+export const MAX_ATTACHMENT_MB = 512;
 export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
+
+/** 上传中转目录。留空则用系统临时目录 */
+export const UPLOAD_TMP_DIR = process.env.UPLOAD_TMP_DIR || '';
 
 /** 显式添加的附件允许的扩展名 */
 export const ALLOWED_EXTS = [

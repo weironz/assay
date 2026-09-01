@@ -7,12 +7,11 @@
 export const MAX_ATTACHMENTS = 5;
 
 /**
- * 单个附件上限。目前整条上传链路是「整包进内存」——multer 缓冲到内存、
- * 再整块交给 S3 驱动，下载同理。所以这个数不能随便调大：调到 GB 级会直接
- * 把 API 容器打爆。真要支持超大文件得先改成流式上传（见 README）。
- * 改这里的同时必须改 apps/web/nginx.conf 的 client_max_body_size。
+ * 单个附件上限。服务端是流式处理，内存不随文件大小增长；受限的是上传
+ * 期间的临时磁盘。改这里必须同步改 apps/api/src/attachments/limits.ts
+ * 和 apps/web/nginx.conf 的 client_max_body_size，三处保持一致。
  */
-export const MAX_ATTACHMENT_MB = 100;
+export const MAX_ATTACHMENT_MB = 512;
 export const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024;
 
 /** 允许的扩展名，小写不带点 */

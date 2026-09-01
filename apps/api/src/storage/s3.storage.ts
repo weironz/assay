@@ -6,8 +6,14 @@ import {
   HeadBucketCommand,
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { StorageDriver, PutObjectInput } from './storage.interface';
+import type { Readable } from 'stream';
+import {
+  StorageDriver,
+  PutObjectInput,
+  PutStreamInput,
+} from './storage.interface';
 
 /**
  * S3 兼容实现，指向 RustFS（也可指向 Garage / 云 OSS，仅换 endpoint）。
@@ -50,6 +56,34 @@ export class S3Storage implements StorageDriver {
         ContentType: input.contentType,
       }),
     );
+  }
+
+  /**
+   * 分片上传：内存占用约等于 partSize × queueSize（这里 8MB × 4 = 32MB），
+   * 与文件大小无关。单次 PutObject 传大文件会把整包读进内存。
+   */
+  async putStream(input: PutStreamInput): Promise<void> {
+    const upload = new Upload({
+      client: this.client,
+      params: {
+        Bucket: this.bucket,
+        Key: input.key,
+        Body: input.body,
+        ContentType: input.contentType,
+      },
+      partSize: 8 * 1024 * 1024,
+      queueSize: 4,
+      // 失败时把已上传的分片清掉，否则会在桶里留下收费的垃圾分片
+      leavePartsOnError: false,
+    });
+    await upload.done();
+  }
+
+  async getStream(key: string): Promise<Readable> {
+    const res = await this.client.send(
+      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
+    );
+    return res.Body as Readable;
   }
 
   async get(key: string): Promise<Buffer> {

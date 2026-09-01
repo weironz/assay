@@ -1,6 +1,12 @@
-import { promises as fs } from 'fs';
+import { createReadStream, createWriteStream, promises as fs } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { StorageDriver, PutObjectInput } from './storage.interface';
+import type { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import {
+  StorageDriver,
+  PutObjectInput,
+  PutStreamInput,
+} from './storage.interface';
 
 /**
  * 本地文件系统实现。附件写入 baseDir，DB 只存 key（相对路径）。
@@ -26,8 +32,19 @@ export class LocalFsStorage implements StorageDriver {
     await fs.writeFile(path, input.body);
   }
 
+  async putStream(input: PutStreamInput): Promise<void> {
+    const path = this.full(input.key);
+    await fs.mkdir(dirname(path), { recursive: true });
+    // pipeline 会在任一端出错时清理两端，手写 pipe 容易漏掉句柄
+    await pipeline(input.body, createWriteStream(path));
+  }
+
   async get(key: string): Promise<Buffer> {
     return fs.readFile(this.full(key));
+  }
+
+  async getStream(key: string): Promise<Readable> {
+    return createReadStream(this.full(key));
   }
 
   async presignGet(key: string): Promise<string> {
