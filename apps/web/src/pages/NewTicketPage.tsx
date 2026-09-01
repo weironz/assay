@@ -161,7 +161,7 @@ export default function NewTicketPage() {
       <h1 className="text-xl font-semibold">{t('ticketNew.title')}</h1>
       <form
         onSubmit={submit}
-        className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 space-y-4"
+        className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-4 sm:p-6 space-y-4"
       >
         <div>
           <label className="block text-sm text-gray-500 mb-1">
@@ -189,7 +189,8 @@ export default function NewTicketPage() {
         {/* 附件：按钮 + 右侧规则说明。说明文字由 lib/attachments 的常量拼出，
             改限制时文案自动跟着变，不会出现「写着支持却传不上」 */}
         <div>
-          <div className="flex flex-wrap items-center gap-3">
+          {/* 手机上按钮和说明并排会把说明挤成一条溢出屏幕的长串，改为竖排 */}
+          <div className="flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
             <button
               type="button"
               disabled={drafts.length >= MAX_ATTACHMENTS}
@@ -199,7 +200,7 @@ export default function NewTicketPage() {
               <span aria-hidden>⬆</span>
               {t('ticketNew.addFile')}
             </button>
-            <p className="min-w-0 flex-1 text-xs leading-relaxed text-gray-400">
+            <p className="w-full min-w-0 break-words text-xs leading-relaxed text-gray-400 sm:flex-1">
               {t('ticketNew.attachmentHint', {
                 exts: EXT_LIST_TEXT,
                 mb: MAX_ATTACHMENT_MB,
@@ -242,7 +243,7 @@ export default function NewTicketPage() {
             </ul>
           )}
         </div>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           {/* 优先级与类型必选：不给默认值，逼用户自己判断。
               留个默认「中」等于大家都不填，SLA 就失去意义了 */}
           <div>
@@ -372,7 +373,7 @@ export default function NewTicketPage() {
               ))}
             </select>
           </div>
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="block text-sm text-gray-500 mb-1">
               {t('ticketNew.serialNumber')}
             </label>
@@ -388,7 +389,7 @@ export default function NewTicketPage() {
           </div>
 
           {/* 联系方式：只读摘要 + 编辑按钮，具体字段在弹窗里填。整体选填 */}
-          <div className="col-span-2">
+          <div className="sm:col-span-2">
             <label className="block text-sm text-gray-500 mb-1">
               {t('ticketNew.contact')}
               <span className="ml-1 text-xs text-gray-400">

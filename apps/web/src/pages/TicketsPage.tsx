@@ -149,10 +149,87 @@ export default function TicketsPage() {
         </select>
       </div>
 
-      {/* 列表 */}
+      {/* 手机：卡片列表。10 列的表格在 375px 屏上只能左右拖着看，
+          等于没法用；改成每单一张卡，把最要紧的几项竖排出来。
+          桌面仍用表格——宽屏下表格的对齐和扫读效率是卡片比不了的 */}
+      <div className="space-y-2 lg:hidden">
+        {isLoading && (
+          <p className="py-8 text-center text-gray-400">{t('common.loading')}</p>
+        )}
+        {data?.items.map((ticket) => (
+          <div
+            key={ticket.id}
+            className="sla-rail rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900"
+            style={
+              {
+                '--rail': slaRailColor(ticket.slaDueAt, ticket.status),
+              } as React.CSSProperties
+            }
+          >
+            <div className="mb-1.5 flex items-center gap-2">
+              <span
+                className={`inline-block whitespace-nowrap rounded px-2 py-0.5 text-xs ${STATUS_COLOR[ticket.status]}`}
+              >
+                {statusLabel(t, ticket.status)}
+              </span>
+              <span className={`text-xs ${PRIORITY_COLOR[ticket.priority]}`}>
+                {priorityLabel(t, ticket.priority)}
+              </span>
+              <span className="ml-auto">
+                <SlaBadge slaDueAt={ticket.slaDueAt} status={ticket.status} />
+              </span>
+            </div>
+            <Link
+              to={`/tickets/${ticket.id}`}
+              className="block font-medium text-sky-600 dark:text-sky-400"
+            >
+              {ticket.title}
+            </Link>
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400">
+              <button
+                type="button"
+                onClick={() => copy(ticket.ticketNo)}
+                title={t('tickets.copyTicketNo')}
+                className="font-mono"
+              >
+                {ticket.ticketNo}
+              </button>
+              {ticket.category && <span>· {ticket.category.name}</span>}
+              <span>· {fmt.compact(ticket.createdAt)}</span>
+            </div>
+            <div className="mt-2 flex items-center gap-3 border-t border-gray-100 pt-2 text-xs dark:border-gray-800">
+              <span className="text-gray-400">
+                {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
+              </span>
+              <Link
+                to={`/tickets/${ticket.id}`}
+                className="ml-auto text-sky-600 dark:text-sky-400"
+              >
+                {t('common.view')}
+              </Link>
+              {(isAdmin || ticket.requester?.id === userId) && (
+                <button
+                  onClick={() => {
+                    if (confirm(t('tickets.confirmDelete', { no: ticket.ticketNo })))
+                      del.mutate(ticket.id);
+                  }}
+                  className="text-red-500"
+                >
+                  {t('common.delete')}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {data && data.items.length === 0 && (
+          <p className="py-8 text-center text-gray-400">{t('tickets.empty')}</p>
+        )}
+      </div>
+
+      {/* 桌面：表格 */}
       {/* overflow-x-auto 而非 hidden：列名长度随语言变化（"处理人" vs
           "ผู้รับผิดชอบ"），窄屏下应可横向滚动而不是把右侧列裁掉 */}
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-x-auto">
+      <div className="hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-x-auto lg:block">
         <table className="w-full min-w-[64rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>

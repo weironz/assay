@@ -105,7 +105,8 @@ export default function LanguageSwitcher() {
         className="inline-flex items-center gap-1.5 rounded-md border border-gray-300 bg-white px-2 py-1 text-xs font-medium text-gray-600 shadow-sm transition-colors hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:bg-gray-800 dark:hover:text-gray-100"
       >
         <GlobeIcon />
-        <span className="whitespace-nowrap">{current.label}</span>
+        {/* 窄屏只留地球图标：顶栏那点宽度留给头像和通知更值 */}
+        <span className="hidden whitespace-nowrap sm:inline">{current.label}</span>
         <ChevronIcon open={open} />
       </button>
 

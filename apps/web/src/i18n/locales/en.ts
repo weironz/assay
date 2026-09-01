@@ -54,6 +54,7 @@ const en = {
     queues: 'Queues',
     profile: 'Profile',
     signOut: 'Sign out',
+    toggleSidebar: 'Toggle sidebar',
     noAccess: 'You do not have permission to view this page.',
   },
 

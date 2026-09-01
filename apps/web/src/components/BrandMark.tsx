@@ -10,8 +10,8 @@ import { useTranslation } from 'react-i18next';
 export default function BrandMark({
   variant = 'bar',
 }: {
-  /** bar：侧边栏横排；stack：登录页竖排放大 */
-  variant?: 'bar' | 'stack';
+  /** bar：侧边栏横排；stack：登录页竖排放大；mark：仅图标，给窄屏顶栏 */
+  variant?: 'bar' | 'stack' | 'mark';
 }) {
   const { t } = useTranslation();
   const lockup = (w: number) => (
@@ -32,6 +32,20 @@ export default function BrandMark({
       />
     </>
   );
+
+  // 手机顶栏横向就那么点地方，副标题必须让位；lockup 本身已含品牌名，
+  // 去掉「工单系统」不会让人认不出这是哪个产品
+  if (variant === 'mark') {
+    return (
+      <Link
+        to="/dashboard"
+        className="flex items-center"
+        aria-label={t('brand.ariaHome')}
+      >
+        {lockup(96)}
+      </Link>
+    );
+  }
 
   if (variant === 'stack') {
     return (

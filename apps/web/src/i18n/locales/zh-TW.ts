@@ -50,6 +50,7 @@ const zhTW: Resource = {
     queues: '佇列管理',
     profile: '個人中心',
     signOut: '登出',
+    toggleSidebar: '展開/收合側邊欄',
     noAccess: '您沒有權限檢視此頁面',
   },
 

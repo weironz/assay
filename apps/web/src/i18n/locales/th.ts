@@ -50,6 +50,7 @@ const th: Resource = {
     queues: 'จัดการคิว',
     profile: 'โปรไฟล์',
     signOut: 'ออกจากระบบ',
+    toggleSidebar: 'เปิด/ปิดแถบด้านข้าง',
     noAccess: 'คุณไม่มีสิทธิ์เข้าถึงหน้านี้',
   },
 

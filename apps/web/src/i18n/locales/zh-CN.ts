@@ -50,6 +50,7 @@ const zhCN: Resource = {
     queues: '队列管理',
     profile: '个人中心',
     signOut: '退出登录',
+    toggleSidebar: '展开/收起侧边栏',
     noAccess: '无权访问该页面',
   },
 
