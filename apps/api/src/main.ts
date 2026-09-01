@@ -16,12 +16,7 @@ async function bootstrap() {
 
   const expressApp = app.getHttpAdapter().getInstance();
 
-  // 关闭公开自助注册：拦截 HTTP 注册路由（管理员经服务端 auth.api 建号不受影响）
-  expressApp.post(/^\/api\/auth\/sign-up\//, (_req: any, res: any) =>
-    res.status(403).json({ error: '已关闭自助注册，请联系管理员创建账号' }),
-  );
-
-  // better-auth 路由（登录/登出/会话等）挂在 body parser 之前
+  // better-auth 路由（登录/注册/登出/会话/邮箱验证/密码重置等）挂在 body parser 之前
   expressApp.all(/^\/api\/auth\//, toNodeHandler(auth));
 
   // 其余接口恢复 JSON / 表单解析

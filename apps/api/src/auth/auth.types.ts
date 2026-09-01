@@ -4,6 +4,8 @@ export interface AuthUser {
   email: string;
   name: string;
   username: string | null;
+  image: string | null;
+  emailVerified: boolean;
   status: string;
   roles: string[]; // 角色名，如 ['admin']
   permissions: string[]; // 权限码集合，如 ['ticket:create', ...]

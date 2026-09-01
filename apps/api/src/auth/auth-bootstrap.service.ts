@@ -44,6 +44,10 @@ export class AuthBootstrapService implements OnModuleInit {
       where: { id: user.id },
       data: { username: user.username ?? 'admin', emailVerified: true },
     });
+    // 只保留 admin 角色（注册钩子会给新用户默认加 requester）
+    await this.prisma.userRole.deleteMany({
+      where: { userId: user.id, roleId: { not: adminRole.id } },
+    });
     await this.prisma.userRole.upsert({
       where: { userId_roleId: { userId: user.id, roleId: adminRole.id } },
       update: {},

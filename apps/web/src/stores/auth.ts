@@ -6,6 +6,8 @@ export interface AuthUser {
   email: string;
   name: string;
   username: string | null;
+  image: string | null;
+  emailVerified: boolean;
   status: string;
   roles: string[];
   permissions: string[];

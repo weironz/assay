@@ -44,6 +44,8 @@ export class AuthService {
       email: user.email,
       name: user.name,
       username: user.username,
+      image: user.image,
+      emailVerified: user.emailVerified,
       status: user.status,
       roles,
       permissions,

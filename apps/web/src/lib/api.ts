@@ -8,6 +8,11 @@ export const api = axios.create({
   withCredentials: true,
 });
 
+/** 后端源站地址：把服务端返回的绝对路径（如 /api/avatars/x.png）拼成可访问 URL */
+export const apiOrigin = BASE;
+export const absUrl = (path?: string | null) =>
+  !path ? '' : /^https?:\/\//.test(path) ? path : `${BASE}${path}`;
+
 // 401 时广播事件，由 App 统一清理登录态并跳转（避免与 store 循环依赖）
 api.interceptors.response.use(
   (res) => res,

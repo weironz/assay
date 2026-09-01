@@ -1,10 +1,9 @@
-import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../stores/auth';
 import { signOut } from '../lib/auth-client';
+import { absUrl } from '../lib/api';
 import NotificationBell from './NotificationBell';
 import ThemeToggle from './ThemeToggle';
-import ChangePasswordModal from './ChangePasswordModal';
 
 interface MenuItem {
   to: string;
@@ -22,7 +21,6 @@ const MENU: MenuItem[] = [
 export default function AppLayout() {
   const { user, has, clear } = useAuth();
   const navigate = useNavigate();
-  const [showPwd, setShowPwd] = useState(false);
 
   const logout = async () => {
     await signOut();
@@ -61,18 +59,29 @@ export default function AppLayout() {
         <header className="h-14 flex items-center justify-end gap-4 px-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
           <ThemeToggle />
           <NotificationBell />
-          <span className="text-sm text-gray-500">
-            {user?.name}
-            <span className="ml-2 text-xs text-gray-400">
-              [{user?.roles.join(', ')}]
-            </span>
-          </span>
-          <button
-            onClick={() => setShowPwd(true)}
-            className="text-sm text-gray-600 dark:text-gray-300 hover:text-blue-600"
+          <NavLink
+            to="/profile"
+            className="flex items-center gap-2 text-sm text-gray-500 hover:text-blue-600"
+            title="个人中心"
           >
-            修改密码
-          </button>
+            {user?.image ? (
+              <img
+                src={absUrl(user.image)}
+                alt=""
+                className="w-7 h-7 rounded-full object-cover border border-gray-200 dark:border-gray-700"
+              />
+            ) : (
+              <span className="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs">
+                {(user?.name || user?.email || '?').slice(0, 1).toUpperCase()}
+              </span>
+            )}
+            <span>
+              {user?.name}
+              <span className="ml-2 text-xs text-gray-400">
+                [{user?.roles.join(', ')}]
+              </span>
+            </span>
+          </NavLink>
           <button
             onClick={logout}
             className="text-sm text-gray-600 dark:text-gray-300 hover:text-red-600"
@@ -84,7 +93,6 @@ export default function AppLayout() {
           <Outlet />
         </main>
       </div>
-      {showPwd && <ChangePasswordModal onClose={() => setShowPwd(false)} />}
     </div>
   );
 }
