@@ -1,4 +1,7 @@
-# 生产环境实际使用的 compose（服务器 /data/assay/docker-compose.yaml 的副本）
+# 场景 2：带 Traefik 的域名部署（也是生产环境实际在用的这一份）
+#
+# 域名由 .env 的 PUBLIC_DOMAIN 决定；不设则回落到 assay.cloudcele.com，
+# 因此与服务器上那份的渲染结果一致。部署步骤见 docs/05-部署文档.md。
 #
 # 与同目录 docker-compose.yaml 的区别：
 #   - web 不暴露端口，改由 Traefik 按域名路由并签发证书（外部网络 traefik-network）
@@ -83,7 +86,7 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-network"
-      - "traefik.http.routers.assay.rule=Host(`assay.cloudcele.com`)"
+      - "traefik.http.routers.assay.rule=Host(`${PUBLIC_DOMAIN:-assay.cloudcele.com}`)"
       - "traefik.http.routers.assay.entrypoints=websecure"
       - "traefik.http.routers.assay.tls=true"
       - "traefik.http.routers.assay.tls.certresolver=letsencrypt"

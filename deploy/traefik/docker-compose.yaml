@@ -1,0 +1,47 @@
+# Traefik 反向代理 —— 场景 2 的前置组件
+#
+# 已经有 Traefik 的话跳过这份，只要确保：
+#   1. 存在名为 traefik-network 的外部网络
+#   2. 有名为 websecure 的 HTTPS 入口
+#   3. 有名为 letsencrypt 的证书解析器
+# 这三个名字要和 assay 的 docker-compose.traefik.yaml 里的标签对得上。
+#
+# 用法：
+#   docker network create traefik-network
+#   cp .env.example .env && 填入 ACME_EMAIL
+#   docker compose up -d
+
+services:
+  traefik:
+    image: traefik:v3.3
+    restart: always
+    command:
+      - "--providers.docker=true"
+      # 只暴露显式打了 traefik.enable=true 的容器，避免把内部服务也代理出去
+      - "--providers.docker.exposedbydefault=false"
+      - "--providers.docker.network=traefik-network"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # 80 端口只用于跳转和 ACME 校验，业务一律走 HTTPS
+      - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?set ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # 只读挂载 docker socket：Traefik 只需要读容器标签
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # 证书必须持久化，否则每次重启都重新申请，很快会撞上 Let's Encrypt 限流
+      - letsencrypt:/letsencrypt
+    networks: [traefik-network]
+
+networks:
+  traefik-network:
+    external: true
+
+volumes:
+  letsencrypt:
