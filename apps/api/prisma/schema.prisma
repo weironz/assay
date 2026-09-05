@@ -89,6 +89,7 @@ model User {
   savedViews           SavedView[]
   ticketParticipations TicketParticipant[]
   mentionedInMessages  TicketMessageMention[]
+  apiTokens            ApiToken[]
 
   @@map("users")
 }
@@ -107,6 +108,27 @@ model Session {
 
   @@index([userId])
   @@map("sessions")
+}
+
+/// 给 CLI、MCP 和自动化脚本使用的个人 API Token。
+/// 完整密钥只在创建/轮换响应里出现，数据库仅保存 SHA-256 哈希。
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  name       String
+  tokenHash  String    @unique @map("token_hash")
+  prefix     String
+  scopes     String[]
+  expiresAt  DateTime? @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  revokedAt  DateTime? @map("revoked_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+  @@index([tokenHash])
+  @@map("api_tokens")
 }
 
 model Account {

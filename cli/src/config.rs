@@ -9,6 +9,8 @@ pub struct Config {
     pub base_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_cookie: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_token: Option<String>,
 }
 
 pub struct ConfigStore {

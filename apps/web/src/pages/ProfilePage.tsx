@@ -1,4 +1,4 @@
-import { FormEvent, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { api, absUrl } from '../lib/api';
@@ -6,321 +6,60 @@ import { authClient, signOut } from '../lib/auth-client';
 import { useAuth } from '../stores/auth';
 import { type Msg, useMsg } from '../lib/messages';
 
-const inputCls =
-  'w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm';
-const card =
-  'bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-5 space-y-3';
+const inputCls = 'w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:focus:ring-brand-950';
+const card = 'space-y-4 rounded-lg border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-gray-900';
+type Section = 'account' | 'security' | 'tokens';
+type ApiToken = { id: string; name: string; prefix: string; scopes: string[]; expiresAt: string | null; lastUsedAt: string | null; revokedAt: string | null; createdAt: string; status: 'ACTIVE' | 'REVOKED' | 'EXPIRED' };
+type RevealedToken = ApiToken & { token: string };
+const tokenTime = (value: string | null, locale: string, fallback: string) => value ? new Date(value).toLocaleString(locale) : fallback;
 
 export default function ProfilePage() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const showMsg = useMsg();
   const navigate = useNavigate();
   const { user, fetchMe, clear } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-
+  const [section, setSection] = useState<Section>('account');
   const [name, setName] = useState(user?.name ?? '');
-  const [msg, setMsg] = useState<Msg>(null);
-  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<Msg>(null); const [busy, setBusy] = useState(false);
+  const [cur, setCur] = useState(''); const [next, setNext] = useState(''); const [confirm, setConfirm] = useState('');
+  const [pwdMsg, setPwdMsg] = useState<Msg>(null); const [pwdOk, setPwdOk] = useState(false);
+  const [delPwd, setDelPwd] = useState(''); const [delMsg, setDelMsg] = useState<Msg>(null); const [confirmDel, setConfirmDel] = useState(false);
+  const [tokens, setTokens] = useState<ApiToken[]>([]); const [tokenBusy, setTokenBusy] = useState(false);
+  const [tokenName, setTokenName] = useState(''); const [tokenScopes, setTokenScopes] = useState<string[]>(['ticket:read']); const [expiry, setExpiry] = useState('90');
+  const [revealed, setRevealed] = useState<RevealedToken | null>(null); const [tokenError, setTokenError] = useState('');
 
-  // 修改密码
-  const [cur, setCur] = useState('');
-  const [next, setNext] = useState('');
-  const [confirm, setConfirm] = useState('');
-  const [pwdMsg, setPwdMsg] = useState<Msg>(null);
-  // 密码提示是成功还是失败，用于着色——不能再靠匹配「成功」二字
-  const [pwdOk, setPwdOk] = useState(false);
-
-  // 删除账号
-  const [delPwd, setDelPwd] = useState('');
-  const [delMsg, setDelMsg] = useState<Msg>(null);
-  const [confirmDel, setConfirmDel] = useState(false);
-
+  const loadTokens = async () => {
+    try { const { data } = await api.get<ApiToken[]>('/me/api-tokens'); setTokens(data); }
+    catch (e: any) { setTokenError(e?.response?.data?.message || t('profile.tokenLoadFailed')); }
+  };
+  useEffect(() => { if (section === 'tokens') void loadTokens(); }, [section]);
   if (!user) return <div className="text-gray-400">{t('common.loading')}</div>;
-
   const initial = (user.name || user.email).slice(0, 1).toUpperCase();
-
+  const toggleScope = (scope: string) => setTokenScopes((current) => {
+    if (scope === 'ticket:read' && current.includes('ticket:comment')) return current;
+    return current.includes(scope) ? current.filter((value) => value !== scope) : [...current, scope === 'ticket:comment' ? 'ticket:read' : scope];
+  });
   const uploadAvatar = async (file?: File | null) => {
-    if (!file) return;
-    setMsg(null);
-    setBusy(true);
-    try {
-      const fd = new FormData();
-      fd.append('file', file);
-      const { data } = await api.post('/me/avatar', fd);
-      const res = await authClient.updateUser({ image: data.url });
-      if (res.error) throw new Error(res.error.message);
-      await fetchMe();
-      setMsg({ key: 'profile.avatarUpdated' });
-    } catch (e: any) {
-      const raw = e?.response?.data?.message || e?.message;
-      setMsg(raw ? { raw } : { key: 'profile.errAvatarFailed' });
-    } finally {
-      setBusy(false);
-    }
+    if (!file) return; setMsg(null); setBusy(true);
+    try { const fd = new FormData(); fd.append('file', file); const { data } = await api.post('/me/avatar', fd); const res = await authClient.updateUser({ image: data.url }); if (res.error) throw new Error(res.error.message); await fetchMe(); setMsg({ key: 'profile.avatarUpdated' }); }
+    catch (e: any) { const raw = e?.response?.data?.message || e?.message; setMsg(raw ? { raw } : { key: 'profile.errAvatarFailed' }); }
+    finally { setBusy(false); }
   };
+  const saveName = async (e: FormEvent) => { e.preventDefault(); setMsg(null); if (!name.trim()) return setMsg({ key: 'profile.errNameRequired' }); setBusy(true); try { const res = await authClient.updateUser({ name: name.trim() }); if (res.error) throw new Error(res.error.message); await fetchMe(); setMsg({ key: 'profile.saved' }); } catch (e: any) { setMsg(e?.message ? { raw: e.message } : { key: 'profile.errSaveFailed' }); } finally { setBusy(false); } };
+  const changePwd = async (e: FormEvent) => { e.preventDefault(); setPwdMsg(null); setPwdOk(false); if (next.length < 6) return setPwdMsg({ key: 'profile.errPasswordTooShort' }); if (next !== confirm) return setPwdMsg({ key: 'profile.errPasswordMismatch' }); setBusy(true); try { const res = await authClient.changePassword({ currentPassword: cur, newPassword: next, revokeOtherSessions: true }); if (res.error) { setPwdMsg(res.error.message ? { raw: res.error.message } : { key: 'profile.errWrongPassword' }); return; } setCur(''); setNext(''); setConfirm(''); setPwdOk(true); setPwdMsg({ key: 'profile.passwordChanged' }); } catch (e: any) { setPwdMsg(e?.message ? { raw: e.message } : { key: 'profile.errChangeFailed' }); } finally { setBusy(false); } };
+  const deleteAccount = async () => { setDelMsg(null); setBusy(true); try { const res = await authClient.deleteUser({ password: delPwd }); if (res.error) { setDelMsg(res.error.message ? { raw: res.error.message } : { key: 'profile.errDeleteFailed' }); return; } await signOut().catch(() => {}); clear(); navigate('/login', { replace: true }); } catch (e: any) { setDelMsg(e?.message ? { raw: e.message } : { key: 'profile.errDeleteFailed' }); } finally { setBusy(false); } };
+  const createToken = async (e: FormEvent) => { e.preventDefault(); setTokenError(''); if (!tokenName.trim()) return setTokenError(t('profile.tokenNameRequired')); setTokenBusy(true); try { const { data } = await api.post<RevealedToken>('/me/api-tokens', { name: tokenName.trim(), scopes: tokenScopes, expiresInDays: expiry ? Number(expiry) : undefined }); setRevealed(data); setTokenName(''); await loadTokens(); } catch (e: any) { setTokenError(e?.response?.data?.message || t('profile.tokenCreateFailed')); } finally { setTokenBusy(false); } };
+  const rotateToken = async (id: string) => { if (!window.confirm(t('profile.tokenRotateConfirm'))) return; setTokenBusy(true); setTokenError(''); try { const { data } = await api.post<RevealedToken>(`/me/api-tokens/${id}/rotate`); setRevealed(data); await loadTokens(); } catch (e: any) { setTokenError(e?.response?.data?.message || t('profile.tokenRotateFailed')); } finally { setTokenBusy(false); } };
+  const revokeToken = async (id: string) => { if (!window.confirm(t('profile.tokenRevokeConfirm'))) return; setTokenBusy(true); setTokenError(''); try { await api.delete(`/me/api-tokens/${id}`); await loadTokens(); } catch (e: any) { setTokenError(e?.response?.data?.message || t('profile.tokenRevokeFailed')); } finally { setTokenBusy(false); } };
+  const copy = async () => { if (revealed) await navigator.clipboard.writeText(revealed.token); };
+  const tabs: { id: Section; label: string }[] = [{ id: 'account', label: t('profile.tabAccount') }, { id: 'security', label: t('profile.tabSecurity') }, { id: 'tokens', label: t('profile.tabTokens') }];
 
-  const saveName = async (e: FormEvent) => {
-    e.preventDefault();
-    setMsg(null);
-    if (!name.trim()) return setMsg({ key: 'profile.errNameRequired' });
-    setBusy(true);
-    try {
-      const res = await authClient.updateUser({ name: name.trim() });
-      if (res.error) throw new Error(res.error.message);
-      await fetchMe();
-      setMsg({ key: 'profile.saved' });
-    } catch (e: any) {
-      setMsg(e?.message ? { raw: e.message } : { key: 'profile.errSaveFailed' });
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const changePwd = async (e: FormEvent) => {
-    e.preventDefault();
-    setPwdMsg(null);
-    setPwdOk(false);
-    if (next.length < 6)
-      return setPwdMsg({ key: 'profile.errPasswordTooShort' });
-    if (next !== confirm) return setPwdMsg({ key: 'profile.errPasswordMismatch' });
-    setBusy(true);
-    try {
-      const res = await authClient.changePassword({
-        currentPassword: cur,
-        newPassword: next,
-        revokeOtherSessions: true,
-      });
-      if (res.error) {
-        setPwdMsg(
-          res.error.message
-            ? { raw: res.error.message }
-            : { key: 'profile.errWrongPassword' },
-        );
-        return;
-      }
-      setCur('');
-      setNext('');
-      setConfirm('');
-      setPwdOk(true);
-      setPwdMsg({ key: 'profile.passwordChanged' });
-    } catch (e: any) {
-      setPwdMsg(
-        e?.message ? { raw: e.message } : { key: 'profile.errChangeFailed' },
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const deleteAccount = async () => {
-    setDelMsg(null);
-    setBusy(true);
-    try {
-      const res = await authClient.deleteUser({ password: delPwd });
-      if (res.error) {
-        setDelMsg(
-          res.error.message
-            ? { raw: res.error.message }
-            : { key: 'profile.errDeleteFailed' },
-        );
-        return;
-      }
-      await signOut().catch(() => {});
-      clear();
-      navigate('/login', { replace: true });
-    } catch (e: any) {
-      setDelMsg(
-        e?.message ? { raw: e.message } : { key: 'profile.errDeleteFailed' },
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="max-w-2xl space-y-5">
-      <h1 className="text-xl font-semibold">{t('profile.title')}</h1>
-
-      {/* 头像与基本资料 */}
-      <div className={card}>
-        <h2 className="text-sm font-medium text-gray-500">
-          {t('profile.avatarSection')}
-        </h2>
-        <div className="flex items-center gap-4">
-          {user.image ? (
-            <img
-              src={absUrl(user.image)}
-              alt={t('profile.avatarAlt')}
-              className="w-16 h-16 rounded-full object-cover border border-gray-200 dark:border-gray-700"
-            />
-          ) : (
-            <div className="w-16 h-16 rounded-full bg-brand-700 text-white flex items-center justify-center text-xl font-medium">
-              {initial}
-            </div>
-          )}
-          <div>
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={busy}
-              className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1.5 text-sm hover:bg-gray-50 dark:hover:bg-gray-800"
-            >
-              {t('profile.changeAvatar')}
-            </button>
-            <p className="text-xs text-gray-400 mt-1">
-              {t('profile.avatarHint')}
-            </p>
-            <input
-              ref={fileRef}
-              type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp"
-              hidden
-              onChange={(e) => uploadAvatar(e.target.files?.[0])}
-            />
-          </div>
-        </div>
-
-        <form onSubmit={saveName} className="space-y-3 pt-2">
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">
-              {t('profile.nameLabel')}
-            </label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={inputCls}
-            />
-          </div>
-          <div className="text-sm text-gray-500">
-            {t('profile.emailLabel')}{' '}
-            <span className="text-gray-700 dark:text-gray-300">
-              {user.email}
-            </span>
-            {user.emailVerified ? (
-              <span className="ml-2 text-green-600 text-xs">
-                {t('profile.verified')}
-              </span>
-            ) : (
-              <span className="ml-2 text-amber-600 text-xs">
-                {t('profile.unverified')}
-              </span>
-            )}
-          </div>
-          <div className="text-sm text-gray-500">
-            {t('profile.rolesLabel')}{' '}
-            <span className="text-gray-700 dark:text-gray-300">
-              {user.roles.join(', ')}
-            </span>
-          </div>
-          {msg && <p className="text-sm text-green-600">{showMsg(msg)}</p>}
-          <button
-            type="submit"
-            disabled={busy}
-            className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
-          >
-            {t('profile.saveProfile')}
-          </button>
-        </form>
-      </div>
-
-      {/* 修改密码 */}
-      <form onSubmit={changePwd} className={card}>
-        <h2 className="text-sm font-medium text-gray-500">
-          {t('profile.changePassword')}
-        </h2>
-        <input
-          type="password"
-          placeholder={t('profile.currentPassword')}
-          aria-label={t('profile.currentPassword')}
-          required
-          value={cur}
-          onChange={(e) => setCur(e.target.value)}
-          className={inputCls}
-          autoComplete="current-password"
-        />
-        <input
-          type="password"
-          placeholder={t('profile.newPassword')}
-          aria-label={t('profile.newPassword')}
-          required
-          value={next}
-          onChange={(e) => setNext(e.target.value)}
-          className={inputCls}
-          autoComplete="new-password"
-        />
-        <input
-          type="password"
-          placeholder={t('profile.confirmPassword')}
-          aria-label={t('profile.confirmPassword')}
-          required
-          value={confirm}
-          onChange={(e) => setConfirm(e.target.value)}
-          className={inputCls}
-          autoComplete="new-password"
-        />
-        {pwdMsg && (
-          <p className={`text-sm ${pwdOk ? 'text-green-600' : 'text-red-500'}`}>
-            {showMsg(pwdMsg)}
-          </p>
-        )}
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60"
-        >
-          {t('profile.confirmChange')}
-        </button>
-      </form>
-
-      {/* 危险操作 */}
-      <div className="bg-white dark:bg-gray-900 border border-red-200 dark:border-red-900 rounded-lg p-5 space-y-3">
-        <h2 className="text-sm font-medium text-red-600">
-          {t('profile.deleteAccount')}
-        </h2>
-        <p className="text-sm text-gray-500">
-          {t('profile.deleteWarning')}
-          <br />
-          {t('profile.deleteWarning2')}
-        </p>
-        {!confirmDel ? (
-          <button
-            onClick={() => setConfirmDel(true)}
-            className="rounded-md border border-red-500 text-red-600 px-4 py-2 text-sm hover:bg-red-50 dark:hover:bg-red-950"
-          >
-            {t('profile.deleteStart')}
-          </button>
-        ) : (
-          <div className="space-y-3">
-            <input
-              type="password"
-              placeholder={t('profile.deletePasswordPlaceholder')}
-              aria-label={t('profile.deletePasswordPlaceholder')}
-              value={delPwd}
-              onChange={(e) => setDelPwd(e.target.value)}
-              className={inputCls}
-            />
-            {delMsg && <p className="text-sm text-red-500">{showMsg(delMsg)}</p>}
-            <div className="flex gap-2">
-              <button
-                onClick={deleteAccount}
-                disabled={busy || !delPwd}
-                className="rounded-md bg-red-600 text-white px-4 py-2 text-sm hover:bg-red-700 disabled:opacity-60"
-              >
-                {t('profile.deleteConfirm')}
-              </button>
-              <button
-                onClick={() => {
-                  setConfirmDel(false);
-                  setDelPwd('');
-                  setDelMsg(null);
-                }}
-                className="rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm"
-              >
-                {t('common.cancel')}
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
+  return <div className="max-w-4xl space-y-5"><div><h1 className="text-xl font-semibold">{t('profile.title')}</h1><p className="mt-1 text-sm text-gray-500">{t('profile.intro')}</p></div><div className="flex gap-1 overflow-x-auto rounded-lg border border-gray-200 bg-white p-1 dark:border-gray-800 dark:bg-gray-900" role="tablist">{tabs.map((tab) => <button key={tab.id} role="tab" aria-selected={section === tab.id} onClick={() => setSection(tab.id)} className={`shrink-0 rounded-md px-3 py-2 text-sm transition ${section === tab.id ? 'bg-brand-700 font-medium text-white shadow-sm' : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'}`}>{tab.label}</button>)}</div>
+    {section === 'account' && <div className={card}><h2 className="text-sm font-medium text-gray-500">{t('profile.avatarSection')}</h2><div className="flex items-center gap-4">{user.image ? <img src={absUrl(user.image)} alt={t('profile.avatarAlt')} className="h-16 w-16 rounded-full border border-gray-200 object-cover dark:border-gray-700" /> : <div className="flex h-16 w-16 items-center justify-center rounded-full bg-brand-700 text-xl font-medium text-white">{initial}</div>}<div><button onClick={() => fileRef.current?.click()} disabled={busy} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 dark:border-gray-700 dark:hover:bg-gray-800">{t('profile.changeAvatar')}</button><p className="mt-1 text-xs text-gray-400">{t('profile.avatarHint')}</p><input ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" hidden onChange={(e) => uploadAvatar(e.target.files?.[0])} /></div></div><form onSubmit={saveName} className="space-y-3 pt-2"><div><label className="mb-1 block text-sm text-gray-500">{t('profile.nameLabel')}</label><input value={name} onChange={(e) => setName(e.target.value)} className={inputCls} /></div><div className="text-sm text-gray-500">{t('profile.emailLabel')} <span className="text-gray-700 dark:text-gray-300">{user.email}</span><span className={`ml-2 text-xs ${user.emailVerified ? 'text-green-600' : 'text-amber-600'}`}>{user.emailVerified ? t('profile.verified') : t('profile.unverified')}</span></div><div className="text-sm text-gray-500">{t('profile.rolesLabel')} <span className="text-gray-700 dark:text-gray-300">{user.roles.join(', ')}</span></div>{msg && <p className="text-sm text-green-600">{showMsg(msg)}</p>}<button type="submit" disabled={busy} className="rounded-md bg-brand-700 px-4 py-2 text-sm text-white hover:bg-brand-800 disabled:opacity-60">{t('profile.saveProfile')}</button></form></div>}
+    {section === 'security' && <div className="space-y-5"><form onSubmit={changePwd} className={card}><h2 className="text-sm font-medium text-gray-500">{t('profile.changePassword')}</h2><input type="password" placeholder={t('profile.currentPassword')} required value={cur} onChange={(e) => setCur(e.target.value)} className={inputCls} autoComplete="current-password" /><input type="password" placeholder={t('profile.newPassword')} required value={next} onChange={(e) => setNext(e.target.value)} className={inputCls} autoComplete="new-password" /><input type="password" placeholder={t('profile.confirmPassword')} required value={confirm} onChange={(e) => setConfirm(e.target.value)} className={inputCls} autoComplete="new-password" />{pwdMsg && <p className={`text-sm ${pwdOk ? 'text-green-600' : 'text-red-500'}`}>{showMsg(pwdMsg)}</p>}<button type="submit" disabled={busy} className="rounded-md bg-brand-700 px-4 py-2 text-sm text-white hover:bg-brand-800 disabled:opacity-60">{t('profile.confirmChange')}</button></form><div className="space-y-3 rounded-lg border border-red-200 bg-white p-5 dark:border-red-900 dark:bg-gray-900"><h2 className="text-sm font-medium text-red-600">{t('profile.deleteAccount')}</h2><p className="text-sm text-gray-500">{t('profile.deleteWarning')}<br />{t('profile.deleteWarning2')}</p>{!confirmDel ? <button onClick={() => setConfirmDel(true)} className="rounded-md border border-red-500 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-950">{t('profile.deleteStart')}</button> : <div className="space-y-3"><input type="password" placeholder={t('profile.deletePasswordPlaceholder')} value={delPwd} onChange={(e) => setDelPwd(e.target.value)} className={inputCls} />{delMsg && <p className="text-sm text-red-500">{showMsg(delMsg)}</p>}<div className="flex gap-2"><button onClick={deleteAccount} disabled={busy || !delPwd} className="rounded-md bg-red-600 px-4 py-2 text-sm text-white hover:bg-red-700 disabled:opacity-60">{t('profile.deleteConfirm')}</button><button onClick={() => { setConfirmDel(false); setDelPwd(''); setDelMsg(null); }} className="rounded-md border border-gray-300 px-4 py-2 text-sm dark:border-gray-700">{t('common.cancel')}</button></div></div>}</div></div>}
+    {section === 'tokens' && <div className="space-y-5"><div className={card}><div><h2 className="text-sm font-medium text-gray-700 dark:text-gray-200">{t('profile.tokenCreateTitle')}</h2><p className="mt-1 text-sm text-gray-500">{t('profile.tokenCreateHint')}</p></div><form onSubmit={createToken} className="grid gap-4 md:grid-cols-[1.15fr_1fr_auto] md:items-end"><div><label className="mb-1 block text-sm text-gray-500">{t('profile.tokenName')}</label><input value={tokenName} onChange={(e) => setTokenName(e.target.value)} placeholder={t('profile.tokenNamePlaceholder')} className={inputCls} /></div><fieldset><legend className="mb-1 block text-sm text-gray-500">{t('profile.tokenExpiry')}</legend><select value={expiry} onChange={(e) => setExpiry(e.target.value)} className={inputCls}><option value="30">30 {t('profile.days')}</option><option value="90">90 {t('profile.days')}</option><option value="180">180 {t('profile.days')}</option><option value="365">365 {t('profile.days')}</option><option value="">{t('profile.neverExpires')}</option></select></fieldset><button disabled={tokenBusy} className="rounded-md bg-brand-700 px-4 py-2 text-sm text-white hover:bg-brand-800 disabled:opacity-60">{t('profile.createToken')}</button><fieldset className="md:col-span-3"><legend className="mb-2 text-sm text-gray-500">{t('profile.tokenScopes')}</legend><div className="flex flex-wrap gap-2">{['ticket:read', 'ticket:comment'].map((scope) => <label key={scope} className="flex cursor-pointer items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm dark:border-gray-700"><input type="checkbox" checked={tokenScopes.includes(scope)} onChange={() => toggleScope(scope)} disabled={scope === 'ticket:read' && tokenScopes.includes('ticket:comment')} /><span className="font-mono text-xs">{scope}</span></label>)}</div><p className="mt-2 text-xs text-gray-400">{t('profile.tokenScopeHint')}</p></fieldset></form>{tokenError && <p className="text-sm text-red-600">{tokenError}</p>}</div>
+      {revealed && <div className="relative overflow-hidden rounded-lg border border-brand-200 bg-brand-50 p-5 dark:border-brand-900 dark:bg-brand-950/30"><div className="absolute inset-y-0 left-0 w-1 bg-brand-500" /><h2 className="font-medium text-brand-900 dark:text-brand-100">{t('profile.tokenRevealedTitle')}</h2><p className="mt-1 text-sm text-brand-800 dark:text-brand-200">{t('profile.tokenRevealedHint')}</p><div className="mt-3 flex flex-col gap-2 sm:flex-row"><code className="min-w-0 flex-1 overflow-x-auto rounded bg-white px-3 py-2 text-xs text-gray-800 ring-1 ring-brand-100 dark:bg-gray-900 dark:text-gray-100 dark:ring-brand-900">{revealed.token}</code><button onClick={() => void copy()} className="rounded-md border border-brand-600 bg-white px-3 py-2 text-sm text-brand-800 hover:bg-brand-100 dark:bg-gray-900 dark:text-brand-300">{t('profile.copyToken')}</button><button onClick={() => setRevealed(null)} className="rounded-md bg-brand-700 px-3 py-2 text-sm text-white hover:bg-brand-800">{t('profile.tokenSaved')}</button></div></div>}
+      <div className={card}><div className="flex items-center justify-between gap-3"><div><h2 className="text-sm font-medium text-gray-700 dark:text-gray-200">{t('profile.tokenListTitle')}</h2><p className="mt-1 text-sm text-gray-500">{t('profile.tokenListHint')}</p></div><button onClick={() => void loadTokens()} className="text-sm text-brand-700 hover:underline dark:text-brand-400">{t('profile.refreshTokens')}</button></div>{tokens.length === 0 ? <p className="border-t border-dashed border-gray-200 pt-4 text-sm text-gray-500 dark:border-gray-800">{t('profile.tokenEmpty')}</p> : <div className="divide-y divide-gray-100 border-t border-gray-100 dark:divide-gray-800 dark:border-gray-800">{tokens.map((token) => <div key={token.id} className="relative flex flex-col gap-3 py-4 sm:flex-row sm:items-center"><span className={`absolute bottom-4 left-0 top-4 w-[3px] rounded-full ${token.status === 'ACTIVE' ? 'bg-brand-500' : 'bg-gray-300 dark:bg-gray-700'}`} /><div className="min-w-0 flex-1 pl-3"><div className="flex flex-wrap items-center gap-2"><span className="font-medium">{token.name}</span><span className={`rounded px-1.5 py-0.5 text-xs ${token.status === 'ACTIVE' ? 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300' : 'bg-gray-100 text-gray-500 dark:bg-gray-800'}`}>{t(`profile.tokenStatus.${token.status}`)}</span></div><code className="mt-1 block text-xs text-gray-500">{token.prefix}</code><div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400"><span>{token.scopes.join(' · ')}</span><span>{t('profile.tokenLastUsed')}: {tokenTime(token.lastUsedAt, i18n.language, t('common.empty'))}</span><span>{t('profile.tokenExpires')}: {tokenTime(token.expiresAt, i18n.language, t('profile.neverExpires'))}</span></div></div>{token.status === 'ACTIVE' && <div className="flex shrink-0 gap-2"><button onClick={() => void rotateToken(token.id)} disabled={tokenBusy} className="rounded-md border border-gray-300 px-3 py-1.5 text-sm hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:hover:bg-gray-800">{t('profile.rotateToken')}</button><button onClick={() => void revokeToken(token.id)} disabled={tokenBusy} className="rounded-md border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-60 dark:border-red-900 dark:hover:bg-red-950">{t('profile.revokeToken')}</button></div>}</div>)}</div>}</div></div>}
+  </div>;
 }

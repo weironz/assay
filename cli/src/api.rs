@@ -2,7 +2,7 @@ use crate::config::Config;
 use anyhow::{Context, Result, bail};
 use reqwest::{
     blocking::{Client, Response},
-    header::{CONTENT_TYPE, COOKIE, SET_COOKIE},
+    header::{AUTHORIZATION, CONTENT_TYPE, COOKIE, SET_COOKIE},
 };
 use serde_json::{Value, json};
 use std::time::Duration;
@@ -10,19 +10,32 @@ use std::time::Duration;
 #[derive(Clone)]
 pub struct ApiClient {
     base_url: String,
-    session_cookie: String,
+    credentials: Credentials,
     http: Client,
+}
+
+#[derive(Clone)]
+enum Credentials {
+    Bearer(String),
+    SessionCookie(String),
 }
 
 impl ApiClient {
     pub fn from_config(config: &Config) -> Result<Self> {
-        let session_cookie = std::env::var("ASSAY_SESSION_COOKIE")
+        let credentials = std::env::var("ASSAY_TOKEN")
             .ok()
-            .or_else(|| config.session_cookie.clone())
-            .context("未登录。请先运行 assay auth login，或由系统注入 ASSAY_SESSION_COOKIE")?;
+            .or_else(|| config.api_token.clone())
+            .map(Credentials::Bearer)
+            .or_else(|| {
+                std::env::var("ASSAY_SESSION_COOKIE")
+                    .ok()
+                    .or_else(|| config.session_cookie.clone())
+                    .map(Credentials::SessionCookie)
+            })
+            .context("未登录。请运行 assay auth login 或 assay auth token --token-stdin")?;
         Ok(Self {
             base_url: config.base_url.clone(),
-            session_cookie,
+            credentials,
             http: Client::builder().timeout(Duration::from_secs(45)).build()?,
         })
     }
@@ -102,7 +115,10 @@ impl ApiClient {
         &self,
         request: reqwest::blocking::RequestBuilder,
     ) -> reqwest::blocking::RequestBuilder {
-        request.header(COOKIE, &self.session_cookie)
+        match &self.credentials {
+            Credentials::Bearer(token) => request.header(AUTHORIZATION, format!("Bearer {token}")),
+            Credentials::SessionCookie(cookie) => request.header(COOKIE, cookie),
+        }
     }
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base_url, path)

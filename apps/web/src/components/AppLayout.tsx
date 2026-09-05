@@ -157,7 +157,7 @@ export default function AppLayout() {
             <ThemeToggle />
             <NotificationBell />
             <NavLink
-              to="/profile"
+              to="/settings"
               className="flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-brand-700 dark:hover:text-brand-400"
               title={t('nav.profile')}
             >

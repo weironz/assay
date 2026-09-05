@@ -11,10 +11,14 @@
 
 ## 1. 认证
 
-> **当前只支持 Cookie 会话认证。**
-> 不支持 HTTP Basic，也不支持 API Token / Bearer —— 两者实测均返回 401。
-> 脚本调用需要先登录拿到会话 Cookie，再带着它访问后续接口。
-> 如需长期集成，建议先补 API Token 机制（见文末「已知限制」）。
+Web 端使用 Cookie 会话。脚本、CLI、MCP 与自动化可使用个人 API Token：
+
+```http
+Authorization: Bearer ast_...
+```
+
+不支持 HTTP Basic。Token 的最终权限是「该账号的角色权限」与「创建 Token 时勾选的
+权限范围」的交集，不能通过 Token 放大账号权限。
 
 ### 1.1 登录
 
@@ -54,6 +58,27 @@ POST /api/auth/sign-out
 - **登录接口有限流**：同一 IP 每 60 秒 5 次。脚本请缓存会话，不要每次调用都重新登录。
 - 会话有有效期，长时间运行的脚本需要处理 401 并重新登录。
 - 密码重置、邮箱验证等接口由 better-auth 提供，路径均在 `/api/auth/*` 下。
+
+### 1.5 个人 API Token
+
+Token 在 Web 的 **设置 → API Token** 创建。完整密钥只在创建或轮换响应中出现一次；
+数据库仅保存哈希。以下管理接口仅接受 Cookie 会话，Bearer Token 不能创建、轮换或吊销
+Token。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/me/api-tokens` | 列出当前账号 Token 元数据（不含密钥） |
+| `POST` | `/api/me/api-tokens` | 创建，返回一次性 `token` 字段 |
+| `POST` | `/api/me/api-tokens/:id/rotate` | 立即吊销旧 Token 并返回新 Token |
+| `DELETE` | `/api/me/api-tokens/:id` | 吊销 Token |
+
+创建示例：
+
+```json
+{ "name": "Codex workstation", "scopes": ["ticket:read", "ticket:comment"], "expiresInDays": 90 }
+```
+
+目前允许的 scope 为 `ticket:read`、`ticket:comment`；勾选评论会自动附带读取权限。
 
 ---
 
@@ -514,10 +539,7 @@ GET /health
 
 ## 9. 已知限制
 
-1. **没有 API Token / HTTP Basic**。只能用 Cookie 会话，且受登录限流约束、
-   会话会过期。长期集成建议先补 API 密钥机制（可命名、可设有效期、可吊销、
-   密钥只在创建时明文显示一次）。
-2. **没有 OpenAPI / Swagger 描述文件**，本文是唯一接口说明。
-3. **没有 Webhook**，事件只能靠轮询发现。
-4. 通知标题是服务端渲染的中文，不随语言变化。
-5. 接口无版本号前缀，破坏性变更依赖本文档同步更新。
+1. **没有 OpenAPI / Swagger 描述文件**，本文是唯一接口说明。
+2. **没有 Webhook**，事件只能靠轮询发现。
+3. 通知标题是服务端渲染的中文，不随语言变化。
+4. 接口无版本号前缀，破坏性变更依赖本文档同步更新。

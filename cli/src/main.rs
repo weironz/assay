@@ -66,6 +66,8 @@ enum Command {
 enum AuthCommand {
     /// 以邮箱和密码登录；密码不会写入磁盘
     Login(LoginArgs),
+    /// 保存个人 API Token；只能通过标准输入传入，避免进入命令历史
+    Token(TokenArgs),
     /// 清除本机保存的会话
     Logout,
     /// 查看当前登录用户
@@ -80,6 +82,13 @@ struct LoginArgs {
     /// 从标准输入读取密码（适用于 CI；避免把密码放入命令历史）
     #[arg(long)]
     password_stdin: bool,
+}
+
+#[derive(Args, Debug)]
+struct TokenArgs {
+    /// 从标准输入读取 Token（必填）
+    #[arg(long)]
+    token_stdin: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -182,6 +191,7 @@ fn run(cli: Cli) -> Result<()> {
         } => json!({
             "baseUrl": store.config.base_url,
             "hasSession": store.config.session_cookie.is_some() || std::env::var("ASSAY_SESSION_COOKIE").is_ok(),
+            "hasToken": store.config.api_token.is_some() || std::env::var("ASSAY_TOKEN").is_ok(),
             "configPath": store.path,
         }),
         Command::Auth {
@@ -195,12 +205,34 @@ fn run(cli: Cli) -> Result<()> {
             json!({ "loggedIn": true, "user": client.get("/me")? })
         }
         Command::Auth {
+            command: AuthCommand::Token(args),
+        } => {
+            if !args.token_stdin {
+                bail!("请使用 assay auth token --token-stdin，并通过标准输入传入 Token");
+            }
+            let token = read_stdin()?;
+            if !token.starts_with("ast_") || token.len() < 24 {
+                bail!("Token 格式无效");
+            }
+            store.config.api_token = Some(token);
+            store.save()?;
+            match ApiClient::from_config(&store.config)?.get("/me") {
+                Ok(user) => json!({ "tokenSaved": true, "user": user }),
+                Err(error) => {
+                    store.config.api_token = None;
+                    store.save()?;
+                    return Err(error);
+                }
+            }
+        }
+        Command::Auth {
             command: AuthCommand::Logout,
         } => {
             if let Ok(client) = ApiClient::from_config(&store.config) {
                 let _ = client.post("/auth/sign-out", json!({}));
             }
             store.config.session_cookie = None;
+            store.config.api_token = None;
             store.save()?;
             json!({ "loggedOut": true })
         }
@@ -307,6 +339,7 @@ pub fn default_config() -> Config {
     Config {
         base_url: DEFAULT_BASE_URL.to_owned(),
         session_cookie: None,
+        api_token: None,
     }
 }
 

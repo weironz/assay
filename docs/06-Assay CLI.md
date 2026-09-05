@@ -53,7 +53,8 @@ assay --version
 
 ## 2. 认证与配置
 
-Assay 当前 API 使用可撤销 Cookie 会话。CLI 登录成功后只保存会话 Cookie，不保存密码：
+CLI 支持两种认证方式：可撤销 Cookie 会话，或从 Web「设置 → API Token」创建的个人
+Bearer Token。登录成功后只保存会话 Cookie，不保存密码：
 
 ```bash
 assay auth login --email you@greenstor.ai
@@ -66,6 +67,13 @@ assay auth whoami
 printf '%s' "$ASSAY_PASSWORD" | assay auth login --email you@greenstor.ai --password-stdin
 ```
 
+Token 更适合 MCP 与自动化；不要把它放进命令行参数或 Shell 历史。创建后通过标准输入保存：
+
+```bash
+printf '%s' "$ASSAY_TOKEN" | assay auth token --token-stdin
+assay auth whoami
+```
+
 默认访问 `https://assay.cloudcele.com/api`。连接测试环境可任选一种方式：
 
 ```bash
@@ -75,8 +83,8 @@ ASSAY_BASE_URL=http://localhost:3000/api assay auth whoami
 ```
 
 配置位于操作系统用户配置目录下（Windows 通常是 `%APPDATA%\assay\config.json`，Linux 通常是
-`~/.config/assay/config.json`）。自动化或 MCP 宿主可注入 `ASSAY_SESSION_COOKIE` 覆盖本地会话，
-避免让 AI 管理登录密码。
+`~/.config/assay/config.json`）。自动化或 MCP 宿主可注入 `ASSAY_TOKEN`（优先）或
+`ASSAY_SESSION_COOKIE` 覆盖本地凭据，避免让 AI 管理登录密码。
 
 ## 3. 命令参数
 
@@ -97,10 +105,11 @@ assay ticket comment --help
 | --- | --- |
 | `assay auth login --email <邮箱>` | 交互式登录，安全读取密码。 |
 | `... --password-stdin` | 从标准输入读取密码，适用于 CI。 |
+| `assay auth token --token-stdin` | 从标准输入保存个人 API Token，并立即验证。 |
 | `assay auth logout` | 注销服务器会话并清除本地 Cookie。 |
 | `assay auth whoami` | 输出当前用户、角色和权限。 |
 | `assay config set-url <URL>` | 设置默认 API 地址；会自动补全 `/api`。 |
-| `assay config show` | 显示地址、会话是否存在和配置文件位置，不泄露 Cookie。 |
+| `assay config show` | 显示地址、Token/会话是否存在和配置文件位置，不泄露凭据。 |
 
 ### 工单
 
@@ -126,7 +135,7 @@ Linux 会立即替换文件。Windows 会在当前进程退出后，通过短暂
 
 ## 5. MCP 集成
 
-先在当前系统用户下执行一次 `assay auth login`，然后添加 MCP 配置：
+先在当前系统用户下执行一次 `assay auth login` 或 `assay auth token --token-stdin`，然后添加 MCP 配置：
 
 ```json
 {
@@ -140,7 +149,7 @@ Linux 会立即替换文件。Windows 会在当前进程退出后，通过短暂
 ```
 
 MCP 使用 stdio，**stdout 只输出 JSON-RPC 协议数据**。不要在 `mcp serve` 前面套输出日志的
-Shell 脚本。若 MCP 宿主有专用服务身份，建议注入短生命周期的会话 Cookie：
+Shell 脚本。若 MCP 宿主有专用服务身份，建议注入最小权限、有限期的 API Token：
 
 ```json
 {
@@ -148,7 +157,7 @@ Shell 脚本。若 MCP 宿主有专用服务身份，建议注入短生命周期
     "assay": {
       "command": "assay",
       "args": ["mcp", "serve"],
-      "env": { "ASSAY_SESSION_COOKIE": "<由宿主安全注入>" }
+      "env": { "ASSAY_TOKEN": "<由宿主安全注入>" }
     }
   }
 }
