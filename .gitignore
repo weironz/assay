@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+target/
 .env
 *.local
 .DS_Store

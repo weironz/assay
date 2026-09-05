@@ -31,6 +31,19 @@ env:
   HUB_WEB: willdockerhub/assay-web
 
 jobs:
+  cli:
+    name: CLI · 测试与构建
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: 测试
+        working-directory: cli
+        run: cargo test --locked
+      - name: 构建
+        working-directory: cli
+        run: cargo build --locked --release
+
   web:
     name: 前端 · 类型检查与构建
     runs-on: ubuntu-latest
@@ -186,7 +199,7 @@ jobs:
     name: 构建并推送镜像
     # 只有类型检查、编译、整栈冒烟测试全过，才允许构建发布镜像；
     # 且必须是手动触发——推代码不会自动发版
-    needs: [web, api, smoke]
+    needs: [cli, web, api, smoke]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:

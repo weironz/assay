@@ -6,6 +6,7 @@
 - 开发计划：[docs/02-开发计划.md](docs/02-开发计划.md)
 - 技术调研：[docs/03-技术调研结论.md](docs/03-技术调研结论.md)
 - **REST API 文档**：[docs/04-API.md](docs/04-API.md)（49 个接口，含认证方式与调用示例）
+- **CLI 与 MCP 文档**：[docs/06-Assay CLI.md](docs/06-Assay%20CLI.md)（安装、命令参数、`assay update`、本地 MCP）
 - **部署文档**：[docs/05-部署文档.md](docs/05-部署文档.md)（IP 直连 / Traefik 域名两种方式，含备份与排错）
 
 ## 目录结构
