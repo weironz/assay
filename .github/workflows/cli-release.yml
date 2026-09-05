@@ -67,4 +67,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.tag || github.ref_name }}
-        run: gh release create "$TAG" dist/assay-* dist/SHA256SUMS --title "Assay CLI ${TAG#assay-cli-v}" --generate-notes
+        run: gh release create "$TAG" dist/assay-* dist/SHA256SUMS --repo "$GITHUB_REPOSITORY" --title "Assay CLI ${TAG#assay-cli-v}" --generate-notes
