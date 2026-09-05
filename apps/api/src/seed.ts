@@ -6,6 +6,7 @@ const prisma = new PrismaClient();
 const PERMISSIONS: [string, string][] = [
   ['ticket:create', '创建工单'],
   ['ticket:read', '查看工单'],
+  ['ticket:read:all', '查看全部工单'],
   ['ticket:update', '编辑工单'],
   ['ticket:assign', '指派工单'],
   ['ticket:transition', '流转工单状态'],
@@ -33,6 +34,7 @@ const ROLE_PERMS: Record<string, string[]> = {
   ],
   supervisor: [
     'ticket:read',
+    'ticket:read:all',
     'ticket:update',
     'ticket:assign',
     'ticket:transition',

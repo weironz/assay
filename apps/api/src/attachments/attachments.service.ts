@@ -19,20 +19,32 @@ export class AttachmentsService {
     @Inject(STORAGE_DRIVER) private readonly storage: StorageDriver,
   ) {}
 
-  private async assertCanView(user: AuthUser, ticketId: string) {
+  private async loadTicketForAccess(ticketId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
       select: { requesterId: true, assigneeId: true },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-    const staff =
-      user.roles.includes('admin') || user.roles.includes('supervisor');
+    return ticket;
+  }
+
+  private async assertCanView(user: AuthUser, ticketId: string) {
+    const ticket = await this.loadTicketForAccess(ticketId);
+    if (user.permissions.includes('ticket:read:all')) return;
     if (
-      !staff &&
       ticket.requesterId !== user.id &&
       ticket.assigneeId !== user.id
     ) {
       throw new ForbiddenException('无权访问该工单附件');
+    }
+  }
+
+  /** 上传是写操作，不能因“查看全部”而获得对他人工单上传附件的能力。 */
+  private async assertCanOperate(user: AuthUser, ticketId: string) {
+    const ticket = await this.loadTicketForAccess(ticketId);
+    const staff = user.roles.includes('admin') || user.roles.includes('supervisor');
+    if (!staff && ticket.requesterId !== user.id && ticket.assigneeId !== user.id) {
+      throw new ForbiddenException('无权向该工单上传附件');
     }
   }
 
@@ -70,7 +82,7 @@ export class AttachmentsService {
     kind?: string,
   ) {
     this.assertAllowed(file, kind);
-    await this.assertCanView(user, ticketId);
+    await this.assertCanOperate(user, ticketId);
     return this.store(user, file, ticketId, messageId);
   }
 

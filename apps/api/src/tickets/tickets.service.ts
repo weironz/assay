@@ -97,15 +97,29 @@ export class TicketsService {
     return ticket;
   }
 
-  /** 列表数据级可见性：admin/supervisor 全看；否则只看自己提交或指派给自己的 */
+  /** 独立的数据范围权限：允许读取全部工单，但不自动授予任何写操作。 */
+  private canReadAll(user: AuthUser) {
+    return user.permissions.includes('ticket:read:all');
+  }
+
+  /** 列表数据级可见性：有 ticket:read:all 全看；否则仅自己提交或指派给自己的。 */
   private visibilityFilter(user: AuthUser): Prisma.TicketWhereInput {
-    if (user.roles.includes('admin') || user.roles.includes('supervisor')) {
+    if (this.canReadAll(user)) {
       return {};
     }
     return { OR: [{ requesterId: user.id }, { assigneeId: user.id }] };
   }
 
   private canView(user: AuthUser, ticket: { requesterId: string; assigneeId: string | null }) {
+    if (this.canReadAll(user)) return true;
+    return ticket.requesterId === user.id || ticket.assigneeId === user.id;
+  }
+
+  /**
+   * 写操作仍沿用原有边界：管理员/主管可处理全部工单，其他人只能操作与自己相关的工单。
+   * 不把 ticket:read:all 混进这里，避免“全局只读”意外变成全局可编辑。
+   */
+  private canOperate(user: AuthUser, ticket: { requesterId: string; assigneeId: string | null }) {
     if (user.roles.includes('admin') || user.roles.includes('supervisor')) return true;
     return ticket.requesterId === user.id || ticket.assigneeId === user.id;
   }
@@ -305,7 +319,7 @@ export class TicketsService {
   // ---------- 编辑 ----------
   async update(user: AuthUser, id: string, dto: UpdateTicketDto) {
     const ticket = await this.loadOrThrow(id);
-    if (!this.canView(user, ticket)) throw new ForbiddenException('无权操作');
+    if (!this.canOperate(user, ticket)) throw new ForbiddenException('无权操作');
     const updated = await this.prisma.ticket.update({
       where: { id },
       data: {
@@ -448,7 +462,7 @@ export class TicketsService {
   // ---------- 消息 ----------
   async addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
     const ticket = await this.loadOrThrow(id);
-    if (!this.canView(user, ticket)) throw new ForbiddenException('无权回复');
+    if (!this.canOperate(user, ticket)) throw new ForbiddenException('无权回复');
 
     const isStaff =
       user.roles.includes('admin') ||

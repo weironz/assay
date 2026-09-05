@@ -97,12 +97,13 @@ POST /api/auth/sign-out
 | --- | --- |
 | `requester` 提单人 | `ticket:create` `ticket:read` `ticket:update` `ticket:comment` `ticket:transition` |
 | `handler` 处理人 | `ticket:read` `ticket:update` `ticket:transition` `ticket:comment` |
-| `supervisor` 主管 | handler 全部 + `ticket:assign` `stats:view` |
+| `supervisor` 主管 | handler 全部 + `ticket:read:all` `ticket:assign` `stats:view` |
 | `admin` 管理员 | 全部权限 |
 
-**权限码通过只是第一道关。**数据可见性和归属规则在服务层另有判定：
-非 admin / supervisor 只能看到自己提交或指派给自己的工单；删除工单要求是
-admin 或提单人本人；状态流转还要满足状态机对角色和归属的要求。
+**权限码通过只是第一道关。**`ticket:read:all` 是独立的只读数据范围权限：拥有它的
+用户可查看全部工单、历史、附件和全量仪表盘统计；未拥有时仅能看自己提交或指派给自己的
+工单。它不授予编辑、回复、上传、删除或状态流转权限；这些仍分别受原有权限码、角色和
+归属规则约束。删除工单要求是 admin 或提单人本人；状态流转还要满足状态机对角色和归属的要求。
 
 ### 2.3 分页
 
@@ -427,7 +428,7 @@ GET /api/stats/overview
 权限：`ticket:read`。返回 `total` `open` `myTodo` `overdue` `unassigned`
 `unread` 以及 `byStatus`（全部 8 个状态的计数）。
 
-非 admin / supervisor 的统计范围自动收窄为「自己提交或指派给自己的工单」。
+未拥有 `ticket:read:all` 时，统计范围自动收窄为「自己提交或指派给自己的工单」。
 
 ### 6.5 保存的筛选视图
 

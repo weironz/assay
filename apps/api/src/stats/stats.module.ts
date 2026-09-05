@@ -16,7 +16,7 @@ class StatsController {
   constructor(private readonly prisma: PrismaService) {}
 
   private scope(user: AuthUser): Prisma.TicketWhereInput {
-    if (user.roles.includes('admin') || user.roles.includes('supervisor')) {
+    if (user.permissions.includes('ticket:read:all')) {
       return {};
     }
     return { OR: [{ requesterId: user.id }, { assigneeId: user.id }] };
