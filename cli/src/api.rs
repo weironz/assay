@@ -14,6 +14,17 @@ pub struct ApiClient {
     http: Client,
 }
 
+pub const MAX_MCP_IMAGES: usize = 4;
+pub const MAX_MCP_IMAGE_BYTES: usize = 10 * 1024 * 1024;
+
+#[derive(Debug)]
+pub struct McpImage {
+    pub id: String,
+    pub file_name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 #[derive(Clone)]
 enum Credentials {
     Bearer(String),
@@ -109,6 +120,113 @@ impl ApiClient {
             .pipe(ensure_success)?
             .json()
             .context("解析 API 响应失败")
+    }
+
+    /// Read ticket-bound image attachments through the ordinary authenticated download route.
+    /// The caller receives raw bytes only after MIME, count and size constraints are checked.
+    pub fn get_ticket_images(
+        &self,
+        ticket: &Value,
+        image_ids: Option<&[String]>,
+    ) -> Result<Vec<McpImage>> {
+        let ticket_id = ticket
+            .get("id")
+            .and_then(Value::as_str)
+            .context("工单详情缺少 id")?;
+        let attachments = self.get(&format!("/tickets/{ticket_id}/attachments"))?;
+        let requested = image_ids.unwrap_or(&[]);
+        if requested.len() > MAX_MCP_IMAGES {
+            bail!("一次最多读取 {MAX_MCP_IMAGES} 张图片");
+        }
+
+        let mut selected = Vec::new();
+        for attachment in attachments.as_array().context("解析附件列表失败")? {
+            let id = attachment
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let mime = attachment
+                .get("mime")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            let is_requested = requested.is_empty() || requested.iter().any(|value| value == id);
+            if is_requested && mime.starts_with("image/") {
+                selected.push(attachment);
+            }
+        }
+        if !requested.is_empty() && selected.len() != requested.len() {
+            bail!("指定的附件不存在、不是图片，或无权读取");
+        }
+        if selected.len() > MAX_MCP_IMAGES {
+            bail!(
+                "该工单有 {} 张图片；请用 imageIds 一次最多指定 {MAX_MCP_IMAGES} 张",
+                selected.len()
+            );
+        }
+
+        selected
+            .into_iter()
+            .map(|attachment| self.download_mcp_image(attachment))
+            .collect()
+    }
+
+    fn download_mcp_image(&self, attachment: &Value) -> Result<McpImage> {
+        let id = attachment
+            .get("id")
+            .and_then(Value::as_str)
+            .context("图片附件缺少 id")?;
+        let file_name = attachment
+            .get("fileName")
+            .and_then(Value::as_str)
+            .unwrap_or(id)
+            .to_owned();
+        let declared_size = attachment
+            .get("fileSize")
+            .and_then(Value::as_u64)
+            .context("图片附件缺少大小")?;
+        if declared_size > MAX_MCP_IMAGE_BYTES as u64 {
+            bail!(
+                "图片 {file_name} 超过 {} MB 的 MCP 读取上限",
+                MAX_MCP_IMAGE_BYTES / 1024 / 1024
+            );
+        }
+        let path = attachment
+            .get("url")
+            .and_then(Value::as_str)
+            .context("图片附件缺少下载地址")?;
+        let response = ensure_success(self.request(self.http.get(self.url(path))).send()?)?;
+        let mime_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .unwrap_or_default()
+            .to_owned();
+        if !mime_type.starts_with("image/") {
+            bail!("附件 {file_name} 的下载内容不是图片");
+        }
+        if response
+            .content_length()
+            .is_some_and(|size| size > MAX_MCP_IMAGE_BYTES as u64)
+        {
+            bail!(
+                "图片 {file_name} 超过 {} MB 的 MCP 读取上限",
+                MAX_MCP_IMAGE_BYTES / 1024 / 1024
+            );
+        }
+        let data = response.bytes()?.to_vec();
+        if data.len() > MAX_MCP_IMAGE_BYTES {
+            bail!(
+                "图片 {file_name} 超过 {} MB 的 MCP 读取上限",
+                MAX_MCP_IMAGE_BYTES / 1024 / 1024
+            );
+        }
+        Ok(McpImage {
+            id: id.to_owned(),
+            file_name,
+            mime_type,
+            data,
+        })
     }
 
     fn request(

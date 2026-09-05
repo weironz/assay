@@ -1,5 +1,6 @@
 use crate::{VERSION, api::ApiClient, config::Config};
 use anyhow::{Context, Result};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
@@ -46,8 +47,8 @@ fn tools() -> Vec<Value> {
     vec![
         tool(
             "assay_ticket_get",
-            "读取工单详情、讨论、附件和参与人。只读。",
-            json!({"type":"object","required":["id"],"properties":{"id":{"type":"string","description":"工单数据库 ID 或工单号"}}}),
+            "读取工单详情、讨论、附件和参与人。只读。需要分析截图时设置 includeImages=true；默认不下载图片。",
+            json!({"type":"object","required":["id"],"properties":{"id":{"type":"string","description":"工单数据库 ID 或工单号"},"includeImages":{"type":"boolean","default":false,"description":"设为 true 时返回图片内容供视觉分析；默认仅返回文字与附件元数据"},"imageIds":{"type":"array","maxItems":4,"items":{"type":"string"},"description":"只读取指定图片附件 ID；不传则读取该工单全部图片，最多 4 张"}}}),
         ),
         tool(
             "assay_ticket_search",
@@ -77,7 +78,39 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
         .unwrap_or_else(|| json!({}));
     let client = ApiClient::from_config(config)?;
     let value = match name {
-        "assay_ticket_get" => client.get_ticket(required_string(&args, "id")?)?,
+        "assay_ticket_get" => {
+            let ticket = client.get_ticket(required_string(&args, "id")?)?;
+            let mut content = vec![json!({
+                "type": "text",
+                "text": serde_json::to_string_pretty(&ticket)?,
+            })];
+            if args
+                .get("includeImages")
+                .and_then(Value::as_bool)
+                .unwrap_or(false)
+            {
+                let image_ids = optional_string_array(&args, "imageIds")?;
+                let images = client.get_ticket_images(&ticket, image_ids.as_deref())?;
+                if images.is_empty() {
+                    content.push(json!({ "type": "text", "text": "该工单没有可读取的图片附件。" }));
+                } else {
+                    let names = images
+                        .iter()
+                        .map(|image| format!("{} ({})", image.file_name, image.id))
+                        .collect::<Vec<_>>()
+                        .join("；");
+                    content.push(json!({ "type": "text", "text": format!("已读取 {} 张图片：{names}", images.len()) }));
+                    for image in images {
+                        content.push(json!({
+                            "type": "image",
+                            "data": STANDARD.encode(image.data),
+                            "mimeType": image.mime_type,
+                        }));
+                    }
+                }
+            }
+            json!({ "content": content })
+        }
         "assay_ticket_search" => {
             let mut query = Vec::new();
             for (api_key, input_key) in [
@@ -107,7 +140,13 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
         )?,
         _ => anyhow::bail!("不支持的工具：{name}"),
     };
-    Ok(json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&value)? }] }))
+    if value.get("content").is_some() {
+        Ok(value)
+    } else {
+        Ok(
+            json!({ "content": [{ "type": "text", "text": serde_json::to_string_pretty(&value)? }] }),
+        )
+    }
 }
 
 fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
@@ -116,6 +155,28 @@ fn required_string<'a>(value: &'a Value, key: &str) -> Result<&'a str> {
         .and_then(Value::as_str)
         .filter(|v| !v.trim().is_empty())
         .with_context(|| format!("缺少参数：{key}"))
+}
+
+fn optional_string_array(value: &Value, key: &str) -> Result<Option<Vec<String>>> {
+    let Some(values) = value.get(key) else {
+        return Ok(None);
+    };
+    let values = values
+        .as_array()
+        .with_context(|| format!("参数 {key} 必须是字符串数组"))?;
+    if values.len() > 4 {
+        anyhow::bail!("参数 {key} 一次最多 4 项");
+    }
+    values
+        .iter()
+        .map(|item| {
+            item.as_str()
+                .filter(|item| !item.trim().is_empty())
+                .map(str::to_owned)
+                .with_context(|| format!("参数 {key} 只能包含非空字符串"))
+        })
+        .collect::<Result<Vec<_>>>()
+        .map(Some)
 }
 fn ok(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
