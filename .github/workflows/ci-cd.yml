@@ -429,6 +429,8 @@ jobs:
           test "$(sed -nE 's/^version = "([^"]+)"/\1/p' cli/Cargo.toml | head -1)" = "$VERSION"
       - uses: actions/download-artifact@v4
         with:
+          # build-push-action 也会上传 *.dockerbuild 调试产物；Release 只需要 CLI 安装包。
+          pattern: assay-*
           path: dist
           merge-multiple: true
       - name: 创建校验文件与发布标签
