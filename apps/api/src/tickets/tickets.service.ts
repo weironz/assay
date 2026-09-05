@@ -12,6 +12,7 @@ import { cleanHtml } from '../common/sanitize';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SlaService } from '../sla/sla.service';
 import {
+  AddParticipantDto,
   AssignDto,
   CreateMessageDto,
   CreateTicketDto,
@@ -45,6 +46,13 @@ const FALLBACK_SLA = { responseMin: 60, resolveMin: 1440 };
 
 /** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
 const AUTHOR_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  image: true,
+} as const;
+
+const PARTICIPANT_USER_SELECT = {
   id: true,
   name: true,
   email: true,
@@ -102,17 +110,67 @@ export class TicketsService {
     return user.permissions.includes('ticket:read:all');
   }
 
-  /** 列表数据级可见性：有 ticket:read:all 全看；否则仅自己提交或指派给自己的。 */
+  /** 列表数据级可见性：有全局只读权限全看；否则看本人关联或被邀请协作的工单。 */
   private visibilityFilter(user: AuthUser): Prisma.TicketWhereInput {
     if (this.canReadAll(user)) {
       return {};
     }
-    return { OR: [{ requesterId: user.id }, { assigneeId: user.id }] };
+    return {
+      OR: [
+        { requesterId: user.id },
+        { assigneeId: user.id },
+        { participants: { some: { userId: user.id } } },
+      ],
+    };
   }
 
-  private canView(user: AuthUser, ticket: { requesterId: string; assigneeId: string | null }) {
+  private canView(
+    user: AuthUser,
+    ticket: {
+      requesterId: string;
+      assigneeId: string | null;
+      participants?: { userId: string; role: string }[];
+    },
+  ) {
     if (this.canReadAll(user)) return true;
-    return ticket.requesterId === user.id || ticket.assigneeId === user.id;
+    return (
+      ticket.requesterId === user.id ||
+      ticket.assigneeId === user.id ||
+      !!ticket.participants?.some((participant) => participant.userId === user.id)
+    );
+  }
+
+  private isCollaborator(
+    user: AuthUser,
+    ticket: { participants?: { userId: string; role: string }[] },
+  ) {
+    return ticket.participants?.some(
+      (participant) =>
+        participant.userId === user.id && participant.role === 'COLLABORATOR',
+    );
+  }
+
+  private isInternalParticipant(
+    user: AuthUser,
+    ticket: { assigneeId: string | null; participants?: { userId: string; role: string }[] },
+  ) {
+    return (
+      user.roles.includes('admin') ||
+      user.roles.includes('supervisor') ||
+      ticket.assigneeId === user.id ||
+      this.isCollaborator(user, ticket)
+    );
+  }
+
+  private canManageParticipants(
+    user: AuthUser,
+    ticket: { assigneeId: string | null },
+  ) {
+    return (
+      user.roles.includes('admin') ||
+      user.roles.includes('supervisor') ||
+      ticket.assigneeId === user.id
+    );
   }
 
   /**
@@ -254,10 +312,17 @@ export class TicketsService {
     if (q.assigneeId) where.assigneeId = q.assigneeId;
     if (q.categoryId) where.categoryId = q.categoryId;
     if (q.keyword) {
-      where.OR = [
-        { title: { contains: q.keyword, mode: 'insensitive' } },
-        { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
+      // 搜索条件与可见范围必须取交集；直接覆盖 OR 会导致协作范围被绕过。
+      where.AND = [
+        this.visibilityFilter(user),
+        {
+          OR: [
+            { title: { contains: q.keyword, mode: 'insensitive' } },
+            { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
+          ],
+        },
       ];
+      delete where.OR;
     }
 
     const page = q.page ?? 1;
@@ -294,8 +359,15 @@ export class TicketsService {
         datacenter: true,
         cluster: true,
         tags: { include: { tag: true } },
+        participants: {
+          include: { user: { select: PARTICIPANT_USER_SELECT } },
+          orderBy: { createdAt: 'asc' },
+        },
         messages: {
-          include: { author: { select: AUTHOR_SELECT } },
+          include: {
+            author: { select: AUTHOR_SELECT },
+            mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
+          },
           orderBy: { createdAt: 'asc' },
         },
       },
@@ -304,10 +376,7 @@ export class TicketsService {
     if (!this.canView(user, ticket)) throw new ForbiddenException('无权查看该工单');
 
     // 提单人看不到内部备注
-    const isStaff =
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      ticket.assigneeId === user.id;
+    const isStaff = this.isInternalParticipant(user, ticket);
     const messages = isStaff
       ? ticket.messages
       : ticket.messages.filter((m) => !m.isInternal);
@@ -457,18 +526,66 @@ export class TicketsService {
     } else if (to === 'CANCELLED') {
       await notify(ticket.assigneeId, 'CANCELLED', `工单被取消：${ticket.ticketNo}`);
     }
+
+    // 关注人需要知晓生命周期变化；提单人与主处理人已由上面的精确规则覆盖。
+    const participantIds = await this.participantIds(ticket.id);
+    await this.notifyMany(
+      participantIds,
+      user.id,
+      'MESSAGE',
+      `工单状态已更新：${ticket.ticketNo}`,
+      ticket.title,
+      ticket.id,
+    );
+  }
+
+  private async participantIds(ticketId: string, role?: 'COLLABORATOR' | 'FOLLOWER') {
+    const participants = await this.prisma.ticketParticipant.findMany({
+      where: { ticketId, ...(role ? { role } : {}) },
+      select: { userId: true },
+    });
+    return participants.map((participant) => participant.userId);
+  }
+
+  private async notifyMany(
+    ids: string[],
+    actorId: string,
+    type: string,
+    title: string,
+    content: string,
+    ticketId: string,
+  ) {
+    await Promise.all(
+      [...new Set(ids)]
+        .filter((id) => id !== actorId)
+        .map((id) =>
+          this.notifications.notify(id, { type, title, content, ticketId }),
+        ),
+    );
   }
 
   // ---------- 消息 ----------
   async addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
-    const ticket = await this.loadOrThrow(id);
-    if (!this.canOperate(user, ticket)) throw new ForbiddenException('无权回复');
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id },
+      include: { participants: true },
+    });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    const canComment = this.canOperate(user, ticket) || this.isCollaborator(user, ticket);
+    if (!canComment) throw new ForbiddenException('无权回复');
 
-    const isStaff =
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      user.roles.includes('handler');
-    const isInternal = !!dto.isInternal && isStaff; // 仅内部人员可发内部备注
+    const isInternal = !!dto.isInternal && this.isInternalParticipant(user, ticket);
+    const allowedMentionIds = new Set([
+      ticket.requesterId,
+      ...(ticket.assigneeId ? [ticket.assigneeId] : []),
+      ...ticket.participants.map((participant) => participant.userId),
+    ]);
+    const mentionUserIds = [
+      ...new Set((dto.mentionUserIds ?? []).filter((id) => id !== user.id)),
+    ];
+    if (mentionUserIds.some((mentionId) => !allowedMentionIds.has(mentionId))) {
+      throw new BadRequestException('只能提及本工单的相关人员');
+    }
 
     const message = await this.prisma.ticketMessage.create({
       data: {
@@ -478,8 +595,14 @@ export class TicketsService {
         isInternal,
         contentType: dto.contentType ?? 'text/html',
         body: cleanHtml(dto.body),
+        mentions: mentionUserIds.length
+          ? { createMany: { data: mentionUserIds.map((userId) => ({ userId })) } }
+          : undefined,
       },
-      include: { author: { select: AUTHOR_SELECT } },
+      include: {
+        author: { select: AUTHOR_SELECT },
+        mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
+      },
     });
     await this.history(id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
@@ -492,25 +615,105 @@ export class TicketsService {
       await this.sla.cancel(id, 'response');
     }
 
-    // 通知对方
-    const notifyTarget = async (uid: string | null) => {
-      if (uid && uid !== user.id) {
-        await this.notifications.notify(uid, {
-          type: 'MESSAGE',
-          title: `工单有新回复：${ticket.ticketNo}`,
-          content: ticket.title,
-          ticketId: id,
-        });
-      }
-    };
+    const collaboratorIds = ticket.participants
+      .filter((participant) => participant.role === 'COLLABORATOR')
+      .map((participant) => participant.userId);
+    const followerIds = ticket.participants
+      .filter((participant) => participant.role === 'FOLLOWER')
+      .map((participant) => participant.userId);
     if (isInternal) {
-      await notifyTarget(ticket.assigneeId); // 内部备注仅通知处理人
-    } else if (ticket.requesterId === user.id) {
-      await notifyTarget(ticket.assigneeId); // 提单人回复 → 通知处理人
+      // 内部讨论不泄露给提单人和仅关注者。
+      await this.notifyMany(
+        [ticket.assigneeId, ...collaboratorIds].filter(Boolean) as string[],
+        user.id,
+        'MESSAGE',
+        `工单有新的内部讨论：${ticket.ticketNo}`,
+        ticket.title,
+        id,
+      );
     } else {
-      await notifyTarget(ticket.requesterId); // 处理人回复 → 通知提单人
+      await this.notifyMany(
+        [ticket.requesterId, ticket.assigneeId, ...collaboratorIds, ...followerIds].filter(
+          Boolean,
+        ) as string[],
+        user.id,
+        'MESSAGE',
+        `工单有新回复：${ticket.ticketNo}`,
+        ticket.title,
+        id,
+      );
     }
+    await this.notifyMany(
+      mentionUserIds,
+      user.id,
+      'MENTION',
+      `有人在工单中提及你：${ticket.ticketNo}`,
+      ticket.title,
+      id,
+    );
     return message;
+  }
+
+  // ---------- 协作成员 / 关注人 ----------
+  async participants(user: AuthUser, id: string) {
+    const ticket = await this.findOne(user, id);
+    return ticket.participants;
+  }
+
+  async participantCandidates(user: AuthUser, id: string) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    if (!this.canManageParticipants(user, ticket)) {
+      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
+    }
+    return this.prisma.user.findMany({
+      where: { status: 'ACTIVE' },
+      select: PARTICIPANT_USER_SELECT,
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async addParticipant(user: AuthUser, id: string, dto: AddParticipantDto) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    if (!this.canManageParticipants(user, ticket)) {
+      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
+    }
+    if (dto.userId === ticket.requesterId || dto.userId === ticket.assigneeId) {
+      throw new BadRequestException('提单人和主处理人已自动拥有工单访问权限');
+    }
+    const participant = await this.prisma.user.findFirst({
+      where: { id: dto.userId, status: 'ACTIVE' },
+    });
+    if (!participant) throw new BadRequestException('协作对象不存在或已禁用');
+    const result = await this.prisma.ticketParticipant.upsert({
+      where: { ticketId_userId: { ticketId: id, userId: dto.userId } },
+      update: { role: dto.role, addedById: user.id },
+      create: { ticketId: id, userId: dto.userId, role: dto.role, addedById: user.id },
+      include: { user: { select: PARTICIPANT_USER_SELECT } },
+    });
+    await this.history(id, user.id, 'UPDATE', 'participant', null, `${dto.role}:${dto.userId}`);
+    await this.notifications.notify(dto.userId, {
+      type: 'ASSIGNED',
+      title:
+        dto.role === 'COLLABORATOR'
+          ? `你已加入工单协作：${ticket.ticketNo}`
+          : `你正在关注工单：${ticket.ticketNo}`,
+      content: ticket.title,
+      ticketId: id,
+    });
+    return result;
+  }
+
+  async removeParticipant(user: AuthUser, id: string, userId: string) {
+    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
+    if (!ticket) throw new NotFoundException('工单不存在');
+    if (!this.canManageParticipants(user, ticket)) {
+      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
+    }
+    await this.prisma.ticketParticipant.deleteMany({ where: { ticketId: id, userId } });
+    await this.history(id, user.id, 'UPDATE', 'participant', userId, null);
+    return { ok: true };
   }
 
   // ---------- 编辑消息（作者本人或 admin/supervisor）----------
@@ -554,8 +757,8 @@ export class TicketsService {
   }
 
   async history_(user: AuthUser, id: string) {
-    const ticket = await this.loadOrThrow(id);
-    if (!this.canView(user, ticket)) throw new ForbiddenException('无权查看');
+    // 统一复用详情的可见性判定，协作成员也可查看审计历史。
+    await this.findOne(user, id);
     return this.prisma.ticketHistory.findMany({
       where: { ticketId: id },
       include: { user: { select: { id: true, name: true } } },

@@ -1,4 +1,5 @@
 import {
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -143,6 +144,20 @@ export class CreateMessageDto {
   @IsOptional()
   @IsString()
   contentType?: string;
+
+  /** 从协作区选择的 @ 提及对象；服务端仅接受本工单相关人员。 */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  mentionUserIds?: string[];
+}
+
+export class AddParticipantDto {
+  @IsString()
+  userId!: string;
+
+  @IsIn(['COLLABORATOR', 'FOLLOWER'])
+  role!: 'COLLABORATOR' | 'FOLLOWER';
 }
 
 export class ListTicketsQuery {

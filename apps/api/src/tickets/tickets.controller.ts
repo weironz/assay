@@ -13,6 +13,7 @@ import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
 import { TicketAction } from './workflow.service';
 import {
+  AddParticipantDto,
   AssignDto,
   CreateMessageDto,
   CreateTicketDto,
@@ -99,6 +100,38 @@ export class TicketsController {
     @Body() dto: CreateMessageDto,
   ) {
     return this.tickets.addMessage(user, id, dto);
+  }
+
+  @Get(':id/participants')
+  @RequirePermissions('ticket:read')
+  participants(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.tickets.participants(user, id);
+  }
+
+  @Get(':id/participant-candidates')
+  @RequirePermissions('ticket:read')
+  participantCandidates(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.tickets.participantCandidates(user, id);
+  }
+
+  @Post(':id/participants')
+  @RequirePermissions('ticket:read')
+  addParticipant(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: AddParticipantDto,
+  ) {
+    return this.tickets.addParticipant(user, id, dto);
+  }
+
+  @Delete(':id/participants/:userId')
+  @RequirePermissions('ticket:read')
+  removeParticipant(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('userId') userId: string,
+  ) {
+    return this.tickets.removeParticipant(user, id, userId);
   }
 
   @Patch(':id/messages/:messageId')

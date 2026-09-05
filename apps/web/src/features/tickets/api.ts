@@ -79,6 +79,16 @@ export interface TicketMessage {
     /** 头像相对路径，未设置时前端退化为姓名首字母 */
     image: string | null;
   };
+  mentions: {
+    user: { id: string; name: string; email: string; image: string | null };
+  }[];
+}
+
+export interface TicketParticipant {
+  userId: string;
+  role: 'COLLABORATOR' | 'FOLLOWER';
+  createdAt: string;
+  user: { id: string; name: string; email: string; image: string | null };
 }
 
 export interface TicketDetail extends TicketListItem {
@@ -91,6 +101,7 @@ export interface TicketDetail extends TicketListItem {
   datacenter: { id: string; name: string } | null;
   cluster: { id: string; name: string } | null;
   serialNumber: string | null;
+  participants: TicketParticipant[];
 }
 
 export interface TicketQuery {
@@ -187,8 +198,35 @@ export const useAssign = () =>
   );
 
 export const useAddMessage = () =>
-  useTicketMutation<{ body: string; isInternal?: boolean }>((id, arg) =>
+  useTicketMutation<{
+    body: string;
+    isInternal?: boolean;
+    mentionUserIds?: string[];
+  }>((id, arg) =>
     api.post(`/tickets/${id}/messages`, arg),
+  );
+
+export const useParticipantCandidates = (ticketId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['ticket-participant-candidates', ticketId],
+    queryFn: async () =>
+      (await api.get(`/tickets/${ticketId}/participant-candidates`)).data as {
+        id: string;
+        name: string;
+        email: string;
+        image: string | null;
+      }[],
+    enabled: !!ticketId && enabled,
+  });
+
+export const useAddParticipant = () =>
+  useTicketMutation<{ userId: string; role: 'COLLABORATOR' | 'FOLLOWER' }>(
+    (id, arg) => api.post(`/tickets/${id}/participants`, arg),
+  );
+
+export const useRemoveParticipant = () =>
+  useTicketMutation<{ userId: string }>((id, arg) =>
+    api.delete(`/tickets/${id}/participants/${arg.userId}`),
   );
 
 // —— 元数据 ——

@@ -98,12 +98,12 @@ POST /api/auth/sign-out
 | `requester` 提单人 | `ticket:create` `ticket:read` `ticket:update` `ticket:comment` `ticket:transition` |
 | `handler` 处理人 | `ticket:read` `ticket:update` `ticket:transition` `ticket:comment` |
 | `supervisor` 主管 | handler 全部 + `ticket:read:all` `ticket:assign` `stats:view` |
+| `ticket_viewer_all` 工单观察员（全局只读） | `ticket:read` `ticket:read:all` |
 | `admin` 管理员 | 全部权限 |
 
-**权限码通过只是第一道关。**`ticket:read:all` 是独立的只读数据范围权限：拥有它的
-用户可查看全部工单、历史、附件和全量仪表盘统计；未拥有时仅能看自己提交或指派给自己的
-工单。它不授予编辑、回复、上传、删除或状态流转权限；这些仍分别受原有权限码、角色和
-归属规则约束。删除工单要求是 admin 或提单人本人；状态流转还要满足状态机对角色和归属的要求。
+角色为固定岗位定义，由代码与 seed 同步维护，Web 端只能把既有角色分配给用户，不能拼装或改写权限。
+`ticket_viewer_all` 是全局只读角色：可查看全部工单、历史、附件及对应仪表盘汇总，但不授予编辑、回复、
+上传、删除、状态流转、分派或用户管理权限；内部备注仍仅对内部处理角色可见。
 
 ### 2.3 分页
 
@@ -215,8 +215,8 @@ GET /api/tickets/:id
 ```
 权限：`ticket:read`
 
-在列表字段基础上额外包含：`messages`（往来消息，**提单人看不到内部备注**）、
-`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、`cluster`、
+在列表字段基础上额外包含：`messages`（往来消息，**提单人和关注人看不到内部备注**）、
+`participants`（协作成员 / 关注人）、`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、`cluster`、
 `serialNumber`、`contact`、`firstResponseAt`、`firstResponseDueAt`。
 
 ### 3.4 修改工单
@@ -273,10 +273,37 @@ PATCH /api/tickets/:id/messages/:msgId   权限 ticket:comment
 | `body` | string | ✅ | HTML，服务端会做 XSS 消毒 |
 | `isInternal` | boolean | | 内部备注，**仅内部人员可发，提单人看不到** |
 | `contentType` | string | | 默认 `text/html` |
+| `mentionUserIds` | string[] | | 可选；仅能提及本工单的协作相关人员，收到 `MENTION` 通知 |
 
 编辑消息限作者本人或 admin / supervisor。
 
-### 3.8 操作历史
+### 3.8 协作成员与关注人
+
+主处理人始终由 `assigneeId` 唯一承担，负责 SLA 与状态流转。协作成员与关注人不改变主责：
+
+| 身份 | 可见范围 | 可执行操作 | 通知 |
+| --- | --- | --- | --- |
+| 协作成员 `COLLABORATOR` | 工单、历史、附件、内部备注 | 回复、内部讨论、上传附件 | 消息、状态变化、@ 提及 |
+| 关注人 `FOLLOWER` | 工单、历史、附件；不含内部备注 | 无 | 消息、状态变化、@ 提及 |
+
+以下接口均要求 `ticket:read`，服务端额外要求调用者是该工单的主处理人、主管或管理员：
+
+```
+GET    /api/tickets/:id/participants
+GET    /api/tickets/:id/participant-candidates
+POST   /api/tickets/:id/participants
+DELETE /api/tickets/:id/participants/:userId
+```
+
+新增或更新成员：
+
+```json
+{ "userId": "<用户id>", "role": "COLLABORATOR" }
+```
+
+`role` 可取 `COLLABORATOR` 或 `FOLLOWER`。提单人与主处理人已有天然访问权，不能重复作为协作成员加入。
+
+### 3.9 操作历史
 
 ```
 GET /api/tickets/:id/history
@@ -286,7 +313,7 @@ GET /api/tickets/:id/history
 返回数组，每项含 `action` `field` `oldValue` `newValue` `createdAt` `user`。
 **`user` 为 `null` 表示系统自动操作**（如 SLA 超时自动升级优先级）。
 
-### 3.9 删除工单
+### 3.10 删除工单
 
 ```
 DELETE /api/tickets/:id
@@ -316,8 +343,7 @@ DELETE /api/tickets/:id
 | `PATCH /api/queues/:id` | `queue:manage` | 改队列 |
 | `DELETE /api/queues/:id` | `queue:manage` | 删队列 |
 | `GET /api/assignees` | 登录 | 可指派的处理人（handler / admin 且状态正常） |
-| `GET /api/roles` | 登录 | 角色列表（含各角色的权限码） |
-| `GET /api/permissions` | 登录 | 权限码列表 |
+| `GET /api/roles` | `user:manage` | 固定岗位角色列表，仅用于为用户分配角色 |
 
 > **改 SLA 只影响之后新建的工单。**在跑的工单截止时刻在建单时就算好了，
 > 改配置不会回溯，避免处理人眼里的「还剩多久」凭空跳变。
@@ -495,6 +521,3 @@ GET /health
 3. **没有 Webhook**，事件只能靠轮询发现。
 4. 通知标题是服务端渲染的中文，不随语言变化。
 5. 接口无版本号前缀，破坏性变更依赖本文档同步更新。
-6. `GET /api/roles` 与 `GET /api/permissions` 未加权限守卫，任何登录用户都能
-   读到完整的角色与权限码清单。不涉及凭据，但会暴露权限模型，收紧到
-   `user:manage` 更稳妥。

@@ -11,6 +11,9 @@ import {
   useHistory,
   useUpdateTicket,
   useUpdateMessage,
+  useAddParticipant,
+  useRemoveParticipant,
+  useParticipantCandidates,
   uploadAttachment,
   attachmentUrl,
   Attachment,
@@ -48,6 +51,16 @@ export default function TicketDetailPage() {
   const { data: history } = useHistory(id);
   const updateTicket = useUpdateTicket();
   const updateMessage = useUpdateMessage();
+  const addParticipant = useAddParticipant();
+  const removeParticipant = useRemoveParticipant();
+  const canManageParticipants =
+    !!user?.roles.includes('admin') ||
+    !!user?.roles.includes('supervisor') ||
+    ticket?.assignee?.id === user?.id;
+  const { data: participantCandidates } = useParticipantCandidates(
+    id,
+    canManageParticipants,
+  );
 
   const [reply, setReply] = useState('');
   const [internal, setInternal] = useState(false);
@@ -58,11 +71,16 @@ export default function TicketDetailPage() {
   const [titleDraft, setTitleDraft] = useState('');
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [msgDraft, setMsgDraft] = useState('');
+  const [participantId, setParticipantId] = useState('');
+  const [participantRole, setParticipantRole] = useState<'COLLABORATOR' | 'FOLLOWER'>('COLLABORATOR');
+  const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !ticket)
     return <div className="text-gray-400">{t('common.loading')}</div>;
 
+  // 前后端滚动升级时旧 API 可能短暂未返回协作字段；详情页保持可用并展示空协作区。
+  const participants = ticket.participants ?? [];
   const isStaff =
     user?.roles.includes('admin') ||
     user?.roles.includes('supervisor') ||
@@ -73,6 +91,17 @@ export default function TicketDetailPage() {
     has('ticket:assign') && ['NEW', 'REOPENED'].includes(ticket.status);
   const canEditTicket =
     has('ticket:update') && (isStaff || ticket.requester?.id === user?.id);
+  const isCollaborator = participants.some(
+    (participant) =>
+      participant.userId === user?.id && participant.role === 'COLLABORATOR',
+  );
+  const canReply =
+    has('ticket:comment') &&
+    (isSupervisorOrAdmin ||
+      ticket.requester?.id === user?.id ||
+      ticket.assignee?.id === user?.id ||
+      isCollaborator);
+  const canWriteInternal = isSupervisorOrAdmin || ticket.assignee?.id === user?.id || isCollaborator;
 
   const saveTitle = () => {
     const v = titleDraft.trim();
@@ -97,10 +126,11 @@ export default function TicketDetailPage() {
   const submitReply = () => {
     if (!plain) return;
     addMessage.mutate(
-      { id, arg: { body: reply, isInternal: internal } },
+      { id, arg: { body: reply, isInternal: internal, mentionUserIds } },
       {
         onSuccess: () => {
           setReply('');
+          setMentionUserIds([]);
           setEditorKey((k) => k + 1); // 重挂载清空编辑器
           qc.invalidateQueries({ queryKey: ['attachments', id] });
         },
@@ -243,6 +273,14 @@ export default function TicketDetailPage() {
                           {t('ticketDetail.internalTag')}
                         </span>
                       )}
+                      {m.mentions.map((mention) => (
+                        <span
+                          key={mention.user.id}
+                          className="rounded bg-brand-50 px-1.5 py-0.5 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300"
+                        >
+                          @{mention.user.name}
+                        </span>
+                      ))}
                       <span className="ml-auto shrink-0 text-gray-400">
                         {fmt.dateTime(m.createdAt)}
                       </span>
@@ -295,45 +333,197 @@ export default function TicketDetailPage() {
             })}
           </div>
 
-          {/* 回复框（富文本） */}
-          <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
-            <RichEditor
-              key={editorKey}
-              placeholder={t('ticketDetail.replyPlaceholder')}
-              onChange={setReply}
-              onUploadImage={async (file) => {
-                const a = await uploadAttachment(id, file, undefined, 'inline');
-                return attachmentUrl(a);
-              }}
-            />
-            <div className="flex items-center justify-between">
-              {isStaff ? (
-                <label className="flex items-center gap-1 text-sm text-gray-500">
-                  <input
-                    type="checkbox"
-                    checked={internal}
-                    onChange={(e) => setInternal(e.target.checked)}
-                  />
-                  {t('ticketDetail.internalCheckbox')}
-                </label>
-              ) : (
-                <span />
+          {/* 协作成员与主处理人共用会话框；关注人保持只读，避免“关注”悄悄变成处理责任。 */}
+          {canReply ? (
+            <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-3 space-y-2">
+              <RichEditor
+                key={editorKey}
+                placeholder={t('ticketDetail.replyPlaceholder')}
+                onChange={setReply}
+                onUploadImage={async (file) => {
+                  const a = await uploadAttachment(id, file, undefined, 'inline');
+                  return attachmentUrl(a);
+                }}
+              />
+              {participants.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="text-gray-400">{t('ticketDetail.mention')}</span>
+                  {participants.map((participant) => {
+                    const selected = mentionUserIds.includes(participant.userId);
+                    return (
+                      <button
+                        key={participant.userId}
+                        type="button"
+                        onClick={() =>
+                          setMentionUserIds((ids) =>
+                            selected
+                              ? ids.filter((item) => item !== participant.userId)
+                              : [...ids, participant.userId],
+                          )
+                        }
+                        className={`rounded-full border px-2 py-1 transition-colors ${
+                          selected
+                            ? 'border-brand-500 bg-brand-50 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300'
+                            : 'border-gray-200 text-gray-500 hover:border-brand-300 dark:border-gray-700 dark:text-gray-400'
+                        }`}
+                      >
+                        @{participant.user.name}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
-              <button
-                disabled={addMessage.isPending || !plain}
-                onClick={submitReply}
-                className="rounded-md bg-brand-700 text-white px-4 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
-              >
-                {internal
-                  ? t('ticketDetail.addInternalNote')
-                  : t('ticketDetail.reply')}
-              </button>
+              <div className="flex items-center justify-between">
+                {canWriteInternal ? (
+                  <label className="flex items-center gap-1 text-sm text-gray-500">
+                    <input
+                      type="checkbox"
+                      checked={internal}
+                      onChange={(e) => setInternal(e.target.checked)}
+                    />
+                    {t('ticketDetail.internalCheckbox')}
+                  </label>
+                ) : (
+                  <span />
+                )}
+                <button
+                  disabled={addMessage.isPending || !plain}
+                  onClick={submitReply}
+                  className="rounded-md bg-brand-700 text-white px-4 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
+                >
+                  {internal
+                    ? t('ticketDetail.addInternalNote')
+                    : t('ticketDetail.reply')}
+                </button>
+              </div>
             </div>
-          </div>
+          ) : (
+            <p className="rounded-lg border border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 dark:border-gray-700 dark:text-gray-400">
+              {t('ticketDetail.followOnlyHint')}
+            </p>
+          )}
         </div>
 
         {/* 右栏 */}
         <div className="space-y-3 text-sm">
+          {/* 协作区用两条细轨区分“参与解决”和“只关注”：角色边界直接写在结构里，
+              不靠一个抽象的权限说明让人猜。 */}
+          <section className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+            <div className="border-b border-gray-100 px-4 py-3 dark:border-gray-800">
+              <h2 className="font-medium text-gray-800 dark:text-gray-100">
+                {t('ticketDetail.collaboration')}
+              </h2>
+              <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">
+                {t('ticketDetail.collaborationHint')}
+              </p>
+            </div>
+            <div className="space-y-3 p-4">
+              <div>
+                <p className="mb-1.5 text-xs font-medium text-gray-500">
+                  {t('ticketDetail.primaryAssignee')}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Avatar
+                    name={ticket.assignee?.name}
+                    email={ticket.assignee?.id}
+                    size={24}
+                  />
+                  <span className="text-sm">
+                    {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
+                  </span>
+                </div>
+              </div>
+              {(['COLLABORATOR', 'FOLLOWER'] as const).map((role) => {
+                const members = participants.filter((item) => item.role === role);
+                const collaborative = role === 'COLLABORATOR';
+                return (
+                  <div key={role} className={`border-l-2 pl-3 ${collaborative ? 'border-brand-500' : 'border-gray-300 dark:border-gray-700'}`}>
+                    <p className="mb-1.5 text-xs font-medium text-gray-500">
+                      {collaborative
+                        ? t('ticketDetail.collaborators')
+                        : t('ticketDetail.followers')}
+                    </p>
+                    {members.length ? (
+                      <ul className="space-y-1.5">
+                        {members.map((member) => (
+                          <li key={member.userId} className="flex items-center gap-2">
+                            <Avatar
+                              name={member.user.name}
+                              email={member.user.email}
+                              image={member.user.image}
+                              size={22}
+                            />
+                            <span className="min-w-0 flex-1 truncate text-xs text-gray-700 dark:text-gray-200">
+                              {member.user.name}
+                            </span>
+                            {canManageParticipants && (
+                              <button
+                                type="button"
+                                onClick={() => removeParticipant.mutate({ id, arg: { userId: member.userId } })}
+                                className="text-xs text-gray-400 hover:text-red-600"
+                              >
+                                {t('ticketDetail.removeParticipant')}
+                              </button>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-xs text-gray-400">{t('common.empty')}</p>
+                    )}
+                  </div>
+                );
+              })}
+              {canManageParticipants && (
+                <div className="space-y-2 border-t border-gray-100 pt-3 dark:border-gray-800">
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2">
+                    <select
+                      value={participantId}
+                      onChange={(e) => setParticipantId(e.target.value)}
+                      aria-label={t('ticketDetail.selectParticipant')}
+                      className="min-w-0 rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800"
+                    >
+                      <option value="">{t('ticketDetail.selectParticipant')}</option>
+                      {participantCandidates
+                        ?.filter(
+                          (candidate) =>
+                            candidate.id !== ticket.requester.id &&
+                            candidate.id !== ticket.assignee?.id &&
+                            !participants.some((member) => member.userId === candidate.id),
+                        )
+                        .map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name} · {candidate.email}
+                          </option>
+                        ))}
+                    </select>
+                    <select
+                      value={participantRole}
+                      onChange={(e) => setParticipantRole(e.target.value as 'COLLABORATOR' | 'FOLLOWER')}
+                      aria-label={t('ticketDetail.participantRole')}
+                      className="rounded-md border border-gray-300 bg-white px-2 py-1.5 text-xs dark:border-gray-700 dark:bg-gray-800"
+                    >
+                      <option value="COLLABORATOR">{t('ticketDetail.collaborator')}</option>
+                      <option value="FOLLOWER">{t('ticketDetail.follower')}</option>
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!participantId || addParticipant.isPending}
+                    onClick={() =>
+                      addParticipant.mutate(
+                        { id, arg: { userId: participantId, role: participantRole } },
+                        { onSuccess: () => setParticipantId('') },
+                      )
+                    }
+                    className="w-full rounded-md border border-brand-600 px-3 py-1.5 text-xs text-brand-700 hover:bg-brand-50 disabled:opacity-50 dark:hover:bg-brand-950/40"
+                  >
+                    {t('ticketDetail.addParticipant')}
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
             <Meta label={t('ticketDetail.metaStatus')}>
               <span
@@ -450,20 +640,24 @@ export default function TicketDetailPage() {
               <span className="text-gray-500">
                 {t('ticketDetail.attachments')}
               </span>
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="text-brand-700 text-xs hover:underline"
-              >
-                {t('ticketDetail.addAttachment')}
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                multiple
-                hidden
-                accept={ACCEPT_ATTR}
-                onChange={(e) => uploadFiles(e.target.files)}
-              />
+              {canReply && (
+                <>
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    className="text-brand-700 text-xs hover:underline"
+                  >
+                    {t('ticketDetail.addAttachment')}
+                  </button>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    multiple
+                    hidden
+                    accept={ACCEPT_ATTR}
+                    onChange={(e) => uploadFiles(e.target.files)}
+                  />
+                </>
+              )}
             </div>
             {attachments?.length ? (
               <ul className="space-y-1">

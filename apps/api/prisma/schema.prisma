@@ -41,6 +41,11 @@ enum MessageType {
   SYSTEM // 系统事件
 }
 
+enum TicketParticipantRole {
+  COLLABORATOR // 可参与处理讨论，但不是 SLA 主责人
+  FOLLOWER // 仅关注动态与接收通知
+}
+
 enum HistoryAction {
   CREATE
   ASSIGN
@@ -54,34 +59,36 @@ enum HistoryAction {
 // User 同时是 better-auth 的用户表：核心字段 name/email/emailVerified/image
 // 由 better-auth 管理，密码存于 account 表；username/phone/status 为业务扩展。
 model User {
-  id            String     @id @default(cuid())
-  name          String
-  email         String     @unique
-  emailVerified Boolean    @default(false)
-  image         String?
+  id             String     @id @default(cuid())
+  name           String
+  email          String     @unique
+  emailVerified  Boolean    @default(false)
+  image          String?
   // 业务扩展字段
-  username      String?    @unique
-  phone         String?
+  username       String?    @unique
+  phone          String?
   // 勾选「设为默认联系方式」时存这里，下次建单自动带出。与 Ticket.contact 同结构
-  defaultContact Json?     @map("default_contact")
-  status        UserStatus @default(ACTIVE)
-  createdAt     DateTime   @default(now())
-  updatedAt     DateTime   @updatedAt
+  defaultContact Json?      @map("default_contact")
+  status         UserStatus @default(ACTIVE)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
 
   // better-auth 关系
   sessions Session[]
   accounts Account[]
 
   // 业务关系
-  roles             UserRole[]
-  requestedTickets  Ticket[]           @relation("Requester")
-  assignedTickets   Ticket[]           @relation("Assignee")
-  defaultForQueues  Queue[]            @relation("QueueDefaultAssignee")
-  messages          TicketMessage[]
-  uploadedFiles     TicketAttachment[]
-  historyEntries    TicketHistory[]
-  notifications     Notification[]
-  savedViews        SavedView[]
+  roles                UserRole[]
+  requestedTickets     Ticket[]               @relation("Requester")
+  assignedTickets      Ticket[]               @relation("Assignee")
+  defaultForQueues     Queue[]                @relation("QueueDefaultAssignee")
+  messages             TicketMessage[]
+  uploadedFiles        TicketAttachment[]
+  historyEntries       TicketHistory[]
+  notifications        Notification[]
+  savedViews           SavedView[]
+  ticketParticipations TicketParticipant[]
+  mentionedInMessages  TicketMessageMention[]
 
   @@map("users")
 }
@@ -147,9 +154,9 @@ model Role {
 }
 
 model Permission {
-  id    String @id @default(cuid())
-  code  String @unique // e.g. ticket:create, ticket:assign
-  name  String
+  id   String @id @default(cuid())
+  code String @unique // e.g. ticket:create, ticket:assign
+  name String
 
   roles RolePermission[]
 
@@ -192,10 +199,10 @@ model Queue {
 }
 
 model TicketType {
-  id             String   @id @default(cuid())
-  name           String   @unique
-  slaResponseMin Int      @default(60) @map("sla_response_min")
-  slaResolveMin  Int      @default(1440) @map("sla_resolve_min")
+  id             String @id @default(cuid())
+  name           String @unique
+  slaResponseMin Int    @default(60) @map("sla_response_min")
+  slaResolveMin  Int    @default(1440) @map("sla_resolve_min")
 
   tickets Ticket[]
 
@@ -259,58 +266,80 @@ model TicketTag {
 
 // ============ 工单主表（容器，不含正文）============
 model Ticket {
-  id              String       @id @default(cuid())
-  ticketNo        String       @unique @map("ticket_no")
-  title           String
-  requesterId     String       @map("requester_id")
-  assigneeId      String?      @map("assignee_id")
-  queueId         String?      @map("queue_id")
-  typeId          String?      @map("type_id")
-  categoryId      String?      @map("category_id")
+  id                 String       @id @default(cuid())
+  ticketNo           String       @unique @map("ticket_no")
+  title              String
+  requesterId        String       @map("requester_id")
+  assigneeId         String?      @map("assignee_id")
+  queueId            String?      @map("queue_id")
+  typeId             String?      @map("type_id")
+  categoryId         String?      @map("category_id")
   // IDC 算力租赁场景的定位信息，三项都选填：机房 / 集群 / 设备序列号
-  datacenterId    String?      @map("datacenter_id")
-  clusterId       String?      @map("cluster_id")
-  serialNumber    String?      @map("serial_number")
-  priority        Priority     @default(MEDIUM)
-  status          TicketStatus @default(NEW)
+  datacenterId       String?      @map("datacenter_id")
+  clusterId          String?      @map("cluster_id")
+  serialNumber       String?      @map("serial_number")
+  priority           Priority     @default(MEDIUM)
+  status             TicketStatus @default(NEW)
   // ===== SLA 计时 =====
   // 计时从「建单」起算，不是从接手起算：没人接手恰恰是最该告警的情况。
   // 挂起期间不计时——挂起意味着与用户达成一致在等外部条件，这段时间
   // 不该算在处理时长里。实现方式是恢复时把暂停时长加回到两个截止时刻上。
-  slaDueAt           DateTime? @map("sla_due_at")
-  firstResponseDueAt DateTime? @map("first_response_due_at")
-  firstResponseAt    DateTime? @map("first_response_at")
-  /** 当前这次挂起的开始时刻；非挂起状态为空 */
-  holdStartedAt      DateTime? @map("hold_started_at")
-  /** 累计挂起毫秒数，供报表算「真实处理时长」用 */
-  holdMs             Int       @default(0) @map("hold_ms")
+  slaDueAt           DateTime?    @map("sla_due_at")
+  firstResponseDueAt DateTime?    @map("first_response_due_at")
+  firstResponseAt    DateTime?    @map("first_response_at")
+  /**
+   * 当前这次挂起的开始时刻；非挂起状态为空
+   */
+  holdStartedAt      DateTime?    @map("hold_started_at")
+  /**
+   * 累计挂起毫秒数，供报表算「真实处理时长」用
+   */
+  holdMs             Int          @default(0) @map("hold_ms")
   // 提单人的联系方式，选填。结构见 TicketContactDto：
   // { position?, phone, callTime, smsTime, emails[] }。
   // 时间/职位存的是枚举键而非展示文案——四种语言下文案会变，键不会
-  contact         Json?
-  extra           Json? // 预留自定义字段
-  createdAt       DateTime     @default(now()) @map("created_at")
-  updatedAt       DateTime     @updatedAt @map("updated_at")
-  closedAt        DateTime?    @map("closed_at")
+  contact            Json?
+  extra              Json? // 预留自定义字段
+  createdAt          DateTime     @default(now()) @map("created_at")
+  updatedAt          DateTime     @updatedAt @map("updated_at")
+  closedAt           DateTime?    @map("closed_at")
 
-  requester User        @relation("Requester", fields: [requesterId], references: [id])
-  assignee  User?       @relation("Assignee", fields: [assigneeId], references: [id])
+  requester  User        @relation("Requester", fields: [requesterId], references: [id])
+  assignee   User?       @relation("Assignee", fields: [assigneeId], references: [id])
   queue      Queue?      @relation(fields: [queueId], references: [id])
   type       TicketType? @relation(fields: [typeId], references: [id])
   category   Category?   @relation(fields: [categoryId], references: [id])
   datacenter Datacenter? @relation(fields: [datacenterId], references: [id])
   cluster    Cluster?    @relation(fields: [clusterId], references: [id])
 
-  messages    TicketMessage[]
-  attachments TicketAttachment[]
-  history     TicketHistory[]
-  tags        TicketTag[]
+  messages      TicketMessage[]
+  attachments   TicketAttachment[]
+  history       TicketHistory[]
+  tags          TicketTag[]
   notifications Notification[]
+  participants  TicketParticipant[]
 
   @@index([status])
   @@index([assigneeId])
   @@index([queueId])
   @@map("tickets")
+}
+
+// ============ 工单协作 ============
+// 主处理人仍由 Ticket.assigneeId 唯一承载；此表仅记录协作/关注关系，不能稀释 SLA 责任。
+model TicketParticipant {
+  ticketId  String                @map("ticket_id")
+  userId    String                @map("user_id")
+  role      TicketParticipantRole @default(COLLABORATOR)
+  createdAt DateTime              @default(now()) @map("created_at")
+  addedById String                @map("added_by_id")
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([ticketId, userId])
+  @@index([userId, role])
+  @@map("ticket_participants")
 }
 
 // ============ 逐条消息 / 往来（正文在这里）============
@@ -324,24 +353,39 @@ model TicketMessage {
   body        String
   createdAt   DateTime    @default(now()) @map("created_at")
 
-  ticket      Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
-  author      User               @relation(fields: [authorId], references: [id])
+  ticket      Ticket                 @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author      User                   @relation(fields: [authorId], references: [id])
   attachments TicketAttachment[]
+  mentions    TicketMessageMention[]
 
   @@index([ticketId])
   @@map("ticket_messages")
 }
 
+// @ 提及独立落库：通知、审计和后续“提及我的消息”筛选不依赖解析富文本正文。
+model TicketMessageMention {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  message TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
+  @@map("ticket_message_mentions")
+}
+
 // ============ 附件（object_key 指向 StorageService）============
 model TicketAttachment {
-  id         String  @id @default(cuid())
-  ticketId   String? @map("ticket_id") // 草稿附件（建单前上传）ticketId 暂为空，提交时关联
-  messageId  String? @map("message_id")
-  fileName   String  @map("file_name")
-  objectKey  String  @map("object_key")
-  fileSize   Int     @map("file_size")
+  id         String   @id @default(cuid())
+  ticketId   String?  @map("ticket_id") // 草稿附件（建单前上传）ticketId 暂为空，提交时关联
+  messageId  String?  @map("message_id")
+  fileName   String   @map("file_name")
+  objectKey  String   @map("object_key")
+  fileSize   Int      @map("file_size")
   mime       String
-  uploaderId String  @map("uploader_id")
+  uploaderId String   @map("uploader_id")
   createdAt  DateTime @default(now()) @map("created_at")
 
   ticket   Ticket?        @relation(fields: [ticketId], references: [id], onDelete: Cascade)
@@ -356,7 +400,9 @@ model TicketAttachment {
 model TicketHistory {
   id        String        @id @default(cuid())
   ticketId  String        @map("ticket_id")
-  /** 为空表示系统自动操作（如 SLA 超时自动升级优先级），界面显示为「系统」 */
+  /**
+   * 为空表示系统自动操作（如 SLA 超时自动升级优先级），界面显示为「系统」
+   */
   userId    String?       @map("user_id")
   action    HistoryAction
   field     String?

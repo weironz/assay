@@ -40,6 +40,10 @@ export default function UsersPage() {
   const [msg, setMsg] = useState<Msg>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [editRoles, setEditRoles] = useState<string[]>([]);
+  const roleLabel = (name: string) => {
+    const role = roles?.find((item) => item.name === name);
+    return role?.description ? `${role.description} · ${name}` : name;
+  };
 
   const createMut = useMutation({
     mutationFn: async () => (await api.post('/users', form)).data,
@@ -162,17 +166,20 @@ export default function UsersPage() {
         <div className="md:col-span-4 flex flex-wrap gap-3 text-sm">
           <span className="text-gray-500">{t('users.rolesLabel')}</span>
           {roles?.map((r) => (
-            <label key={r.id} className="flex items-center gap-1">
+            <label key={r.id} className="flex items-center gap-1.5">
               <input
                 type="checkbox"
                 checked={form.roleNames.includes(r.name)}
                 onChange={() => toggleRole(r.name)}
               />
-              {r.name}
-              {r.description ? `(${r.description})` : ''}
+              <span>{r.description ?? r.name}</span>
+              <code className="text-xs text-gray-400">{r.name}</code>
             </label>
           ))}
         </div>
+        <p className="md:col-span-4 text-xs text-gray-500 dark:text-gray-400">
+          {t('users.fixedRolesHint')}
+        </p>
         {msg && (
           <p className="md:col-span-4 text-sm text-gray-500">{showMsg(msg)}</p>
         )}
@@ -198,7 +205,7 @@ export default function UsersPage() {
               >
                 <td className="px-4 py-2">{u.name}</td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
-                <td className="px-4 py-2">{u.roles.join(', ')}</td>
+                <td className="px-4 py-2">{u.roles.map(roleLabel).join(', ')}</td>
                 <td className="px-4 py-2">
                   <span
                     className={
@@ -265,10 +272,8 @@ export default function UsersPage() {
                     checked={editRoles.includes(r.name)}
                     onChange={() => toggleEditRole(r.name)}
                   />
-                  {r.name}
-                  {r.description ? (
-                    <span className="text-gray-400">（{r.description}）</span>
-                  ) : null}
+                  <span>{r.description ?? r.name}</span>
+                  <code className="text-xs text-gray-400">{r.name}</code>
                 </label>
               ))}
             </div>

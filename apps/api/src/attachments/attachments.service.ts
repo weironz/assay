@@ -22,7 +22,11 @@ export class AttachmentsService {
   private async loadTicketForAccess(ticketId: string) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
-      select: { requesterId: true, assigneeId: true },
+      select: {
+        requesterId: true,
+        assigneeId: true,
+        participants: { select: { userId: true, role: true } },
+      },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
     return ticket;
@@ -33,7 +37,8 @@ export class AttachmentsService {
     if (user.permissions.includes('ticket:read:all')) return;
     if (
       ticket.requesterId !== user.id &&
-      ticket.assigneeId !== user.id
+      ticket.assigneeId !== user.id &&
+      !ticket.participants.some((participant) => participant.userId === user.id)
     ) {
       throw new ForbiddenException('无权访问该工单附件');
     }
@@ -43,7 +48,11 @@ export class AttachmentsService {
   private async assertCanOperate(user: AuthUser, ticketId: string) {
     const ticket = await this.loadTicketForAccess(ticketId);
     const staff = user.roles.includes('admin') || user.roles.includes('supervisor');
-    if (!staff && ticket.requesterId !== user.id && ticket.assigneeId !== user.id) {
+    const collaborator = ticket.participants.some(
+      (participant) =>
+        participant.userId === user.id && participant.role === 'COLLABORATOR',
+    );
+    if (!staff && !collaborator && ticket.requesterId !== user.id && ticket.assigneeId !== user.id) {
       throw new ForbiddenException('无权向该工单上传附件');
     }
   }

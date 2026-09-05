@@ -1,4 +1,9 @@
 import { PrismaClient } from '@prisma/client';
+import {
+  SYSTEM_ROLE_DESCRIPTIONS,
+  SYSTEM_ROLE_NAMES,
+  SYSTEM_ROLE_PERMISSIONS,
+} from './auth/role-policy';
 
 const prisma = new PrismaClient();
 
@@ -17,40 +22,6 @@ const PERMISSIONS: [string, string][] = [
   ['stats:view', '查看统计'],
 ];
 
-// 角色 -> 权限
-const ROLE_PERMS: Record<string, string[]> = {
-  requester: [
-    'ticket:create',
-    'ticket:read',
-    'ticket:update', // 编辑自己工单的标题/优先级（service 限制仅本人）
-    'ticket:comment',
-    'ticket:transition', // 关单/重开/取消（具体动作由 WorkflowService 细粒度控制）
-  ],
-  handler: [
-    'ticket:read',
-    'ticket:update',
-    'ticket:transition',
-    'ticket:comment',
-  ],
-  supervisor: [
-    'ticket:read',
-    'ticket:read:all',
-    'ticket:update',
-    'ticket:assign',
-    'ticket:transition',
-    'ticket:comment',
-    'stats:view',
-  ],
-  admin: PERMISSIONS.map((p) => p[0]),
-};
-
-const ROLE_DESC: Record<string, string> = {
-  requester: '提单人',
-  handler: '处理人',
-  supervisor: '主管',
-  admin: '管理员',
-};
-
 async function main() {
   // 权限
   for (const [code, name] of PERMISSIONS) {
@@ -61,25 +32,29 @@ async function main() {
     });
   }
 
-  // 角色 + 角色权限
-  for (const roleName of Object.keys(ROLE_PERMS)) {
+  // 固定岗位角色 + 固定权限。每次 seed 均按代码基线校准，避免页面配置漂移。
+  for (const roleName of SYSTEM_ROLE_NAMES) {
     const role = await prisma.role.upsert({
       where: { name: roleName },
-      update: { description: ROLE_DESC[roleName] },
-      create: { name: roleName, description: ROLE_DESC[roleName] },
+      update: { description: SYSTEM_ROLE_DESCRIPTIONS[roleName] },
+      create: { name: roleName, description: SYSTEM_ROLE_DESCRIPTIONS[roleName] },
     });
-    for (const code of ROLE_PERMS[roleName]) {
-      const perm = await prisma.permission.findUnique({ where: { code } });
-      if (perm) {
-        await prisma.rolePermission.upsert({
-          where: {
-            roleId_permissionId: { roleId: role.id, permissionId: perm.id },
-          },
-          update: {},
-          create: { roleId: role.id, permissionId: perm.id },
-        });
-      }
+    const permissionCodes = SYSTEM_ROLE_PERMISSIONS[roleName];
+    const permissions = await prisma.permission.findMany({
+      where: { code: { in: permissionCodes } },
+    });
+    if (permissions.length !== permissionCodes.length) {
+      throw new Error(`角色 ${roleName} 存在未定义的权限码`);
     }
+    await prisma.$transaction([
+      prisma.rolePermission.deleteMany({ where: { roleId: role.id } }),
+      prisma.rolePermission.createMany({
+        data: permissions.map((permission) => ({
+          roleId: role.id,
+          permissionId: permission.id,
+        })),
+      }),
+    ]);
   }
 
   // 管理员账号由 api 启动时的 AuthBootstrapService 通过 better-auth 创建

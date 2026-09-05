@@ -4,6 +4,7 @@ import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { auth } from './auth';
 import { AuthUser } from './auth.types';
+import { isSystemRoleName } from './role-policy';
 
 @Injectable()
 export class AuthService {
@@ -30,10 +31,12 @@ export class AuthService {
     });
     if (!user) return null;
 
-    const roles = user.roles.map((ur) => ur.role.name);
+    // 只承认代码定义的岗位角色，遗留或手工插入的角色不应扩大权限。
+    const systemRoles = user.roles.filter((ur) => isSystemRoleName(ur.role.name));
+    const roles = systemRoles.map((ur) => ur.role.name);
     const permissions = Array.from(
       new Set(
-        user.roles.flatMap((ur) =>
+        systemRoles.flatMap((ur) =>
           ur.role.permissions.map((rp) => rp.permission.code),
         ),
       ),

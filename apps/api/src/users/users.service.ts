@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { auth } from '../auth/auth';
+import { isSystemRoleName } from '../auth/role-policy';
 import { CreateUserDto, UpdateUserDto } from './dto';
 
 @Injectable()
@@ -19,7 +20,10 @@ export class UsersService {
       username: user.username,
       phone: user.phone,
       status: user.status,
-      roles: user.roles?.map((ur: any) => ur.role.name) ?? [],
+      roles:
+        user.roles
+          ?.map((ur: any) => ur.role.name)
+          .filter(isSystemRoleName) ?? [],
       createdAt: user.createdAt,
     };
   }
@@ -117,11 +121,15 @@ export class UsersService {
 
   /** 重置用户的角色集合 */
   private async setRoles(userId: string, roleNames: string[]) {
+    const names = [...new Set(roleNames)];
+    if (!names.every(isSystemRoleName)) {
+      throw new BadRequestException('包含非系统角色');
+    }
     const roles = await this.prisma.role.findMany({
-      where: { name: { in: roleNames } },
+      where: { name: { in: names } },
     });
-    if (roles.length !== roleNames.length) {
-      throw new BadRequestException('包含未知角色');
+    if (roles.length !== names.length) {
+      throw new BadRequestException('系统角色尚未初始化');
     }
     await this.prisma.userRole.deleteMany({ where: { userId } });
     await this.prisma.userRole.createMany({

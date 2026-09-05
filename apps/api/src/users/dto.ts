@@ -1,4 +1,5 @@
 import {
+  ArrayNotEmpty,
   IsArray,
   IsEmail,
   IsIn,
@@ -6,6 +7,7 @@ import {
   IsString,
   MinLength,
 } from 'class-validator';
+import { SYSTEM_ROLE_NAMES } from '../auth/role-policy';
 
 export class CreateUserDto {
   @IsEmail()
@@ -28,7 +30,9 @@ export class CreateUserDto {
   phone?: string;
 
   @IsArray()
+  @ArrayNotEmpty()
   @IsString({ each: true })
+  @IsIn(SYSTEM_ROLE_NAMES, { each: true })
   roleNames!: string[]; // ['handler'] 等
 }
 
@@ -53,6 +57,8 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayNotEmpty()
   @IsString({ each: true })
+  @IsIn(SYSTEM_ROLE_NAMES, { each: true })
   roleNames?: string[];
 }
