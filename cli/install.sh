@@ -17,7 +17,7 @@ need awk
 need sha256sum
 
 RELEASES="$(curl -fsSL "$API")"
-TAG="$(printf '%s' "$RELEASES" | awk -F'"' '/"tag_name"[[:space:]]*:[[:space:]]*"assay-cli-v/{print $4; exit}')"
+TAG="$(printf '%s' "$RELEASES" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"assay-cli-v[^"]*"' | head -n 1 | sed 's/.*"\(assay-cli-v[^"]*\)"/\1/')"
 [ -n "$TAG" ] || { echo "No stable assay-cli release found." >&2; exit 1; }
 
 ASSET="assay-${TARGET}"
