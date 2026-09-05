@@ -25,8 +25,8 @@ pub fn run(check_only: bool) -> Result<()> {
     let release = latest_cli_release()?;
     let latest = release
         .tag_name
-        .strip_prefix("assay-cli-v")
-        .context("CLI Release 标签格式错误")?;
+        .strip_prefix('v')
+        .context("Release 标签格式错误，应为 vX.Y.Z")?;
     let current = Version::parse(VERSION)?;
     let latest_version = Version::parse(latest)?;
     if latest_version <= current {
@@ -109,8 +109,19 @@ fn latest_cli_release() -> Result<Release> {
         .json()?;
     releases
         .into_iter()
-        .find(|r| r.tag_name.starts_with("assay-cli-v") && !r.prerelease && !r.draft)
-        .context("尚未发布 assay-cli。请从 GitHub Release 安装首个版本")
+        .filter(|r| {
+            r.tag_name
+                .strip_prefix('v')
+                .is_some_and(|version| Version::parse(version).is_ok())
+                && !r.prerelease
+                && !r.draft
+                && r.assets
+                    .iter()
+                    .any(|asset| asset.name.starts_with("assay-"))
+                && r.assets.iter().any(|asset| asset.name == "SHA256SUMS")
+        })
+        .max_by_key(|r| Version::parse(r.tag_name.strip_prefix('v').unwrap_or("0.0.0")).ok())
+        .context("尚未发布包含 CLI 安装包的正式版本。请从 GitHub Release 安装首个版本")
 }
 
 fn http() -> Result<Client> {

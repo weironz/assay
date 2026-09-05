@@ -4,7 +4,7 @@
 不会直连 PostgreSQL、Redis 或对象存储。除了供工程师在终端操作外，`assay mcp serve`
 还能启动一个本地 stdio MCP Server，供 Codex、Claude Desktop 等 AI 客户端调用。
 
-当前 CLI 版本独立于 Web/API 的 `v1.3.x` 版本，使用 `assay-cli-vX.Y.Z` Git 标签发布。
+CLI 与 Web/API 使用同一产品版本，统一使用 `v1.3.x` Git 标签发布。
 
 ## 1. 安装
 
@@ -130,7 +130,7 @@ assay update           # 下载、校验 SHA-256 并替换当前可执行文件
 ```
 
 Linux 会立即替换文件。Windows 会在当前进程退出后，通过短暂的本地更新脚本替换 `assay.exe`；
-下一次打开终端即可使用新版本。更新仅接受 `assay-cli-v*` 的稳定 GitHub Release 及其
+下一次打开终端即可使用新版本。更新仅接受带有 CLI 安装包的稳定 `v*` GitHub Release 及其
 `SHA256SUMS` 校验文件。
 
 ## 5. MCP 集成
@@ -187,12 +187,16 @@ MCP 会通过原有工单权限读取图片附件并返回可视觉识别的图�
 
 ## 6. 发布维护者说明
 
-创建并推送 `assay-cli-vX.Y.Z` 标签会触发 `.github/workflows/cli-release.yml`，构建 Linux
-`x86_64` 和 Windows `x86_64` 二进制，生成 `SHA256SUMS` 并创建 GitHub Release。示例：
+在 GitHub Actions 手动运行 `CI / CD`，并填写 `release_version`（如 `1.3.5`），流水线会在
+测试、镜像部署和健康校验全部成功后，构建 Linux `x86_64` 与 Windows `x86_64` 二进制、生成
+`SHA256SUMS`、创建 `v1.3.5` 标签与 GitHub Release。示例：
 
 ```bash
-git tag -a assay-cli-v0.1.0 -m "Release Assay CLI v0.1.0"
-git push origin assay-cli-v0.1.0
+gh workflow run ci-cd.yml -f release_version=1.3.5
+gh run watch
 ```
 
-发布后，安装器与 `assay update` 会自动发现该最新稳定 CLI Release。
+发布后，安装器与 `assay update` 会自动发现带有安装包的最新稳定产品 Release。
+
+> 从旧的 `assay-cli-v0.1.x` 迁移时，流水线会额外生成一次同版本的兼容更新入口；它只为让
+> 已安装的旧 CLI 自动升级，产品正式 Release 始终以 `v1.3.x` 为准。

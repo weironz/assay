@@ -12,6 +12,10 @@ on:
       - 'docs/**'
   workflow_dispatch:
     inputs:
+      release_version:
+        description: '统一发布版本（例如 1.3.5；会部署、创建 v1.3.5 Release 并附带 CLI）'
+        type: string
+        default: ''
       skip_deploy:
         description: '只构建推送镜像，不部署到服务器'
         type: boolean
@@ -20,6 +24,9 @@ on:
         description: '镜像版本号（留空则用 commit sha）'
         type: string
         default: ''
+
+permissions:
+  contents: write
 
 concurrency:
   # PR 可以互相取消；main 上的发布流程不取消，避免服务器停在半途状态
@@ -211,7 +218,14 @@ jobs:
       - name: 计算镜像标签与仓库地址
         id: meta
         run: |
-          if [ -n "${{ inputs.image_tag }}" ]; then
+          if [ -n "${{ inputs.release_version }}" ]; then
+            VERSION="${{ inputs.release_version }}"
+            if ! echo "$VERSION" | grep -Eq '^1\.3\.[0-9]+$'; then
+              echo "::error::统一发布版本必须为 1.3.x，例如 1.3.5"
+              exit 1
+            fi
+            echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.image_tag }}" ]; then
             echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
@@ -268,6 +282,45 @@ jobs:
           sbom: false
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+  cli_assets:
+    name: CLI · ${{ matrix.target }}
+    needs: [cli, web, api, smoke]
+    if: github.event_name == 'workflow_dispatch' && inputs.release_version != ''
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            asset: assay-x86_64-unknown-linux-musl
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            asset: assay-x86_64-pc-windows-msvc.exe
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: 安装 musl 交叉链接器
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: 构建 CLI
+        working-directory: cli
+        run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: 整理 Linux 安装包
+        if: runner.os == 'Linux'
+        run: cp cli/target/${{ matrix.target }}/release/assay ${{ matrix.asset }}
+      - name: 整理 Windows 安装包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Copy-Item cli/target/${{ matrix.target }}/release/assay.exe ${{ matrix.asset }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
 
   deploy:
     name: 部署到生产
@@ -356,3 +409,82 @@ jobs:
             echo "- 站点：${{ secrets.DEPLOY_PUBLIC_URL }}"
             echo "- 结果：${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: 创建统一 GitHub Release
+    needs: [build, deploy, cli_assets]
+    if: github.event_name == 'workflow_dispatch' && inputs.release_version != '' && needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 校验仓库内版本号
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          test "$(node -p "require('./package.json').version")" = "$VERSION"
+          test "$(node -p "require('./apps/api/package.json').version")" = "$VERSION"
+          test "$(node -p "require('./apps/web/package.json').version")" = "$VERSION"
+          test "$(sed -nE 's/^version = "([^"]+)"/\1/p' cli/Cargo.toml | head -1)" = "$VERSION"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 创建校验文件与发布标签
+        env:
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          TAG="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$TAG"; then
+            echo "::error::标签 $TAG 已存在，拒绝覆盖"
+            exit 1
+          fi
+          (cd dist && sha256sum assay-* > SHA256SUMS)
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+      - name: 创建 GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.release_version }}
+          ACR_URL: ${{ secrets.ACR_URL }}
+        run: |
+          TAG="v$VERSION"
+          cat > release-notes.md <<EOF
+          ## 部署
+
+          - 已部署镜像：\`$ACR_URL/assay-api:$VERSION\`、\`$ACR_URL/assay-web:$VERSION\`
+          - CLI 与 Web/API 使用统一版本：\`$VERSION\`
+
+          ## CLI 安装包
+
+          - Linux x86_64：\`assay-x86_64-unknown-linux-musl\`
+          - Windows x86_64：\`assay-x86_64-pc-windows-msvc.exe\`
+          - 下载前请使用 \`SHA256SUMS\` 校验文件完整性。
+          EOF
+          gh release create "$TAG" dist/assay-* dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Assay $TAG" \
+            --notes-file release-notes.md \
+            --generate-notes
+      - name: 创建旧版 CLI 更新兼容 Release
+        # v0.1.x 的更新器只识别 assay-cli-v*；保留一次兼容入口，让既有安装能自动迁移到统一版本。
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.release_version }}
+        run: |
+          LEGACY_TAG="assay-cli-v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$LEGACY_TAG"; then
+            echo "::error::兼容标签 $LEGACY_TAG 已存在，拒绝覆盖"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$LEGACY_TAG" -m "CLI compatibility release $LEGACY_TAG"
+          git push origin "$LEGACY_TAG"
+          gh release create "$LEGACY_TAG" dist/assay-* dist/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Assay CLI $VERSION（兼容更新）" \
+            --notes "此 Release 仅用于让旧版 assay-cli-v* 自动更新到统一版本 $VERSION。请使用 v$VERSION 作为产品正式 Release。"

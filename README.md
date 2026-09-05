@@ -98,12 +98,12 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 ### 发版（GitHub Actions 自动完成）
 
 推送**只跑测试**（类型检查 + 编译 + 整栈冒烟测试），不会自动发版。
-发版一律手动触发，跑完整流水线：**测试 → 构建镜像 → 双仓库推送 → 部署 → 健康校验**，
+发版一律手动触发，跑完整流水线：**测试 → 构建镜像 → 双仓库推送 → 部署 → 健康校验 → 构建 CLI → 创建 GitHub Release**，
 健康校验失败自动回滚到上一版本。
 
 ```bash
-gh workflow run ci-cd.yml                          # 发版并部署
-gh workflow run ci-cd.yml -f image_tag=1.3.0       # 指定版本号
+gh workflow run ci-cd.yml -f release_version=1.3.5 # 统一发版：镜像、部署、CLI、GitHub Release
+gh workflow run ci-cd.yml -f image_tag=1.3.5       # 仅构建推送指定镜像（不创建 Release）
 gh workflow run ci-cd.yml -f skip_deploy=true      # 只推镜像不部署
 gh run watch                                       # 跟踪进度
 ```
