@@ -126,11 +126,11 @@ export default function DashboardPage() {
           {/* 指标卡 */}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
             <StatCard label={t('dashboard.total')} value={data.total} to="/tickets" />
-            <StatCard label={t('dashboard.open')} value={data.open} tone="primary" to="/tickets" />
-            <StatCard label={t('dashboard.done')} value={done} to="/tickets" />
-            <StatCard label={t('dashboard.myTodo')} value={data.myTodo} tone="primary" to="/tickets" />
-            <StatCard label={t('dashboard.unassigned')} value={data.unassigned} tone="warn" to="/tickets" />
-            <StatCard label={t('dashboard.overdue')} value={data.overdue} tone="danger" to="/tickets" />
+            <StatCard label={t('dashboard.open')} value={data.open} tone="primary" to="/tickets?scope=open" />
+            <StatCard label={t('dashboard.done')} value={done} to="/tickets?scope=completed" />
+            <StatCard label={t('dashboard.myTodo')} value={data.myTodo} tone="primary" to="/tickets?scope=mine" />
+            <StatCard label={t('dashboard.unassigned')} value={data.unassigned} tone="warn" to="/tickets?scope=unassigned" />
+            <StatCard label={t('dashboard.overdue')} value={data.overdue} tone="danger" to="/tickets?scope=overdue" />
             <StatCard label={t('dashboard.unread')} value={data.unread} />
           </div>
 

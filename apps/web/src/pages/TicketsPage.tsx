@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useDateFormat } from '../i18n/format';
 import {
@@ -25,6 +25,20 @@ import { useCopy } from '../lib/use-copy';
 import SlaBadge from '../components/SlaBadge';
 import Toast from '../components/Toast';
 
+const TICKET_SCOPES: NonNullable<TicketQuery['scope']>[] = [
+  'open',
+  'completed',
+  'mine',
+  'unassigned',
+  'overdue',
+];
+
+function scopeFromSearch(value: string | null): TicketQuery['scope'] {
+  return TICKET_SCOPES.includes(value as NonNullable<TicketQuery['scope']>)
+    ? (value as TicketQuery['scope'])
+    : undefined;
+}
+
 export default function TicketsPage() {
   const { t } = useTranslation();
   const fmt = useDateFormat();
@@ -32,7 +46,16 @@ export default function TicketsPage() {
   const isAdmin = useAuth((s) => s.hasRole('admin'));
   const userId = useAuth((s) => s.user?.id);
   const { copy, copied } = useCopy();
-  const [q, setQ] = useState<TicketQuery>({ page: 1, pageSize: 20 });
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [q, setQ] = useState<TicketQuery>(() => ({
+    status: searchParams.get('status') || undefined,
+    scope: scopeFromSearch(searchParams.get('scope')),
+    priority: searchParams.get('priority') || undefined,
+    queueId: searchParams.get('queueId') || undefined,
+    keyword: searchParams.get('keyword') || undefined,
+    page: Number(searchParams.get('page')) || 1,
+    pageSize: Number(searchParams.get('pageSize')) || 20,
+  }));
   const { data, isLoading } = useTickets(q);
   const { data: queues } = useQueues();
   const del = useDeleteTicket();
@@ -40,11 +63,24 @@ export default function TicketsPage() {
   const saveView = useSaveView();
   const delView = useDeleteView();
 
+  const syncQuery = (next: TicketQuery) => {
+    setQ(next);
+    const params = new URLSearchParams();
+    (['status', 'scope', 'priority', 'queueId', 'keyword'] as const).forEach(
+      (key) => {
+        if (next[key]) params.set(key, next[key]!);
+      },
+    );
+    if ((next.page ?? 1) > 1) params.set('page', String(next.page));
+    if ((next.pageSize ?? 20) !== 20) params.set('pageSize', String(next.pageSize));
+    setSearchParams(params, { replace: true });
+  };
+
   const set = (patch: Partial<TicketQuery>) =>
-    setQ((prev) => ({ ...prev, ...patch, page: 1 }));
+    syncQuery({ ...q, ...patch, page: 1 });
 
   const applyView = (filter: TicketQuery) =>
-    setQ({ ...filter, page: 1, pageSize: 20 });
+    syncQuery({ ...filter, page: 1, pageSize: 20 });
 
   const saveCurrent = () => {
     const name = prompt(t('tickets.savePrompt'));
@@ -54,6 +90,15 @@ export default function TicketsPage() {
   };
 
   const totalPages = data ? Math.ceil(data.total / (q.pageSize ?? 20)) : 1;
+  const scopeLabel = q.scope
+    ? {
+        open: t('dashboard.open'),
+        completed: t('dashboard.done'),
+        mine: t('dashboard.myTodo'),
+        unassigned: t('dashboard.unassigned'),
+        overdue: t('dashboard.overdue'),
+      }[q.scope]
+    : null;
 
   return (
     <div className="space-y-4">
@@ -78,6 +123,15 @@ export default function TicketsPage() {
         >
           {t('tickets.filterAll')}
         </button>
+        {scopeLabel && (
+          <button
+            onClick={() => set({ scope: undefined })}
+            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-3 py-1 text-xs text-brand-800 hover:bg-brand-100 dark:border-brand-800 dark:bg-brand-950 dark:text-brand-300 dark:hover:bg-brand-900"
+            aria-label={t('tickets.filterAll')}
+          >
+            {scopeLabel} <span aria-hidden="true">×</span>
+          </button>
+        )}
         {views?.map((v) => (
           <span
             key={v.id}
@@ -112,11 +166,18 @@ export default function TicketsPage() {
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
         />
         <select
-          value={q.status ?? ''}
-          onChange={(e) => set({ status: e.target.value || undefined })}
+          value={q.scope === 'open' ? '__open__' : q.scope === 'completed' ? '__completed__' : q.status ?? ''}
+          onChange={(e) => {
+            const value = e.target.value;
+            if (value === '__open__') set({ status: undefined, scope: 'open' });
+            else if (value === '__completed__') set({ status: undefined, scope: 'completed' });
+            else set({ status: value || undefined, scope: undefined });
+          }}
           className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
         >
           <option value="">{t('tickets.allStatuses')}</option>
+          <option value="__open__">{t('dashboard.open')}</option>
+          <option value="__completed__">{t('dashboard.done')}</option>
           {STATUS_KEYS.map((k) => (
             <option key={k} value={k}>
               {statusLabel(t, k)}
@@ -357,14 +418,14 @@ export default function TicketsPage() {
           </span>
           <button
             disabled={(q.page ?? 1) <= 1}
-            onClick={() => setQ((p) => ({ ...p, page: (p.page ?? 1) - 1 }))}
+            onClick={() => syncQuery({ ...q, page: (q.page ?? 1) - 1 })}
             className="px-3 py-1 rounded border border-gray-300 dark:border-gray-700 disabled:opacity-40"
           >
             {t('tickets.prev')}
           </button>
           <button
             disabled={(q.page ?? 1) >= totalPages}
-            onClick={() => setQ((p) => ({ ...p, page: (p.page ?? 1) + 1 }))}
+            onClick={() => syncQuery({ ...q, page: (q.page ?? 1) + 1 })}
             className="px-3 py-1 rounded border border-gray-300 dark:border-gray-700 disabled:opacity-40"
           >
             {t('tickets.next')}

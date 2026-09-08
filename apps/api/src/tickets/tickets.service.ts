@@ -43,6 +43,8 @@ function normalizeContact(
  * 这里只是防止「没类型 = 没有任何 SLA 监控」。
  */
 const FALLBACK_SLA = { responseMin: 60, resolveMin: 1440 };
+const TERMINAL_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED', 'CANCELLED'];
+const COMPLETED_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED'];
 
 /** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
 const AUTHOR_SELECT = {
@@ -305,25 +307,41 @@ export class TicketsService {
 
   // ---------- 列表 ----------
   async list(user: AuthUser, q: ListTicketsQuery) {
-    const where: Prisma.TicketWhereInput = { ...this.visibilityFilter(user) };
-    if (q.status) where.status = q.status as TicketStatus;
-    if (q.priority) where.priority = q.priority as any;
-    if (q.queueId) where.queueId = q.queueId;
-    if (q.assigneeId) where.assigneeId = q.assigneeId;
-    if (q.categoryId) where.categoryId = q.categoryId;
-    if (q.keyword) {
-      // 搜索条件与可见范围必须取交集；直接覆盖 OR 会导致协作范围被绕过。
-      where.AND = [
-        this.visibilityFilter(user),
-        {
-          OR: [
-            { title: { contains: q.keyword, mode: 'insensitive' } },
-            { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
-          ],
-        },
-      ];
-      delete where.OR;
+    // 所有筛选都必须与可见范围相交。用 AND 组合可避免关键字/快捷范围覆盖
+    // visibilityFilter 里的 OR，从而意外扩大普通用户能看到的工单。
+    const filters: Prisma.TicketWhereInput[] = [this.visibilityFilter(user)];
+    if (q.status) filters.push({ status: q.status as TicketStatus });
+    if (q.priority) filters.push({ priority: q.priority as any });
+    if (q.queueId) filters.push({ queueId: q.queueId });
+    if (q.assigneeId) filters.push({ assigneeId: q.assigneeId });
+    if (q.categoryId) filters.push({ categoryId: q.categoryId });
+
+    if (q.scope === 'open') {
+      filters.push({ status: { notIn: TERMINAL_STATUSES } });
+    } else if (q.scope === 'completed') {
+      // “已完成”不包含已取消，需与仪表盘口径保持一致。
+      filters.push({ status: { in: COMPLETED_STATUSES } });
+    } else if (q.scope === 'mine') {
+      filters.push({ assigneeId: user.id, status: { notIn: TERMINAL_STATUSES } });
+    } else if (q.scope === 'unassigned') {
+      filters.push({ assigneeId: null, status: { notIn: TERMINAL_STATUSES } });
+    } else if (q.scope === 'overdue') {
+      filters.push({
+        slaDueAt: { lt: new Date() },
+        status: { notIn: TERMINAL_STATUSES },
+      });
     }
+
+    if (q.keyword) {
+      filters.push({
+        OR: [
+          { title: { contains: q.keyword, mode: 'insensitive' } },
+          { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
+        ],
+      });
+    }
+    const where: Prisma.TicketWhereInput =
+      filters.length === 1 ? filters[0] : { AND: filters };
 
     const page = q.page ?? 1;
     const pageSize = q.pageSize ?? 20;

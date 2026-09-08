@@ -106,6 +106,7 @@ export interface TicketDetail extends TicketListItem {
 
 export interface TicketQuery {
   status?: string;
+  scope?: 'open' | 'completed' | 'mine' | 'unassigned' | 'overdue';
   priority?: string;
   queueId?: string;
   keyword?: string;

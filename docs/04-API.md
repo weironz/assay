@@ -154,6 +154,7 @@ GET /api/tickets
 | `status` | string | 状态枚举，见 §7 |
 | `priority` | string | `LOW` `MEDIUM` `HIGH` `URGENT` |
 | `queueId` | string | 队列 id |
+| `scope` | string | 快捷范围：`open`、`completed`、`mine`、`unassigned`、`overdue` |
 | `assigneeId` | string | 处理人 id |
 | `categoryId` | string | 分类 id |
 | `keyword` | string | 模糊匹配标题或工单号 |

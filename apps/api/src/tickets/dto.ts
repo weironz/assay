@@ -15,6 +15,13 @@ import { Type } from 'class-transformer';
 import { TicketContactDto } from './contact';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
+const TICKET_SCOPES = [
+  'open',
+  'completed',
+  'mine',
+  'unassigned',
+  'overdue',
+] as const;
 
 export class CreateTicketDto {
   @IsString()
@@ -164,6 +171,11 @@ export class ListTicketsQuery {
   @IsOptional()
   @IsString()
   status?: string;
+
+  /** 仪表盘快捷入口使用的预设范围；与普通状态筛选可组合。 */
+  @IsOptional()
+  @IsIn(TICKET_SCOPES)
+  scope?: (typeof TICKET_SCOPES)[number];
 
   @IsOptional()
   @IsString()
