@@ -306,6 +306,24 @@ export class TicketsService {
   }
 
   // ---------- 列表 ----------
+  /**
+   * 仅返回当前用户可见工单涉及的人员，供列表的处理人/提单人下拉框使用。
+   * 不返回邮箱、角色等目录信息，也不会绕过 visibilityFilter。
+   */
+  async filterPeople(user: AuthUser) {
+    const visibleTickets = this.visibilityFilter(user);
+    return this.prisma.user.findMany({
+      where: {
+        OR: [
+          { requestedTickets: { some: visibleTickets } },
+          { assignedTickets: { some: visibleTickets } },
+        ],
+      },
+      select: { id: true, name: true },
+      orderBy: { name: 'asc' },
+    });
+  }
+
   async list(user: AuthUser, q: ListTicketsQuery) {
     // 所有筛选都必须与可见范围相交。用 AND 组合可避免关键字/快捷范围覆盖
     // visibilityFilter 里的 OR，从而意外扩大普通用户能看到的工单。
@@ -314,7 +332,11 @@ export class TicketsService {
     if (q.priority) filters.push({ priority: q.priority as any });
     if (q.queueId) filters.push({ queueId: q.queueId });
     if (q.assigneeId) filters.push({ assigneeId: q.assigneeId });
+    if (q.requesterId) filters.push({ requesterId: q.requesterId });
     if (q.categoryId) filters.push({ categoryId: q.categoryId });
+    if (q.ticketNo) {
+      filters.push({ ticketNo: { contains: q.ticketNo, mode: 'insensitive' } });
+    }
 
     if (q.scope === 'open') {
       filters.push({ status: { notIn: TERMINAL_STATUSES } });

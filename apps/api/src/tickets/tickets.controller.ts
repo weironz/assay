@@ -32,6 +32,16 @@ export class TicketsController {
     return this.tickets.list(user, q);
   }
 
+  /**
+   * 列表筛选只需要「人是谁」，不应复用需要 user:manage 的完整用户目录。
+   * 此路由必须放在 :id 之前，避免被动态路由吞掉。
+   */
+  @Get('filter-people')
+  @RequirePermissions('ticket:read')
+  filterPeople(@CurrentUser() user: AuthUser) {
+    return this.tickets.filterPeople(user);
+  }
+
   @Post()
   @RequirePermissions('ticket:create')
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateTicketDto) {

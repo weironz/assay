@@ -191,7 +191,15 @@ export class ListTicketsQuery {
 
   @IsOptional()
   @IsString()
+  requesterId?: string;
+
+  @IsOptional()
+  @IsString()
   categoryId?: string;
+
+  @IsOptional()
+  @IsString()
+  ticketNo?: string;
 
   @IsOptional()
   @IsString()

@@ -18,24 +18,108 @@ function humanize(t: ReturnType<typeof useTranslation>['t'], min: number) {
   return restH ? t('sla.durDaysHours', { d, h: restH }) : t('sla.durDays', { d });
 }
 
+type DurationUnit = 'minute' | 'hour' | 'day';
+
+type EditableDuration = {
+  value: string;
+  unit: DurationUnit;
+};
+
+const UNIT_MINUTES: Record<DurationUnit, number> = {
+  minute: 1,
+  hour: 60,
+  day: 60 * 24,
+};
+
+/** 优先展示可整除的最大单位：2880 分钟显示为 2 天，而不是 2880 分钟。 */
+function editableDuration(minutes: number): EditableDuration {
+  if (minutes % UNIT_MINUTES.day === 0) {
+    return { value: String(minutes / UNIT_MINUTES.day), unit: 'day' };
+  }
+  if (minutes % UNIT_MINUTES.hour === 0) {
+    return { value: String(minutes / UNIT_MINUTES.hour), unit: 'hour' };
+  }
+  return { value: String(minutes), unit: 'minute' };
+}
+
+/** SLA 持久化单位是分钟；允许 1.5 小时这类恰好能换算为整分钟的输入。 */
+function asMinutes({ value, unit }: EditableDuration): number {
+  const raw = Number(value);
+  if (!Number.isFinite(raw)) return Number.NaN;
+  const minutes = raw * UNIT_MINUTES[unit];
+  const rounded = Math.round(minutes);
+  return Math.abs(minutes - rounded) < 1e-6 ? rounded : Number.NaN;
+}
+
+function withUnit(duration: EditableDuration, unit: DurationUnit): EditableDuration {
+  const minutes = asMinutes(duration);
+  if (!Number.isFinite(minutes)) return { ...duration, unit };
+  // 切换单位保持相同的时长，例如 2 天 → 48 小时，而不是错误地变成 2 小时。
+  return {
+    value: String(Number((minutes / UNIT_MINUTES[unit]).toFixed(6))),
+    unit,
+  };
+}
+
+function DurationInput({
+  value,
+  label,
+  onChange,
+}: {
+  value: EditableDuration;
+  label: string;
+  onChange: (next: EditableDuration) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="flex w-40 overflow-hidden rounded-md border border-gray-300 bg-white shadow-sm focus-within:border-brand-600 focus-within:ring-2 focus-within:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:focus-within:border-brand-500 dark:focus-within:ring-brand-900">
+      <input
+        type="number"
+        min="0.001"
+        step="any"
+        value={value.value}
+        onChange={(e) => onChange({ ...value, value: e.target.value })}
+        className="min-w-0 flex-1 bg-transparent px-2 py-1 text-sm outline-none"
+        inputMode="decimal"
+        aria-label={label}
+      />
+      <select
+        value={value.unit}
+        onChange={(e) => onChange(withUnit(value, e.target.value as DurationUnit))}
+        className="border-l border-gray-300 bg-gray-50 px-1.5 py-1 text-xs text-gray-700 outline-none dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+        aria-label={`${label} ${t('slaAdmin.unitLabel')}`}
+      >
+        <option value="minute">{t('slaAdmin.unitMinute')}</option>
+        <option value="hour">{t('slaAdmin.unitHour')}</option>
+        <option value="day">{t('slaAdmin.unitDay')}</option>
+      </select>
+    </div>
+  );
+}
+
 function Row({ type }: { type: TicketType }) {
   const { t } = useTranslation();
   const update = useUpdateType();
   const [editing, setEditing] = useState(false);
-  const [resp, setResp] = useState(String(type.slaResponseMin));
-  const [reso, setReso] = useState(String(type.slaResolveMin));
+  const [resp, setResp] = useState<EditableDuration>(() =>
+    editableDuration(type.slaResponseMin),
+  );
+  const [reso, setReso] = useState<EditableDuration>(() =>
+    editableDuration(type.slaResolveMin),
+  );
   const [err, setErr] = useState<string | null>(null);
 
   const start = () => {
-    setResp(String(type.slaResponseMin));
-    setReso(String(type.slaResolveMin));
+    setResp(editableDuration(type.slaResponseMin));
+    setReso(editableDuration(type.slaResolveMin));
     setErr(null);
     setEditing(true);
   };
 
   const save = () => {
-    const a = Number(resp);
-    const b = Number(reso);
+    const a = asMinutes(resp);
+    const b = asMinutes(reso);
     if (!Number.isInteger(a) || !Number.isInteger(b) || a < 1 || b < 1) {
       setErr(t('slaAdmin.errPositive'));
       return;
@@ -58,20 +142,15 @@ function Row({ type }: { type: TicketType }) {
     );
   };
 
-  const inputCls =
-    'w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-800';
-
   return (
     <tr className="border-t border-gray-100 dark:border-gray-800">
       <td className="px-4 py-3 font-medium">{type.name}</td>
       <td className="px-4 py-3">
         {editing ? (
-          <input
+          <DurationInput
             value={resp}
-            onChange={(e) => setResp(e.target.value)}
-            className={inputCls}
-            inputMode="numeric"
-            aria-label={t('slaAdmin.colResponse')}
+            onChange={setResp}
+            label={t('slaAdmin.colResponse')}
           />
         ) : (
           <span>
@@ -84,12 +163,10 @@ function Row({ type }: { type: TicketType }) {
       </td>
       <td className="px-4 py-3">
         {editing ? (
-          <input
+          <DurationInput
             value={reso}
-            onChange={(e) => setReso(e.target.value)}
-            className={inputCls}
-            inputMode="numeric"
-            aria-label={t('slaAdmin.colResolve')}
+            onChange={setReso}
+            label={t('slaAdmin.colResolve')}
           />
         ) : (
           <span>

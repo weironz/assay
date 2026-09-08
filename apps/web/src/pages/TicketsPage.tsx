@@ -5,6 +5,8 @@ import { useDateFormat } from '../i18n/format';
 import {
   useTickets,
   useQueues,
+  useCategories,
+  useTicketFilterPeople,
   useDeleteTicket,
   useSavedViews,
   useSaveView,
@@ -52,12 +54,18 @@ export default function TicketsPage() {
     scope: scopeFromSearch(searchParams.get('scope')),
     priority: searchParams.get('priority') || undefined,
     queueId: searchParams.get('queueId') || undefined,
+    assigneeId: searchParams.get('assigneeId') || undefined,
+    requesterId: searchParams.get('requesterId') || undefined,
+    categoryId: searchParams.get('categoryId') || undefined,
+    ticketNo: searchParams.get('ticketNo') || undefined,
     keyword: searchParams.get('keyword') || undefined,
     page: Number(searchParams.get('page')) || 1,
     pageSize: Number(searchParams.get('pageSize')) || 20,
   }));
   const { data, isLoading } = useTickets(q);
   const { data: queues } = useQueues();
+  const { data: categories } = useCategories();
+  const { data: filterPeople } = useTicketFilterPeople();
   const del = useDeleteTicket();
   const { data: views } = useSavedViews();
   const saveView = useSaveView();
@@ -66,7 +74,7 @@ export default function TicketsPage() {
   const syncQuery = (next: TicketQuery) => {
     setQ(next);
     const params = new URLSearchParams();
-    (['status', 'scope', 'priority', 'queueId', 'keyword'] as const).forEach(
+    (['status', 'scope', 'priority', 'queueId', 'assigneeId', 'requesterId', 'categoryId', 'ticketNo', 'keyword'] as const).forEach(
       (key) => {
         if (next[key]) params.set(key, next[key]!);
       },
@@ -99,6 +107,20 @@ export default function TicketsPage() {
         overdue: t('dashboard.overdue'),
       }[q.scope]
     : null;
+  const statusFilterValue =
+    q.scope === 'open'
+      ? '__open__'
+      : q.scope === 'completed'
+        ? '__completed__'
+        : q.status ?? '';
+  const setStatusFilter = (value: string) => {
+    if (value === '__open__') set({ status: undefined, scope: 'open' });
+    else if (value === '__completed__') set({ status: undefined, scope: 'completed' });
+    else set({ status: value || undefined, scope: undefined });
+  };
+
+  const filterControlClass =
+    'w-full rounded-md border border-gray-300 bg-white px-2 py-1.5 text-sm font-normal text-gray-900 shadow-sm outline-none transition focus:border-brand-600 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 dark:focus:border-brand-500 dark:focus:ring-brand-900';
 
   return (
     <div className="space-y-4">
@@ -156,61 +178,76 @@ export default function TicketsPage() {
         </button>
       </div>
 
-      {/* 筛选栏 */}
-      <div className="flex flex-wrap gap-3 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-3">
-        <input
-          placeholder={t('tickets.searchPlaceholder')}
-          aria-label={t('tickets.searchPlaceholder')}
-          value={q.keyword ?? ''}
-          onChange={(e) => set({ keyword: e.target.value || undefined })}
-          className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-        />
-        <select
-          value={q.scope === 'open' ? '__open__' : q.scope === 'completed' ? '__completed__' : q.status ?? ''}
-          onChange={(e) => {
-            const value = e.target.value;
-            if (value === '__open__') set({ status: undefined, scope: 'open' });
-            else if (value === '__completed__') set({ status: undefined, scope: 'completed' });
-            else set({ status: value || undefined, scope: undefined });
-          }}
-          className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-        >
-          <option value="">{t('tickets.allStatuses')}</option>
-          <option value="__open__">{t('dashboard.open')}</option>
-          <option value="__completed__">{t('dashboard.done')}</option>
-          {STATUS_KEYS.map((k) => (
-            <option key={k} value={k}>
-              {statusLabel(t, k)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={q.priority ?? ''}
-          onChange={(e) => set({ priority: e.target.value || undefined })}
-          className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-        >
-          <option value="">{t('tickets.allPriorities')}</option>
-          {PRIORITY_KEYS.map((k) => (
-            <option key={k} value={k}>
-              {priorityLabel(t, k)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={q.queueId ?? ''}
-          onChange={(e) => set({ queueId: e.target.value || undefined })}
-          className="rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-1.5 text-sm"
-        >
-          <option value="">{t('tickets.allQueues')}</option>
-          {queues?.map((qu: any) => (
-            <option key={qu.id} value={qu.id}>
-              {qu.name}
-            </option>
-          ))}
-        </select>
+      {/* 移动端保留独立筛选栏；桌面筛选控件直接位于对应的表头。 */}
+      <div className="flex flex-wrap gap-3 rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-800 dark:bg-gray-900 lg:hidden">
+        <label className="min-w-48 flex-1">
+          <span className="sr-only">{t('tickets.titlePlaceholder')}</span>
+          <input
+            placeholder={t('tickets.titlePlaceholder')}
+            value={q.keyword ?? ''}
+            onChange={(e) => set({ keyword: e.target.value || undefined })}
+            className={filterControlClass}
+          />
+        </label>
+        <label>
+          <span className="sr-only">{t('tickets.colStatus')}</span>
+          <select value={statusFilterValue} onChange={(e) => setStatusFilter(e.target.value)} className={filterControlClass}>
+            <option value="">{t('tickets.allStatuses')}</option>
+            <option value="__open__">{t('dashboard.open')}</option>
+            <option value="__completed__">{t('dashboard.done')}</option>
+            {STATUS_KEYS.map((k) => (
+              <option key={k} value={k}>{statusLabel(t, k)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">{t('tickets.colPriority')}</span>
+          <select value={q.priority ?? ''} onChange={(e) => set({ priority: e.target.value || undefined })} className={filterControlClass}>
+            <option value="">{t('tickets.allPriorities')}</option>
+            {PRIORITY_KEYS.map((k) => (
+              <option key={k} value={k}>{priorityLabel(t, k)}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">{t('tickets.colCategory')}</span>
+          <select value={q.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value || undefined })} className={filterControlClass}>
+            <option value="">{t('tickets.filterAll')} {t('tickets.colCategory')}</option>
+            {categories?.map((category: any) => (
+              <option key={category.id} value={category.id}>{category.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">{t('ticketNew.queue')}</span>
+          <select value={q.queueId ?? ''} onChange={(e) => set({ queueId: e.target.value || undefined })} className={filterControlClass}>
+            <option value="">{t('tickets.allQueues')}</option>
+            {queues?.map((queue: any) => (
+              <option key={queue.id} value={queue.id}>{queue.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">{t('tickets.colAssignee')}</span>
+          <select value={q.assigneeId ?? ''} onChange={(e) => set({ assigneeId: e.target.value || undefined })} className={filterControlClass}>
+            <option value="">{t('tickets.allAssignees')}</option>
+            {filterPeople?.map((person) => (
+              <option key={person.id} value={person.id}>{person.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">{t('tickets.colRequester')}</span>
+          <select value={q.requesterId ?? ''} onChange={(e) => set({ requesterId: e.target.value || undefined })} className={filterControlClass}>
+            <option value="">{t('tickets.allRequesters')}</option>
+            {filterPeople?.map((person) => (
+              <option key={person.id} value={person.id}>{person.name}</option>
+            ))}
+          </select>
+        </label>
       </div>
 
-      {/* 手机：卡片列表。10 列的表格在 375px 屏上只能左右拖着看，
+      {/* 手机：卡片列表。多列的表格在 375px 屏上只能左右拖着看，
           等于没法用；改成每单一张卡，把最要紧的几项竖排出来。
           桌面仍用表格——宽屏下表格的对齐和扫读效率是卡片比不了的 */}
       <div className="space-y-2 lg:hidden">
@@ -291,17 +328,102 @@ export default function TicketsPage() {
       {/* overflow-x-auto 而非 hidden：列名长度随语言变化（"处理人" vs
           "ผู้รับผิดชอบ"），窄屏下应可横向滚动而不是把右侧列裁掉 */}
       <div className="hidden bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg overflow-x-auto lg:block">
-        <table className="w-full min-w-[64rem] text-sm">
+        <table className="w-full min-w-[88rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colTicketNo')}</th>
-              <th className="w-full px-4 py-2 text-left font-medium">{t('tickets.colTitle')}</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colCategory')}</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colStatus')}</th>
+              <th className="w-36 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colTicketNo')}</span>
+                  <input
+                    placeholder={t('tickets.ticketNoPlaceholder')}
+                    aria-label={t('tickets.ticketNoPlaceholder')}
+                    value={q.ticketNo ?? ''}
+                    onChange={(e) => set({ ticketNo: e.target.value || undefined })}
+                    className={`mt-1 ${filterControlClass}`}
+                  />
+                </label>
+              </th>
+              <th className="w-72 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colTitle')}</span>
+                  <input
+                    placeholder={t('tickets.titlePlaceholder')}
+                    aria-label={t('tickets.titlePlaceholder')}
+                    value={q.keyword ?? ''}
+                    onChange={(e) => set({ keyword: e.target.value || undefined })}
+                    className={`mt-1 ${filterControlClass}`}
+                  />
+                </label>
+              </th>
+              <th className="w-32 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colCategory')}</span>
+                  <select value={q.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.filterAll')}</option>
+                    {categories?.map((category: any) => (
+                      <option key={category.id} value={category.id}>{category.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
+              <th className="w-32 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('ticketNew.queue')}</span>
+                  <select value={q.queueId ?? ''} onChange={(e) => set({ queueId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.filterAll')}</option>
+                    {queues?.map((queue: any) => (
+                      <option key={queue.id} value={queue.id}>{queue.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
+              <th className="w-32 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colStatus')}</span>
+                  <select value={statusFilterValue} onChange={(e) => setStatusFilter(e.target.value)} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.allStatuses')}</option>
+                    <option value="__open__">{t('dashboard.open')}</option>
+                    <option value="__completed__">{t('dashboard.done')}</option>
+                    {STATUS_KEYS.map((k) => (
+                      <option key={k} value={k}>{statusLabel(t, k)}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colSla')}</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colPriority')}</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colAssignee')}</th>
-              <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colRequester')}</th>
+              <th className="w-28 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colPriority')}</span>
+                  <select value={q.priority ?? ''} onChange={(e) => set({ priority: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.allPriorities')}</option>
+                    {PRIORITY_KEYS.map((k) => (
+                      <option key={k} value={k}>{priorityLabel(t, k)}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
+              <th className="w-32 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colAssignee')}</span>
+                  <select value={q.assigneeId ?? ''} onChange={(e) => set({ assigneeId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.allAssignees')}</option>
+                    {filterPeople?.map((person) => (
+                      <option key={person.id} value={person.id}>{person.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
+              <th className="w-32 px-4 py-2 text-left font-medium">
+                <label className="block">
+                  <span>{t('tickets.colRequester')}</span>
+                  <select value={q.requesterId ?? ''} onChange={(e) => set({ requesterId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
+                    <option value="">{t('tickets.allRequesters')}</option>
+                    {filterPeople?.map((person) => (
+                      <option key={person.id} value={person.id}>{person.name}</option>
+                    ))}
+                  </select>
+                </label>
+              </th>
               <th className="whitespace-nowrap px-4 py-2 text-left font-medium">{t('tickets.colCreatedAt')}</th>
               <th className="whitespace-nowrap px-4 py-2 text-right font-medium">{t('common.actions')}</th>
             </tr>
@@ -309,7 +431,7 @@ export default function TicketsPage() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                <td colSpan={11} className="px-4 py-8 text-center text-gray-400">
                   {t('common.loading')}
                 </td>
               </tr>
@@ -350,6 +472,9 @@ export default function TicketsPage() {
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
                   {ticket.category?.name ?? t('common.empty')}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
+                  {ticket.queue?.name ?? t('common.empty')}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span

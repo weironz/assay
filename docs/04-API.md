@@ -156,7 +156,9 @@ GET /api/tickets
 | `queueId` | string | 队列 id |
 | `scope` | string | 快捷范围：`open`、`completed`、`mine`、`unassigned`、`overdue` |
 | `assigneeId` | string | 处理人 id |
+| `requesterId` | string | 提单人 id |
 | `categoryId` | string | 分类 id |
+| `ticketNo` | string | 模糊匹配工单号，可与其他筛选组合 |
 | `keyword` | string | 模糊匹配标题或工单号 |
 | `page` | int | 默认 1 |
 | `pageSize` | int | 默认 20，最大 100 |
@@ -183,6 +185,15 @@ GET /api/tickets
   ]
 }
 ```
+
+#### 列表人员筛选候选
+
+```
+GET /api/tickets/filter-people
+```
+
+权限：`ticket:read`。返回当前账号**已可见工单**中出现过的提单人与处理人，仅含
+`id`、`name`，可用于 `assigneeId`、`requesterId` 下拉筛选；不暴露完整用户目录、邮箱或角色。
 
 ### 3.2 创建工单
 

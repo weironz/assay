@@ -109,9 +109,27 @@ export interface TicketQuery {
   scope?: 'open' | 'completed' | 'mine' | 'unassigned' | 'overdue';
   priority?: string;
   queueId?: string;
+  assigneeId?: string;
+  requesterId?: string;
+  categoryId?: string;
+  ticketNo?: string;
   keyword?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface TicketFilterPerson {
+  id: string;
+  name: string;
+}
+
+/** 仅限当前可见工单涉及的人员；不是完整的用户目录。 */
+export function useTicketFilterPeople() {
+  return useQuery({
+    queryKey: ['ticket-filter-people'],
+    queryFn: async () =>
+      (await api.get('/tickets/filter-people')).data as TicketFilterPerson[],
+  });
 }
 
 export function useTickets(q: TicketQuery) {
