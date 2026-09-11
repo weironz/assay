@@ -4,9 +4,11 @@
 
 - 设计文档：[docs/01-设计文档.md](docs/01-设计文档.md)
 - 开发计划：[docs/02-开发计划.md](docs/02-开发计划.md)
+- 技术选型讨论：[docs/00-工单系统技术选型.md](docs/00-工单系统技术选型.md)
 - 技术调研：[docs/03-技术调研结论.md](docs/03-技术调研结论.md)
 - **REST API 文档**：[docs/04-API.md](docs/04-API.md)（49 个接口，含认证方式与调用示例）
 - **CLI 与 MCP 文档**：[docs/06-Assay CLI.md](docs/06-Assay%20CLI.md)（安装、命令参数、`assay update`、本地 MCP）
+- **工单分享链接**：[docs/08-工单分享链接实现与运维.md](docs/08-工单分享链接实现与运维.md)（外部只读分享、权限边界、安全与运维）
 - **部署文档**：[docs/05-部署文档.md](docs/05-部署文档.md)（IP 直连 / Traefik 域名两种方式，含备份与排错）
 
 ## 目录结构

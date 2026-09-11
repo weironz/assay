@@ -35,6 +35,7 @@ import { useDateFormat } from '../i18n/format';
 import Avatar from '../components/Avatar';
 import RichEditor from '../components/RichEditor';
 import SlaBadge from '../components/SlaBadge';
+import TicketShareDialog from '../components/TicketShareDialog';
 
 export default function TicketDetailPage() {
   const { t } = useTranslation();
@@ -74,6 +75,7 @@ export default function TicketDetailPage() {
   const [participantId, setParticipantId] = useState('');
   const [participantRole, setParticipantRole] = useState<'COLLABORATOR' | 'FOLLOWER'>('COLLABORATOR');
   const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !ticket)
@@ -102,6 +104,13 @@ export default function TicketDetailPage() {
       ticket.assignee?.id === user?.id ||
       isCollaborator);
   const canWriteInternal = isSupervisorOrAdmin || ticket.assignee?.id === user?.id || isCollaborator;
+  // 分享是数据外发能力：仅提单人、当前处理人或管理岗位可创建/撤销，
+  // 协作者和“查看全部”观察员仍保持只读边界。
+  const canShare =
+    has('ticket:read') &&
+    (isSupervisorOrAdmin ||
+      ticket.requester?.id === user?.id ||
+      ticket.assignee?.id === user?.id);
 
   const saveTitle = () => {
     const v = titleDraft.trim();
@@ -232,6 +241,15 @@ export default function TicketDetailPage() {
               {t('ticketDetail.assign')}
             </button>
           </div>
+        )}
+        {canShare && (
+          <button
+            type="button"
+            onClick={() => setShareOpen(true)}
+            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-700 transition-colors hover:border-brand-500 hover:text-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200"
+          >
+            {t('share.open')}
+          </button>
         )}
       </div>
 
@@ -721,6 +739,7 @@ export default function TicketDetailPage() {
           </div>
         </div>
       </div>
+      <TicketShareDialog ticketId={id} open={shareOpen} onClose={() => setShareOpen(false)} />
     </div>
   );
 }

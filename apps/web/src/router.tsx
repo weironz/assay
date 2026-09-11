@@ -12,11 +12,13 @@ import TicketDetailPage from './pages/TicketDetailPage';
 import UsersPage from './pages/UsersPage';
 import QueuesPage from './pages/QueuesPage';
 import SlaPage from './pages/SlaPage';
+import PublicTicketSharePage from './pages/PublicTicketSharePage';
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
+  { path: '/share/:token', element: <PublicTicketSharePage /> },
   {
     path: '/',
     element: (

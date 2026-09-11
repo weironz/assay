@@ -16,6 +16,7 @@ import { SlaModule } from './sla/sla.module';
 import { StatsModule } from './stats/stats.module';
 import { SavedViewsModule } from './saved-views/saved-views.module';
 import { ApiTokensModule } from './api-tokens/api-tokens.module';
+import { TicketSharesModule } from './ticket-shares/ticket-shares.module';
 import { HealthController } from './health/health.controller';
 import { SessionGuard } from './auth/session.guard';
 import { PermissionsGuard } from './auth/permissions.guard';
@@ -33,6 +34,7 @@ import { PermissionsGuard } from './auth/permissions.guard';
     StorageModule,
     AuthModule,
     ApiTokensModule,
+    TicketSharesModule,
     UsersModule,
     QueuesModule,
     TicketsModule,

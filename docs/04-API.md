@@ -256,7 +256,34 @@ GET /api/tickets/:id
 `participants`（协作成员 / 关注人）、`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、`cluster`、
 `serialNumber`、`contact`、`firstResponseAt`、`firstResponseDueAt`。
 
-### 3.4 修改工单
+### 3.4 工单分享链接
+
+分享链接用于让未登录的外部人员**只读**查看工单公开讨论。密钥是不可猜测的随机值，
+数据库只保存其哈希；完整 URL 只会在创建响应中返回一次。链接可设置有效期，撤销后立即失效。
+
+创建、查看列表、撤销均需要 `ticket:read`，且服务端进一步限制为**提单人、当前处理人、管理员或主管**；
+协作者和“工单观察员”不能外发链接。`ticket:read:all` 本身也不会授予分享能力。
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| `GET` | `/api/tickets/:ticketId/shares` | 分享链接元数据；不返回完整 URL |
+| `POST` | `/api/tickets/:ticketId/shares` | 创建链接，响应额外含一次性的 `token` |
+| `DELETE` | `/api/tickets/:ticketId/shares/:shareId` | 立即撤销 |
+| `GET` | `/api/shared-tickets/:token` | **无需登录**的只读分享内容 |
+
+创建请求：
+
+```json
+{ "label": "客户确认", "expiresInDays": 7 }
+```
+
+`label` 选填（≤80 字符）；`expiresInDays` 可填 `1`–`365`，不传即永不过期。创建成功后，
+前端拼接为 `https://assay.cloudcele.com/share/<token>`。
+
+公开接口只包含工单号、标题、状态、优先级、类型/分类/IDC 定位信息和**公开回复**；不返回内部备注、
+联系方式、提单人/处理人的邮箱、队列、协作成员或普通附件。公开回复正文引用的内联图片会经受控地址展示。
+
+### 3.5 修改工单
 
 ```
 PATCH /api/tickets/:id
@@ -266,7 +293,7 @@ PATCH /api/tickets/:id
 可改字段：`title` `priority` `typeId` `categoryId` `queueId` `serialNumber`
 `datacenterId` `clusterId` `contact`。传 `contact: null` 可清空联系方式。
 
-### 3.5 指派
+### 3.6 指派
 
 ```
 POST /api/tickets/:id/assign
@@ -274,7 +301,7 @@ POST /api/tickets/:id/assign
 ```
 权限：`ticket:assign`。仅 `NEW` / `REOPENED` 状态可指派，指派后状态变为 `ASSIGNED`。
 
-### 3.6 状态流转
+### 3.7 状态流转
 
 ```
 POST /api/tickets/:id/transition
@@ -295,7 +322,7 @@ POST /api/tickets/:id/transition
 不满足前置状态返回 `409`，角色或归属不符返回 `403`。
 当前可执行的动作可直接读工单详情的 `availableActions`。
 
-### 3.7 消息
+### 3.8 消息
 
 ```
 GET  /api/tickets/:id/messages           权限 ticket:read
@@ -314,7 +341,7 @@ PATCH /api/tickets/:id/messages/:msgId   权限 ticket:comment
 
 编辑消息限作者本人或 admin / supervisor。
 
-### 3.8 协作成员与关注人
+### 3.9 协作成员与关注人
 
 主处理人始终由 `assigneeId` 唯一承担，负责 SLA 与状态流转。协作成员与关注人不改变主责：
 
@@ -340,7 +367,7 @@ DELETE /api/tickets/:id/participants/:userId
 
 `role` 可取 `COLLABORATOR` 或 `FOLLOWER`。提单人与主处理人已有天然访问权，不能重复作为协作成员加入。
 
-### 3.9 操作历史
+### 3.10 操作历史
 
 ```
 GET /api/tickets/:id/history
@@ -350,7 +377,7 @@ GET /api/tickets/:id/history
 返回数组，每项含 `action` `field` `oldValue` `newValue` `createdAt` `user`。
 **`user` 为 `null` 表示系统自动操作**（如 SLA 超时自动升级优先级）。
 
-### 3.10 删除工单
+### 3.11 删除工单
 
 ```
 DELETE /api/tickets/:id

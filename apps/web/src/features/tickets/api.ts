@@ -1,9 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import axios from 'axios';
 import { api } from '../../lib/api';
 import type { TicketContact } from '../../lib/contact';
 
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000') + '/api';
+
+// 分享页无需登录，不能复用会在 401 时跳回登录页的业务 API 实例。
+const publicApi = axios.create({ baseURL: API_BASE });
 
 export interface Attachment {
   id: string;
@@ -118,6 +122,41 @@ export interface TicketQuery {
   pageSize?: number;
 }
 
+export interface TicketShare {
+  id: string;
+  label: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  createdAt: string;
+  status: 'ACTIVE' | 'REVOKED' | 'EXPIRED';
+}
+
+export interface CreatedTicketShare extends TicketShare {
+  /** 仅本次创建响应含有原始密钥，关闭面板后无法恢复。 */
+  token: string;
+}
+
+export interface PublicTicketShare {
+  ticketNo: string;
+  title: string;
+  status: string;
+  priority: string;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string | null;
+  type: { name: string } | null;
+  category: { name: string } | null;
+  datacenter: { name: string } | null;
+  cluster: { name: string } | null;
+  serialNumber: string | null;
+  messages: {
+    id: string;
+    body: string;
+    createdAt: string;
+    author: { name: string };
+  }[];
+}
+
 export interface TicketFilterPerson {
   id: string;
   name: string;
@@ -152,6 +191,53 @@ export function useTicket(id: string) {
     enabled: !!id,
   });
 }
+
+export const useTicketShares = (ticketId: string, enabled: boolean) =>
+  useQuery({
+    queryKey: ['ticket-shares', ticketId],
+    queryFn: async () =>
+      (await api.get(`/tickets/${ticketId}/shares`)).data as TicketShare[],
+    enabled: !!ticketId && enabled,
+  });
+
+export function useCreateTicketShare() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      ticketId,
+      label,
+      expiresInDays,
+    }: {
+      ticketId: string;
+      label?: string;
+      expiresInDays?: number;
+    }) =>
+      (await api.post(`/tickets/${ticketId}/shares`, { label, expiresInDays }))
+        .data as CreatedTicketShare,
+    onSuccess: (_data, { ticketId }) =>
+      qc.invalidateQueries({ queryKey: ['ticket-shares', ticketId] }),
+  });
+}
+
+export function useRevokeTicketShare() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ ticketId, shareId }: { ticketId: string; shareId: string }) =>
+      (await api.delete(`/tickets/${ticketId}/shares/${shareId}`)).data,
+    onSuccess: (_data, { ticketId }) =>
+      qc.invalidateQueries({ queryKey: ['ticket-shares', ticketId] }),
+  });
+}
+
+export const usePublicTicketShare = (token: string) =>
+  useQuery({
+    queryKey: ['public-ticket-share', token],
+    queryFn: async () =>
+      (await publicApi.get(`/shared-tickets/${encodeURIComponent(token)}`))
+        .data as PublicTicketShare,
+    enabled: !!token,
+    retry: false,
+  });
 
 export function useCreateTicket() {
   return useMutation({

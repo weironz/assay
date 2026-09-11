@@ -90,6 +90,7 @@ model User {
   ticketParticipations TicketParticipant[]
   mentionedInMessages  TicketMessageMention[]
   apiTokens            ApiToken[]
+  createdTicketShares  TicketShare[]          @relation("TicketShareCreator")
 
   @@map("users")
 }
@@ -129,6 +130,26 @@ model ApiToken {
   @@index([userId, revokedAt])
   @@index([tokenHash])
   @@map("api_tokens")
+}
+
+/// 免登录查看工单公开讨论的分享链接。
+/// 链接密钥只在创建时返回；数据库仅保存 SHA-256 哈希，泄露数据库不能还原链接。
+model TicketShare {
+  id          String    @id @default(cuid())
+  ticketId    String    @map("ticket_id")
+  createdById String    @map("created_by_id")
+  label       String
+  tokenHash   String    @unique @map("token_hash")
+  expiresAt   DateTime? @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  ticket    Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  createdBy User   @relation("TicketShareCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  @@index([ticketId, revokedAt])
+  @@index([tokenHash])
+  @@map("ticket_shares")
 }
 
 model Account {
@@ -340,6 +361,7 @@ model Ticket {
   tags          TicketTag[]
   notifications Notification[]
   participants  TicketParticipant[]
+  shares        TicketShare[]
 
   @@index([status])
   @@index([assigneeId])
