@@ -38,10 +38,10 @@ def request(path, payload=None, extra_headers=None):
         return error.code, json.loads(error.read())
 
 
-def expect_ok(path, payload=None, extra_headers=None):
+def expect_ok(path, payload=None, extra_headers=None, expected_status=200):
     status, data = request(path, payload, extra_headers)
-    if status != 200:
-        raise AssertionError(f"{path}: expected 200, got {status} ({data.get('code', '')})")
+    if status != expected_status:
+        raise AssertionError(f"{path}: expected {expected_status}, got {status} ({data.get('code', '')})")
     return data
 
 
@@ -79,7 +79,7 @@ assert expect_ok("/api/me")["twoFactorEnabled"] is True
 
 step_up = expect_ok("/api/me/security/step-up", {
     "purpose": "two-factor", "password": PASSWORD, "code": totp(setup["totpURI"]),
-})
+}, expected_status=201)
 expect_ok("/api/auth/two-factor/disable", {"password": PASSWORD}, {
     "X-Step-Up-Token": step_up["stepUpToken"],
 })
