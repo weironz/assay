@@ -23,11 +23,13 @@ PASSWORD = os.environ["ASSAY_TEST_PASSWORD"]
 client = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
 
 
-def request(path, payload=None):
+def request(path, payload=None, extra_headers=None):
     body = None if payload is None else json.dumps(payload).encode()
     headers = {"Origin": BASE}
     if body is not None:
         headers["Content-Type"] = "application/json"
+    if extra_headers:
+        headers.update(extra_headers)
     req = urllib.request.Request(BASE + path, data=body, headers=headers)
     try:
         with client.open(req, timeout=10) as response:
@@ -36,8 +38,8 @@ def request(path, payload=None):
         return error.code, json.loads(error.read())
 
 
-def expect_ok(path, payload=None):
-    status, data = request(path, payload)
+def expect_ok(path, payload=None, extra_headers=None):
+    status, data = request(path, payload, extra_headers)
     if status != 200:
         raise AssertionError(f"{path}: expected 200, got {status} ({data.get('code', '')})")
     return data
@@ -75,7 +77,12 @@ assert expect_ok("/api/auth/sign-in/email", {"email": EMAIL, "password": PASSWOR
 expect_ok("/api/auth/two-factor/verify-backup-code", {"code": setup["backupCodes"][0]})
 assert expect_ok("/api/me")["twoFactorEnabled"] is True
 
-expect_ok("/api/auth/two-factor/disable", {"password": PASSWORD})
+step_up = expect_ok("/api/me/security/step-up", {
+    "purpose": "two-factor", "password": PASSWORD, "code": totp(setup["totpURI"]),
+})
+expect_ok("/api/auth/two-factor/disable", {"password": PASSWORD}, {
+    "X-Step-Up-Token": step_up["stepUpToken"],
+})
 assert expect_ok("/api/me")["twoFactorEnabled"] is False
 expect_ok("/api/auth/sign-out", {})
 assert "twoFactorRedirect" not in expect_ok("/api/auth/sign-in/email", {"email": EMAIL, "password": PASSWORD})
