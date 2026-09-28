@@ -1,12 +1,14 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AuthService } from './auth.service';
 import { IS_PUBLIC_KEY } from './decorators';
+import { privilegedMfaMode } from './step-up-store';
 
 /**
  * 全局会话守卫：校验 better-auth 会话，把用户挂到 req.user。
@@ -33,6 +35,12 @@ export class SessionGuard implements CanActivate {
     if (!user) throw new UnauthorizedException('未登录');
     if (user.status === 'DISABLED') {
       throw new UnauthorizedException('账号已被禁用');
+    }
+    if (privilegedMfaMode() === 'enforce' &&
+        user.roles.some((role) => role === 'admin' || role === 'supervisor') &&
+        !user.twoFactorEnabled &&
+        !['/api/me', '/api/me/security', '/api/me/security/step-up'].includes(req.path)) {
+      throw new ForbiddenException('请先完成 TOTP 绑定，才能使用特权账号');
     }
     return true;
   }

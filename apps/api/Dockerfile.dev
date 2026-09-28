@@ -10,9 +10,10 @@ WORKDIR /app
 
 # 先拷贝清单，利用缓存
 COPY package.json ./
+COPY pnpm-lock.yaml ./
 COPY prisma ./prisma
 
-RUN pnpm install
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
 # 生成 Prisma Client（schema 已在上面拷入）
 RUN pnpm prisma generate
@@ -24,4 +25,6 @@ EXPOSE 3000
 
 # 启动前用 db push 同步表结构（P0 便捷方式），再热更新启动
 # 正式迁移文件在后续阶段用 `prisma migrate dev` 生成
-CMD ["sh", "-c", "pnpm prisma db push --skip-generate && pnpm db:seed:dev || true; pnpm start:dev"]
+# The named node_modules volume masks the image's dependencies. Reconcile it with
+# the mounted lockfile and regenerate Prisma Client before compiling on each start.
+CMD ["sh", "-c", "pnpm install --frozen-lockfile --ignore-scripts && pnpm prisma generate && pnpm prisma db push --skip-generate && { pnpm db:seed:dev || true; } && exec pnpm start:dev"]

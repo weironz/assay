@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { auth } from './auth';
+import { assertSessionEpochMigration } from './session-epoch';
 
 /**
  * 启动时确保存在一个管理员账号。
@@ -13,6 +14,11 @@ export class AuthBootstrapService implements OnModuleInit {
   constructor(private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
+    // Docker dev runs db push before Nest. In development this verifies the
+    // epoch column and installs any missing trigger functions/triggers from
+    // the checked-in SQL, without marking Prisma migrations as applied.
+    // Production must use prisma migrate deploy.
+    await assertSessionEpochMigration(this.prisma);
     const email = process.env.ADMIN_EMAIL || 'admin@example.com';
     const password = process.env.ADMIN_PASSWORD || 'admin12345';
     const name = process.env.ADMIN_NAME || '系统管理员';

@@ -3,11 +3,13 @@ FROM oven/bun:1.4.0-alpine
 
 WORKDIR /app
 
-COPY package.json bun.lock* ./
-RUN bun install
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
 
 EXPOSE 5173
 
-CMD ["bun", "run", "dev"]
+# The named node_modules volume masks the image's dependencies; refresh it from
+# the bind-mounted lockfile before starting Vite.
+CMD ["sh", "-c", "bun install --frozen-lockfile && exec bun run dev"]

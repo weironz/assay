@@ -5,8 +5,9 @@ FROM node:22-alpine AS builder
 RUN apk add --no-cache openssl && corepack enable && corepack prepare pnpm@10.13.1 --activate
 WORKDIR /app
 COPY package.json ./
+COPY pnpm-lock.yaml ./
 COPY prisma ./prisma
-RUN pnpm install --ignore-scripts && pnpm prisma generate
+RUN pnpm install --frozen-lockfile --ignore-scripts && pnpm prisma generate
 COPY tsconfig.json nest-cli.json ./
 COPY src ./src
 # 同时产出 dist/main.js 与 dist/seed.js（seed 已移入 src，不再需要运行时的 ts-node）
@@ -19,9 +20,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 COPY package.json ./
+COPY pnpm-lock.yaml ./
 COPY prisma ./prisma
 # install 与 generate 合并为一层：分两层会把整个 node_modules 再复制一份进镜像
-RUN pnpm install --prod --ignore-scripts \
+RUN pnpm install --prod --frozen-lockfile --ignore-scripts \
  && pnpm prisma generate \
  # generate 完成后清掉运行时用不到的东西：
  # typescript 是 prisma 的可选 peer 依赖被顺带装进来的，跑编译好的 JS 不需要它

@@ -5,8 +5,8 @@ FROM oven/bun:1.4.0-alpine AS builder
 WORKDIR /app
 
 # 先只拷依赖清单，命中缓存后源码改动不必重装依赖
-COPY package.json bun.lock* ./
-RUN bun install --frozen-lockfile || bun install
+COPY package.json bun.lock ./
+RUN bun install --frozen-lockfile
 
 COPY . .
 # 单域名部署：API 走相对路径 /api（由 Nginx 反代），故 base 留空

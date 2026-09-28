@@ -6,15 +6,20 @@ import {
   Param,
   Patch,
   Post,
+  Req,
 } from '@nestjs/common';
+import type { Request } from 'express';
 import { UsersService } from './users.service';
 import { CreateUserDto, ResetPasswordDto, UpdateUserDto } from './dto';
 import { RequirePermissions } from '../auth/decorators';
+import { CurrentUser } from '../auth/decorators';
+import type { AuthUser } from '../auth/auth.types';
+import { StepUpService } from '../auth/step-up.service';
 
 @Controller('users')
 @RequirePermissions('user:manage')
 export class UsersController {
-  constructor(private readonly users: UsersService) {}
+  constructor(private readonly users: UsersService, private readonly stepUp: StepUpService) {}
 
   @Get()
   list() {
@@ -27,22 +32,26 @@ export class UsersController {
   }
 
   @Post()
-  create(@Body() dto: CreateUserDto) {
+  async create(@Req() req: Request, @CurrentUser() actor: AuthUser, @Body() dto: CreateUserDto) {
+    await this.stepUp.consume(req, actor, 'roles');
     return this.users.create(dto);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() dto: UpdateUserDto) {
+  async update(@Req() req: Request, @CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: UpdateUserDto) {
+    if (dto.roleNames !== undefined || dto.status !== undefined) await this.stepUp.consume(req, actor, 'roles');
     return this.users.update(id, dto);
   }
 
   @Delete(':id')
-  remove(@Param('id') id: string) {
+  async remove(@Req() req: Request, @CurrentUser() actor: AuthUser, @Param('id') id: string) {
+    await this.stepUp.consume(req, actor, 'roles');
     return this.users.remove(id);
   }
 
   @Post(':id/reset-password')
-  resetPassword(@Param('id') id: string, @Body() dto: ResetPasswordDto) {
+  async resetPassword(@Req() req: Request, @CurrentUser() actor: AuthUser, @Param('id') id: string, @Body() dto: ResetPasswordDto) {
+    await this.stepUp.consume(req, actor, 'roles');
     return this.users.resetPassword(id, dto.newPassword);
   }
 }

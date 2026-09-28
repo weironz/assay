@@ -11,7 +11,7 @@
 #    覆盖后 compose 会挂载一组空卷，看起来就像数据全没了。
 #    改动 compose 请先 diff，确认卷名与网络一致再同步。
 #
-# 部署流水线只做 `docker compose pull && up -d`（只换镜像），不会自动同步本文件。
+# 应用发布只拉取和重建 api/web，不自动同步本文件，也不更新 RustFS。
 
 name: assay
 
@@ -45,7 +45,7 @@ services:
       retries: 10
 
   rustfs:
-    image: rustfs/rustfs:latest
+    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
     restart: always
     command: ["/data"]
     environment:

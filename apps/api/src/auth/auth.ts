@@ -1,9 +1,14 @@
 import { betterAuth, APIError } from 'better-auth';
+import { createAuthMiddleware } from 'better-auth/api';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins';
 import { PrismaClient } from '@prisma/client';
-import { createClient } from 'redis';
+import { ConflictException } from '@nestjs/common';
 import { mailEnabled, mailTemplate, sendMail } from '../mail/mailer';
+import { authRedis } from './auth-redis';
+import { enforceBetterAuthSensitiveStepUp } from './better-auth-step-up';
+import { assertCanLoseActiveAdmin } from './last-admin';
+import { captureAuthEpoch, readValidatedSession, refreshSessionMarker, stampSessionEpoch, stampTwoFactorChallenge } from './session-epoch';
 
 /**
  * 是否强制邮箱验证后才能登录。
@@ -19,12 +24,6 @@ const REQUIRE_EMAIL_VERIFICATION =
 const prisma = new PrismaClient();
 
 // Redis 二级存储：会话数据存 Redis，可即时撤销（删 key 即失效）
-const redis = createClient({
-  url: process.env.REDIS_URL || 'redis://redis:6379',
-});
-redis.on('error', (e) => console.error('[better-auth redis]', e.message));
-redis.connect().catch((e) => console.error('[better-auth redis connect]', e));
-
 export const auth = betterAuth({
   appName: 'Greenstor Assay',
   baseURL: process.env.AUTH_BASE_URL || 'http://localhost:3000',
@@ -35,8 +34,21 @@ export const auth = betterAuth({
   ),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   plugins: [twoFactor({ issuer: 'Greenstor Assay' })],
+  // These routes are handled directly by Better Auth before Nest's guards.
+  hooks: {
+    before: createAuthMiddleware(async (ctx) => {
+      await captureAuthEpoch(prisma, ctx);
+      await enforceBetterAuthSensitiveStepUp(ctx.path, ctx.headers, {
+        session: () => auth.api.getSession({ headers: ctx.headers! }),
+        user: (id) => prisma.user.findUnique({
+          where: { id }, select: { status: true, twoFactorEnabled: true, twoFactor: { select: { verified: true } }, roles: { include: { role: true } } },
+        }),
+      });
+    }),
+  },
   emailAndPassword: {
     enabled: true,
+    revokeSessionsOnPasswordReset: true,
     // 开放邮箱自助注册；配了发信服务时要求先验证邮箱才能登录
     disableSignUp: false,
     requireEmailVerification: REQUIRE_EMAIL_VERIFICATION,
@@ -77,6 +89,14 @@ export const auth = betterAuth({
     deleteUser: {
       enabled: true,
       beforeDelete: async (user) => {
+        try {
+          await assertCanLoseActiveAdmin(prisma, user.id);
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            throw new APIError('CONFLICT', { message: '不能删除最后一位在职管理员' });
+          }
+          throw error;
+        }
         const [tickets, messages] = await Promise.all([
           prisma.ticket.count({
             where: {
@@ -91,10 +111,28 @@ export const auth = betterAuth({
               '该账号已有工单或回复记录，无法删除。如需停用请联系管理员禁用账号。',
           });
         }
+        // Invalidate orphaned Redis sessions before Better Auth deletes the
+        // user. A failed later delete may log the user out, but never revive
+        // an old session.
+        await prisma.user.update({ where: { id: user.id }, data: { sessionEpoch: { increment: 1 } } });
       },
     },
   },
   databaseHooks: {
+    session: {
+      create: {
+        before: async (session, ctx) => {
+          await stampSessionEpoch(prisma, ctx, session);
+        },
+      },
+    },
+    verification: {
+      create: {
+        before: async (verification, ctx) => {
+          await stampTwoFactorChallenge(ctx, verification);
+        },
+      },
+    },
     user: {
       create: {
         // 自助注册的新用户默认给「提单人」角色，否则登录后零权限
@@ -116,24 +154,27 @@ export const auth = betterAuth({
     },
   },
   secondaryStorage: {
-    get: async (key) => (await redis.get(key)) ?? null,
+    get: async (key) => readValidatedSession(prisma, key),
+    getAndDelete: async (key) => authRedis.getDel(key),
     set: async (key, value, ttl) => {
-      if (ttl) await redis.set(key, value, { EX: ttl });
-      else await redis.set(key, value);
+      await refreshSessionMarker(key, value, ttl);
+      if (ttl) await authRedis.set(key, value, { EX: ttl });
+      else await authRedis.set(key, value);
     },
     delete: async (key) => {
-      await redis.del(key);
+      await authRedis.del(key);
     },
     // 原子自增（供限流计数用）：首次计数时设过期为窗口时长
     increment: async (key: string, ttl?: number) => {
-      const count = await redis.incr(key);
-      if (count === 1 && ttl) await redis.expire(key, ttl);
+      const count = await authRedis.incr(key);
+      if (count === 1 && ttl) await authRedis.expire(key, ttl);
       return count;
     },
   },
   session: {
     expiresIn: 60 * 60 * 24 * 7, // 7 天
     updateAge: 60 * 60 * 24, // 每天滑动续期
+    cookieCache: { enabled: false }, // every request must check the durable epoch
   },
   // 限流：防登录爆破。计数走 Redis；真实 IP 取 nginx 设置的 x-real-ip
   rateLimit: {

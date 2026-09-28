@@ -66,6 +66,7 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
+      NODE_ENV: development
       # 容器内使用服务名连接
       DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD:-assay_dev_pwd}@postgres:5432/${POSTGRES_DB:-assay}?schema=public
       REDIS_HOST: redis

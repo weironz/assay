@@ -52,7 +52,7 @@ jobs:
         run: cargo build --locked --release
 
   web:
-    name: 前端 · 类型检查与构建
+    name: 前端 · 测试、类型检查与构建
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +64,10 @@ jobs:
       - name: 安装依赖（锁定版本）
         working-directory: apps/web
         run: bun install --frozen-lockfile
+
+      - name: 前端安全契约测试
+        working-directory: apps/web
+        run: bun run test
 
       - name: 类型检查
         working-directory: apps/web
@@ -78,6 +82,29 @@ jobs:
   api:
     name: 后端 · 类型检查与构建
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: assay
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d assay"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -89,26 +116,46 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: apps/api/package.json
+          cache-dependency-path: apps/api/pnpm-lock.yaml
 
-      - name: 安装依赖
-        working-directory: apps/api
-        run: pnpm install --ignore-scripts
+      # 根 pnpm-workspace.yaml 还包含用 Bun 管理、没有 pnpm 锁文件的 web。
+      # 在 runner 临时目录中安装 API，使用 apps/api/pnpm-lock.yaml 的独立 importer。
+      - name: 准备独立 API 工作目录
+        run: |
+          mkdir -p "$RUNNER_TEMP/assay-api"
+          cp -a apps/api/. "$RUNNER_TEMP/assay-api/"
+
+      - name: 安装依赖（锁定版本）
+        working-directory: ${{ runner.temp }}/assay-api
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: 生成 Prisma Client
-        working-directory: apps/api
+        working-directory: ${{ runner.temp }}/assay-api
         run: pnpm prisma generate
 
       - name: 校验 Prisma schema
-        working-directory: apps/api
+        working-directory: ${{ runner.temp }}/assay-api
         # validate 会解析 datasource 里的 env()，需要变量存在；这里不连库，给个占位即可
         env:
           DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
         run: pnpm prisma validate
 
       - name: 编译
-        working-directory: apps/api
+        working-directory: ${{ runner.temp }}/assay-api
         run: pnpm build
+
+      - name: 创建隔离测试数据库结构
+        working-directory: ${{ runner.temp }}/assay-api
+        env:
+          DATABASE_URL: postgresql://ci:ci_test_password@127.0.0.1:5432/assay?schema=public
+        run: pnpm prisma migrate deploy
+
+      - name: API 测试（必须发现并执行非零数量）
+        working-directory: ${{ runner.temp }}/assay-api
+        env:
+          REDIS_URL: redis://127.0.0.1:6379
+          SESSION_EPOCH_TEST_DATABASE_URL: postgresql://ci:ci_test_password@127.0.0.1:5432/assay?schema=public
+        run: pnpm test
 
   smoke:
     name: 集成冒烟测试（整栈拉起）
@@ -152,9 +199,11 @@ jobs:
             sleep 3
           done
           for i in $(seq 1 60); do
-            if docker compose logs api 2>/dev/null | grep -q "API 已启动"; then echo "api 就绪"; break; fi
+            if docker compose exec -T api node -e "fetch('http://127.0.0.1:' + (Number(process.env.API_PORT)||3000) + '/health', {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then echo "api 就绪"; exit 0; fi
             sleep 3
           done
+          echo "::error::API /health 未就绪"
+          exit 1
 
       - name: 冒烟断言
         run: |
@@ -216,6 +265,8 @@ jobs:
     outputs:
       tag: ${{ steps.meta.outputs.tag }}
       acr_registry: ${{ steps.meta.outputs.acr_registry }}
+      api_digest: ${{ steps.digests.outputs.api_digest }}
+      web_digest: ${{ steps.digests.outputs.web_digest }}
     steps:
       - uses: actions/checkout@v4
 
@@ -287,6 +338,19 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      - name: 记录 ACR 中本次镜像的 digest
+        id: digests
+        env:
+          ACR_URL: ${{ secrets.ACR_URL }}
+          TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for service in api web; do
+            digest=$(docker buildx imagetools inspect "$ACR_URL/assay-$service:$TAG" | awk '$1 == "Digest:" { print $2; exit }')
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::$service 的 ACR digest 缺失"; exit 1; }
+            echo "${service}_digest=$digest" >> "$GITHUB_OUTPUT"
+          done
+
   cli_assets:
     name: CLI · ${{ matrix.target }}
     needs: [cli, web, api, smoke]
@@ -332,6 +396,9 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_deploy }}
     runs-on: ubuntu-latest
     environment: production
+    concurrency:
+      group: assay-production
+      cancel-in-progress: false
     steps:
       - name: 准备 SSH
         run: |
@@ -353,55 +420,155 @@ jobs:
           # 密码经 stdin 传入，不写进命令行（否则会出现在服务器进程列表里）
           printf '%s' "$ACR_PASSWORD" | ssh -o BatchMode=yes "$USER@$HOST"             "docker login --username='$ACR_USERNAME' --password-stdin '$ACR_REGISTRY'"
 
-      - name: 拉取新镜像并滚动更新
+      - name: 部署指定版本并验证（失败自动回滚一次）
         env:
           HOST: ${{ secrets.DEPLOY_HOST }}
           USER: ${{ secrets.DEPLOY_USER }}
           TAG: ${{ needs.build.outputs.tag }}
+          EXPECTED_API_DIGEST: ${{ needs.build.outputs.api_digest }}
+          EXPECTED_WEB_DIGEST: ${{ needs.build.outputs.web_digest }}
         run: |
-          ssh -o BatchMode=yes "$USER@$HOST" bash -euo pipefail <<EOF
+          [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::无效镜像标签"; exit 1; }
+          [[ "$EXPECTED_API_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::无效 API digest"; exit 1; }
+          [[ "$EXPECTED_WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::无效 Web digest"; exit 1; }
+          ssh -o BatchMode=yes "$USER@$HOST" "bash -s -- '$TAG' '$EXPECTED_API_DIGEST' '$EXPECTED_WEB_DIGEST'" <<'REMOTE'
+            set -Eeuo pipefail
             cd /data/assay
-            echo "== 记录当前版本，供回滚用 =="
-            docker compose images -q api > /tmp/prev-api.txt 2>/dev/null || true
-            docker compose images -q web > /tmp/prev-web.txt 2>/dev/null || true
+            tag=$1
+            api_digest=$2
+            web_digest=$3
 
-            echo "== 拉取 $TAG =="
-            docker compose pull
+            image_ref() {
+              local service=$1 version=$2 image found=''
+              while IFS= read -r image; do
+                case "$image" in
+                  */assay-"$service":"$version")
+                    [ -z "$found" ] || return 1
+                    found=$image ;;
+                esac
+              done < <(IMAGE_TAG="$version" docker compose config --images)
+              [ -n "$found" ] || return 1
+              printf '%s' "$found"
+            }
 
-            echo "== 滚动更新 =="
-            docker compose up -d --remove-orphans
-          EOF
+            container_image() {
+              local container
+              container=$(docker compose ps -q "$1")
+              [ -n "$container" ] || return 1
+              docker inspect "$container" --format '{{.Image}}'
+            }
 
-      - name: 健康校验（失败即回滚）
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          PUBLIC_URL: ${{ secrets.DEPLOY_PUBLIC_URL }}
-        run: |
-          ok=0
-          for i in $(seq 1 30); do
-            code=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$PUBLIC_URL/" || true)
-            api=$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$PUBLIC_URL/api/me" || true)
-            # 首页 200 且受保护接口 401（说明前端静态与 API 反代都通）
-            if [ "$code" = "200" ] && [ "$api" = "401" ]; then ok=1; break; fi
-            sleep 5
-          done
-          if [ "$ok" != "1" ]; then
-            echo "::error::健康校验失败，执行回滚"
-            ssh -o BatchMode=yes "$USER@$HOST" bash -euo pipefail <<'EOF'
-              cd /data/assay
-              REG=$(grep -oE '^REGISTRY=.*' .env | cut -d= -f2-)
-              REG=${REG:-registry.cn-shenzhen.aliyuncs.com/willspace}
-              PREV_API=$(cat /tmp/prev-api.txt 2>/dev/null || true)
-              PREV_WEB=$(cat /tmp/prev-web.txt 2>/dev/null || true)
-              [ -n "$PREV_API" ] && docker tag "$PREV_API" "$REG/assay-api:latest" || true
-              [ -n "$PREV_WEB" ] && docker tag "$PREV_WEB" "$REG/assay-web:latest" || true
-              docker compose up -d
-              echo "已回滚到上一版本"
-          EOF
-            exit 1
-          fi
-          echo "✅ 部署成功，站点健康"
+            container_ref() {
+              local container
+              container=$(docker compose ps -q "$1")
+              [ -n "$container" ] || return 1
+              docker inspect "$container" --format '{{.Config.Image}}'
+            }
+
+            api_ready() {
+              docker compose exec -T api node -e 'fetch("http://127.0.0.1:" + (Number(process.env.API_PORT)||3000) + "/health", {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))' >/dev/null 2>&1
+            }
+
+            ready() {
+              [ "$(container_image api)" = "$1" ] || return 1
+              [ "$(container_image web)" = "$2" ] || return 1
+              [ "$(container_ref api)" = "$3" ] || return 1
+              [ "$(container_ref web)" = "$4" ] || return 1
+              [ "$(docker compose ps -q rustfs)" = "$old_rustfs_container" ] || return 1
+              api_ready || return 1
+              [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$public_url/" || true)" = 200 ] || return 1
+              [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$public_url/api/me" || true)" = 401 ]
+            }
+
+            wait_ready() {
+              local attempt
+              for attempt in $(seq 1 "$5"); do
+                if ready "$1" "$2" "$3" "$4"; then return 0; fi
+                sleep 5
+              done
+              return 1
+            }
+
+            [ -f .env ] || { echo '::error::服务器缺少 .env'; exit 1; }
+            mapfile -t tag_lines < <(grep '^IMAGE_TAG=' .env || true)
+            [ "${#tag_lines[@]}" -le 1 ] || { echo '::error::重复的 IMAGE_TAG'; exit 1; }
+            old_tag=latest
+            if [ "${#tag_lines[@]}" -eq 1 ]; then
+              old_tag=${tag_lines[0]#IMAGE_TAG=}
+              old_tag=${old_tag:-latest}
+            fi
+            [[ "$old_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo '::error::原 IMAGE_TAG 格式无效'; exit 1; }
+            mapfile -t url_lines < <(grep '^PUBLIC_URL=' .env || true)
+            [ "${#url_lines[@]}" -eq 1 ] || { echo '::error::PUBLIC_URL 缺失或重复'; exit 1; }
+            public_url=${url_lines[0]#PUBLIC_URL=}
+            public_url=${public_url%/}
+            case "$public_url" in http://*|https://*) ;; *) echo '::error::PUBLIC_URL 格式无效'; exit 1;; esac
+
+            old_api_ref=$(image_ref api "$old_tag")
+            old_web_ref=$(image_ref web "$old_tag")
+            new_api_ref=$(image_ref api "$tag")
+            new_web_ref=$(image_ref web "$tag")
+            old_api_id=$(container_image api)
+            old_web_id=$(container_image web)
+            old_rustfs_container=$(docker compose ps -q rustfs)
+            [ -n "$old_rustfs_container" ] && api_ready || { echo '::error::原 API 未就绪'; exit 1; }
+            docker image inspect "$old_api_id" "$old_web_id" >/dev/null
+
+            umask 077
+            backup=$(mktemp ./.env.assay-backup.XXXXXX)
+            cp -p .env "$backup" || { rm -f "$backup"; exit 1; }
+            next_env=$(mktemp ./.env.assay-next.XXXXXX)
+
+            rollback() {
+              local failure=$?
+              trap - EXIT HUP INT TERM
+              [ "$failure" -ne 0 ] || return 0
+              set +e
+              echo '::error::部署失败，回滚 API/Web 和 IMAGE_TAG'
+              if ! mv -f "$backup" .env; then
+                echo "::error::无法恢复 .env；备份保留在 $backup" >&2
+                exit "$failure"
+              fi
+              rm -f "$next_env"
+              local restored=1
+              docker tag "$old_api_id" "$old_api_ref" || restored=0
+              docker tag "$old_web_id" "$old_web_ref" || restored=0
+              if [ "$restored" -eq 1 ]; then
+                IMAGE_TAG="$old_tag" docker compose up -d --no-deps --force-recreate api web || restored=0
+              fi
+              if [ "$restored" -eq 1 ] && wait_ready "$old_api_id" "$old_web_id" "$old_api_ref" "$old_web_ref" 30; then
+                echo "回滚就绪：API=$old_api_id Web=$old_web_id IMAGE_TAG=$old_tag"
+              else
+                echo '::error::回滚后镜像或服务未就绪，需要人工检查' >&2
+              fi
+              exit "$failure"
+            }
+            trap rollback EXIT
+            trap 'exit 1' HUP INT TERM
+
+            cp -p .env "$next_env"
+            awk -v version="$tag" '
+              /^IMAGE_TAG=/ { if (!seen++) print "IMAGE_TAG=" version; next }
+              { print }
+              END { if (!seen) print "IMAGE_TAG=" version }
+            ' .env > "$next_env"
+            mv -f "$next_env" .env
+
+            IMAGE_TAG="$tag" docker compose pull --policy always api web
+            expected_api_id=$(docker image inspect "$new_api_ref" --format '{{.Id}}')
+            expected_web_id=$(docker image inspect "$new_web_ref" --format '{{.Id}}')
+            expected_api_digest=$(docker image inspect "$new_api_ref" --format '{{json .RepoDigests}}')
+            expected_web_digest=$(docker image inspect "$new_web_ref" --format '{{json .RepoDigests}}')
+            [[ "$expected_api_digest" == *"${new_api_ref%:*}@$api_digest"* ]] || { echo '::error::API digest 与本次构建不符'; exit 1; }
+            [[ "$expected_web_digest" == *"${new_web_ref%:*}@$web_digest"* ]] || { echo '::error::Web digest 与本次构建不符'; exit 1; }
+            IMAGE_TAG="$tag" docker compose up -d --no-deps --force-recreate api web
+            wait_ready "$expected_api_id" "$expected_web_id" "$new_api_ref" "$new_web_ref" 30 || { echo '::error::新版本未就绪或镜像不符'; exit 1; }
+
+            echo "部署就绪：API=$expected_api_id Web=$expected_web_id IMAGE_TAG=$tag"
+            echo "API RepoDigests=$expected_api_digest"
+            echo "Web RepoDigests=$expected_web_digest"
+            rm -f "$backup"
+          REMOTE
 
       - name: 部署摘要
         if: always()

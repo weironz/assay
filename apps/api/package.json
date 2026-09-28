@@ -5,6 +5,7 @@
   "description": "工单系统后端 (NestJS)",
   "scripts": {
     "build": "nest build",
+    "test": "node scripts/run-tests.cjs",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",

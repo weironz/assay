@@ -6,6 +6,7 @@ import { auth } from './auth';
 import { AuthUser } from './auth.types';
 import { isSystemRoleName } from './role-policy';
 import { ApiTokensService } from '../api-tokens/api-tokens.service';
+import { assertSessionEpoch } from './session-epoch';
 
 @Injectable()
 export class AuthService {
@@ -27,6 +28,7 @@ export class AuthService {
       headers: fromNodeHeaders(req.headers),
     });
     if (!session?.user) return null;
+    await assertSessionEpoch(this.prisma, session.session.token, session.user.id);
 
     const user = await this.prisma.user.findUnique({
       where: { id: session.user.id },
