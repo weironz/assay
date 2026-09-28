@@ -466,7 +466,7 @@ jobs:
             }
 
             api_ready() {
-              docker compose exec -T api node -e 'fetch("http://127.0.0.1:" + (Number(process.env.API_PORT)||3000) + "/health", {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))' >/dev/null 2>&1
+              docker compose exec -T api node -e 'fetch("http://127.0.0.1:" + (Number(process.env.API_PORT)||3000) + "/health", {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))' </dev/null >/dev/null 2>&1
             }
 
             ready() {
@@ -569,6 +569,20 @@ jobs:
             echo "Web RepoDigests=$expected_web_digest"
             rm -f "$backup"
           REMOTE
+
+      - name: 独立核验生产版本
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          TAG: ${{ needs.build.outputs.tag }}
+          ACR_URL: ${{ secrets.ACR_URL }}
+        run: |
+          set -euo pipefail
+          ssh -o BatchMode=yes "$USER@$HOST" "cd /data/assay && grep -Fx 'IMAGE_TAG=$TAG' .env >/dev/null && docker compose ps --format json" |
+            jq -s -e --arg api "$ACR_URL/assay-api:$TAG" --arg web "$ACR_URL/assay-web:$TAG" '
+              any(.[]; .Service == "api" and .State == "running" and .Health == "healthy" and .Image == $api) and
+              any(.[]; .Service == "web" and .State == "running" and .Health == "healthy" and .Image == $web)
+            '
 
       - name: 部署摘要
         if: always()
