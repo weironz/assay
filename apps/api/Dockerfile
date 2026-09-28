@@ -36,7 +36,7 @@ COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \
-  CMD node -e "fetch('http://127.0.0.1:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(Number(process.env.API_PORT)||3000)+'/health',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 # 启动：应用迁移 → 灌种子(幂等) → 启动服务
 # 直接调二进制而不经 pnpm：启动时不必再解析 corepack/pnpm，也不会因缓存被清而回退到别的 pnpm 版本。
