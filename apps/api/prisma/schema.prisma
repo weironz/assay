@@ -63,6 +63,7 @@ model User {
   name           String
   email          String     @unique
   emailVerified  Boolean    @default(false)
+  twoFactorEnabled Boolean   @default(false)
   image          String?
   // 业务扩展字段
   username       String?    @unique
@@ -76,6 +77,7 @@ model User {
   // better-auth 关系
   sessions Session[]
   accounts Account[]
+  twoFactor TwoFactor?
 
   // 业务关系
   roles                UserRole[]
@@ -182,6 +184,20 @@ model Verification {
 
   @@index([identifier])
   @@map("verifications")
+}
+
+// better-auth two-factor 插件：密钥与恢复码由插件加密存储，业务代码不读取。
+model TwoFactor {
+  id                      String    @id @default(cuid())
+  secret                  String
+  backupCodes             String
+  userId                  String    @unique
+  user                    User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  verified                Boolean   @default(false)
+  failedVerificationCount Int       @default(0)
+  lockedUntil             DateTime?
+
+  @@map("twoFactor")
 }
 
 model Role {

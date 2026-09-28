@@ -181,6 +181,9 @@ jobs:
           echo "— 工单列表可访问"
           curl -fsS -b "$JAR" -o /dev/null "http://localhost:8088/api/tickets?pageSize=1"
 
+          echo "— 两步验证端到端"
+          ASSAY_TEST_PASSWORD=ciadmin12345 python3 scripts/smoke-two-factor.py
+
           echo "— 登录限流生效（连打 8 次后应出现 429）"
           CODES=""
           for i in $(seq 1 8); do
@@ -193,6 +196,7 @@ jobs:
           echo "$CODES" | grep -q 429
 
           echo "全部冒烟断言通过"
+
 
       - name: 失败时输出日志
         if: failure()

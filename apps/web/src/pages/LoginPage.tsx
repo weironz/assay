@@ -31,6 +31,9 @@ export default function LoginPage() {
   );
   const [needVerify, setNeedVerify] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [twoFactorPending, setTwoFactorPending] = useState(false);
+  const [factorCode, setFactorCode] = useState('');
+  const [backupMode, setBackupMode] = useState(false);
 
   const reset = () => {
     setError(null);
@@ -56,6 +59,13 @@ export default function LoginPage() {
         }
         return;
       }
+      if (res.data && 'twoFactorRedirect' in res.data && res.data.twoFactorRedirect) {
+        setPassword('');
+        setFactorCode('');
+        setBackupMode(false);
+        setTwoFactorPending(true);
+        return;
+      }
       const me = await fetchMe();
       if (me) navigate('/dashboard', { replace: true });
       else setError({ key: 'auth.errSessionFailed' });
@@ -63,6 +73,29 @@ export default function LoginPage() {
       setError(
         err?.message ? { raw: err.message } : { key: 'auth.errLoginFailed' },
       );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyTwoFactor = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setLoading(true);
+    try {
+      const code = factorCode.trim();
+      const res = backupMode
+        ? await authClient.twoFactor.verifyBackupCode({ code })
+        : await authClient.twoFactor.verifyTotp({ code });
+      if (res.error) {
+        setError({ key: res.error.status === 429 ? 'auth.twoFactorTooMany' : 'auth.twoFactorInvalid' });
+        return;
+      }
+      const me = await fetchMe();
+      if (me) navigate('/dashboard', { replace: true });
+      else setError({ key: 'auth.errSessionFailed' });
+    } catch {
+      setError({ key: 'auth.twoFactorInvalid' });
     } finally {
       setLoading(false);
     }
@@ -132,6 +165,27 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
+
+  if (twoFactorPending) return (
+    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
+      <div className="absolute right-4 top-4"><LanguageSwitcher /></div>
+      <div className="w-full max-w-sm space-y-8">
+        <div className="flex justify-center"><BrandMark variant="stack" /></div>
+        <form onSubmit={verifyTwoFactor} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <h1 className="text-lg font-semibold">{t('auth.twoFactorTitle')}</h1>
+          <p className="text-sm text-gray-500">{t(backupMode ? 'auth.twoFactorBackupHint' : 'auth.twoFactorTotpHint')}</p>
+          <label className="block text-sm font-medium" htmlFor="two-factor-code">{t(backupMode ? 'auth.twoFactorBackupCode' : 'auth.twoFactorCode')}</label>
+          <input id="two-factor-code" autoFocus required value={factorCode} onChange={(e) => setFactorCode(e.target.value)} inputMode={backupMode ? 'text' : 'numeric'} autoComplete="one-time-code" maxLength={backupMode ? 64 : 6} className={inputCls} />
+          {error && <p role="alert" className="text-sm text-red-600">{msg(error)}</p>}
+          <button disabled={loading} className="w-full rounded-md bg-brand-700 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-60">{loading ? t('common.processing') : t('auth.twoFactorVerify')}</button>
+          <div className="flex justify-between text-sm">
+            <button type="button" onClick={() => { setBackupMode(!backupMode); setFactorCode(''); setError(null); }} className="text-brand-700 hover:underline">{t(backupMode ? 'auth.twoFactorUseApp' : 'auth.twoFactorUseBackup')}</button>
+            <button type="button" onClick={() => { setTwoFactorPending(false); setFactorCode(''); setError(null); }} className="text-gray-500 hover:underline">{t('auth.twoFactorBack')}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">

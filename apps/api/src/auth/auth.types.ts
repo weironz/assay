@@ -8,6 +8,7 @@ export interface AuthUser {
   username: string | null;
   image: string | null;
   emailVerified: boolean;
+  twoFactorEnabled: boolean;
   status: string;
   /** 上次勾选「设为默认」存下的联系方式，建单时预填 */
   defaultContact: TicketContactDto | null;

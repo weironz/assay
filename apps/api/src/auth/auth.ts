@@ -1,5 +1,6 @@
 import { betterAuth, APIError } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
+import { twoFactor } from 'better-auth/plugins';
 import { PrismaClient } from '@prisma/client';
 import { createClient } from 'redis';
 import { mailEnabled, mailTemplate, sendMail } from '../mail/mailer';
@@ -25,6 +26,7 @@ redis.on('error', (e) => console.error('[better-auth redis]', e.message));
 redis.connect().catch((e) => console.error('[better-auth redis connect]', e));
 
 export const auth = betterAuth({
+  appName: 'Greenstor Assay',
   baseURL: process.env.AUTH_BASE_URL || 'http://localhost:3000',
   basePath: '/api/auth',
   secret: process.env.AUTH_SECRET || 'dev_secret_change_me',
@@ -32,6 +34,7 @@ export const auth = betterAuth({
     ',',
   ),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
+  plugins: [twoFactor({ issuer: 'Greenstor Assay' })],
   emailAndPassword: {
     enabled: true,
     // 开放邮箱自助注册；配了发信服务时要求先验证邮箱才能登录
@@ -53,7 +56,8 @@ export const auth = betterAuth({
     },
   },
   emailVerification: {
-    autoSignInAfterVerification: true,
+    // 验证邮箱不自动签发会话，避免已启用 2FA 的账号从邮件链接绕过第二因子。
+    autoSignInAfterVerification: false,
     sendOnSignUp: true,
     sendVerificationEmail: async ({ user, url }) => {
       await sendMail(
@@ -144,6 +148,8 @@ export const auth = betterAuth({
       '/forget-password': { window: 3600, max: 5 }, // 旧版别名
       '/send-verification-email': { window: 3600, max: 5 },
       '/delete-user': { window: 3600, max: 5 },
+      '/two-factor/verify-totp': { window: 60, max: 10 },
+      '/two-factor/verify-backup-code': { window: 60, max: 10 },
     },
   },
   advanced: {

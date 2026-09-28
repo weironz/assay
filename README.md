@@ -149,6 +149,10 @@ docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" 
 界面支持四种语言，默认英文，用户选择保存在浏览器：English / 简体中文 / 繁體中文 / ไทย。
 切换器在登录页右上角与登录后顶部导航栏右侧。
 
+## 两步验证
+
+用户可在「设置 → 安全」启用验证器应用（TOTP），登录时需输入动态码，也支持一次性恢复码。部署要求与操作细节见 [两步验证与验证器使用](docs/09-两步验证与验证器使用.md)。
+
 ## 当前进度
 
 - [x] P0 骨架 + docker compose 一键起

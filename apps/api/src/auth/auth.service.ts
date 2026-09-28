@@ -47,7 +47,7 @@ export class AuthService {
   private toAuthUser(
     user: {
       id: string; email: string; name: string; username: string | null; image: string | null;
-      emailVerified: boolean; status: string; defaultContact: unknown;
+      emailVerified: boolean; twoFactorEnabled: boolean; status: string; defaultContact: unknown;
       roles: { role: { name: string; permissions: { permission: { code: string } }[] } }[];
     },
     token: { id: string; scopes: string[] } | null,
@@ -75,6 +75,7 @@ export class AuthService {
       username: user.username,
       image: user.image,
       emailVerified: user.emailVerified,
+      twoFactorEnabled: user.twoFactorEnabled,
       status: user.status,
       defaultContact: (user.defaultContact as AuthUser['defaultContact']) ?? null,
       authType: token ? 'token' : 'session',

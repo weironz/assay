@@ -25,6 +25,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-i18next": "^17.0.12",
+    "react-qr-code": "2.2.0",
     "react-router-dom": "^7.1.0",
     "zustand": "^5.0.2"
   },
