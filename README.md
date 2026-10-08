@@ -104,8 +104,8 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 健康校验失败自动回滚到上一版本。
 
 ```bash
-gh workflow run ci-cd.yml -f release_version=1.3.7                     # 统一发版：镜像、部署、CLI、GitHub Release
-gh workflow run ci-cd.yml -f image_tag=1.3.7 -f skip_deploy=true       # 仅构建推送指定镜像，不部署或创建 Release
+gh workflow run ci-cd.yml -f release_version=1.3.8                     # 统一发版：镜像、部署、CLI、GitHub Release
+gh workflow run ci-cd.yml -f image_tag=1.3.8 -f skip_deploy=true       # 仅构建推送指定镜像，不部署或创建 Release
 gh workflow run ci-cd.yml -f skip_deploy=true                         # 用 commit SHA 标记镜像，仅推送不部署
 gh run watch                                       # 跟踪进度
 ```
