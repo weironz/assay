@@ -32,6 +32,21 @@ const en = {
     description: 'Description',
   },
 
+  metadata: {
+    incident: 'Incident', request: 'Service request', question: 'Question',
+    itSupport: 'IT support', network: 'Network', accountAccess: 'Account access', software: 'Software installation',
+    ibNetwork: 'IB network', ethernet: 'Ethernet network', gpu: 'GPU card', b300: 'B300', defaultQueue: 'Default queue',
+  },
+  ticketAttributes: {
+    sectionTitle: 'Ticket attributes', title: 'Edit ticket attributes', edit: 'Edit attributes',
+    hint: 'Add or correct ticket details. Status, owner and existing SLA deadlines are not changed here.',
+    saved: 'Ticket attributes saved.', saveFailed: 'Could not save. Check your connection and try again.',
+    invalidValues: 'Check the title, category and contact details. Use valid email addresses, at most five.',
+    forbidden: 'You no longer have permission to edit this ticket. Reload the page.',
+    loadFailed: 'Could not load the available options. Retry before saving.', retry: 'Retry',
+    contactEnabled: 'Add contact details (uncheck to clear)', emailsHint: 'One email per line; up to {{max}} addresses.',
+    discard: 'Discard your unsaved attribute changes?',
+  },
   language: {
     label: 'Language',
     select: 'Select language',

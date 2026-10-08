@@ -6,6 +6,7 @@ import { PRIORITY_COLOR, STATUS_COLOR, priorityLabel, statusLabel } from '../lib
 import { renderHtml } from '../lib/sanitize';
 import { useDateFormat } from '../i18n/format';
 import { apiOrigin } from '../lib/api';
+import { metadataLabel } from '../lib/metadata-labels';
 
 function Meta({ label, value }: { label: string; value?: string | null }) {
   if (!value) return null;
@@ -90,10 +91,9 @@ export default function PublicTicketSharePage() {
               </div>
               <h1 className="mt-3 break-words text-xl font-semibold leading-8 sm:text-2xl">{ticket.title}</h1>
               <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-4 border-t border-gray-100 pt-4 dark:border-gray-800 sm:grid-cols-4">
-                <Meta label={t('share.metaType')} value={ticket.type?.name} />
-                <Meta label={t('share.metaCategory')} value={ticket.category?.name} />
+                <Meta label={t('share.metaType')} value={ticket.type && metadataLabel(t, 'type', ticket.type.name)} />
+                <Meta label={t('share.metaCategory')} value={ticket.category && metadataLabel(t, 'category', ticket.category.name)} />
                 <Meta label={t('share.metaDatacenter')} value={ticket.datacenter?.name} />
-                <Meta label={t('share.metaCluster')} value={ticket.cluster?.name} />
                 <Meta label={t('share.metaSerialNumber')} value={ticket.serialNumber} />
                 <Meta label={t('share.metaCreatedAt')} value={fmt.dateTime(ticket.createdAt)} />
               </dl>

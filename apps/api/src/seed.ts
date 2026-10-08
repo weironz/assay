@@ -99,21 +99,13 @@ async function main() {
     await ensureCategory(name);
   }
 
-  // 机房与集群
-  const dz = await prisma.datacenter.upsert({
+  // 机房。Cluster 已退出工单界面，不再为新部署创建；历史数据保持不变。
+  await prisma.datacenter.upsert({
     where: { name: 'datazone' },
     update: {},
     create: { name: 'datazone' },
   });
-  for (const name of ['BKK-CL01', 'BKK-CL02']) {
-    await prisma.cluster.upsert({
-      where: { name },
-      update: {},
-      create: { name, datacenterId: dz.id },
-    });
-  }
-
-  console.log('✅ Seed 完成：权限/角色/admin/默认队列/类型/分类/机房集群');
+  console.log('✅ Seed 完成：权限/角色/admin/默认队列/类型/分类/机房');
 }
 
 main()

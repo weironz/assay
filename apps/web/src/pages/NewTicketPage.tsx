@@ -7,12 +7,12 @@ import {
   useTypes,
   useCategories,
   useDatacenters,
-  useClusters,
   uploadDraft,
   attachmentUrl,
   Attachment,
 } from '../features/tickets/api';
 import { PRIORITY_KEYS, priorityLabel } from '../lib/ticket-meta';
+import { metadataLabel } from '../lib/metadata-labels';
 import {
   ACCEPT_ATTR,
   EXT_LIST_TEXT,
@@ -46,7 +46,6 @@ export default function NewTicketPage() {
   const { data: types } = useTypes();
   const { data: categories } = useCategories();
   const { data: datacenters } = useDatacenters();
-  const { data: clusters } = useClusters();
 
   const [form, setForm] = useState({
     title: '',
@@ -57,7 +56,6 @@ export default function NewTicketPage() {
     typeId: '',
     queueId: '',
     datacenterId: '',
-    clusterId: '',
     serialNumber: '',
   });
   const [error, setError] = useState<Msg>(null);
@@ -76,11 +74,6 @@ export default function NewTicketPage() {
     !!user?.defaultContact,
   );
   const [contactOpen, setContactOpen] = useState(false);
-
-  // 选了机房就只列该机房下的集群；没选则全列（还没有归属的集群也要能选到）
-  const visibleClusters = form.datacenterId
-    ? clusters?.filter((c) => c.datacenterId === form.datacenterId)
-    : clusters;
 
   // 编辑器内插图：上传草稿并记录 id
   const uploadImg = async (file: File) => {
@@ -137,7 +130,6 @@ export default function NewTicketPage() {
         categoryName: custom ? form.categoryName.trim() : undefined,
         queueId: form.queueId || undefined,
         datacenterId: form.datacenterId || undefined,
-        clusterId: form.clusterId || undefined,
         serialNumber: form.serialNumber.trim() || undefined,
         contact: contact ?? undefined,
         saveContactAsDefault: contact ? saveContactAsDefault : undefined,
@@ -277,7 +269,7 @@ export default function NewTicketPage() {
               <option value="">{t('common.pleaseSelect')}</option>
               {types?.map((item: any) => (
                 <option key={item.id} value={item.id}>
-                  {item.name}
+                  {metadataLabel(t, 'type', item.name)}
                 </option>
               ))}
             </select>
@@ -294,7 +286,7 @@ export default function NewTicketPage() {
               <option value="">{t('common.notSpecified')}</option>
               {categories?.map((c: any) => (
                 <option key={c.id} value={c.id}>
-                  {c.name}
+                  {metadataLabel(t, 'category', c.name)}
                 </option>
               ))}
               <option value={CUSTOM_CATEGORY}>
@@ -326,12 +318,12 @@ export default function NewTicketPage() {
               <option value="">{t('common.notSpecified')}</option>
               {queues?.map((qu: any) => (
                 <option key={qu.id} value={qu.id}>
-                  {qu.name}
+                  {metadataLabel(t, 'queue', qu.name)}
                 </option>
               ))}
             </select>
           </div>
-          {/* IDC 资产定位，三项都选填 */}
+          {/* IDC 与设备序列号，均选填；Cluster 已从业务界面移除。 */}
           <div>
             <label className="block text-sm text-gray-500 mb-1">
               {t('ticketNew.datacenter')}
@@ -342,8 +334,6 @@ export default function NewTicketPage() {
                 setForm({
                   ...form,
                   datacenterId: e.target.value,
-                  // 换机房后原集群多半不属于新机房了，清掉比留个错值好
-                  clusterId: '',
                 })
               }
               className={inputCls}
@@ -352,23 +342,6 @@ export default function NewTicketPage() {
               {datacenters?.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">
-              {t('ticketNew.cluster')}
-            </label>
-            <select
-              value={form.clusterId}
-              onChange={(e) => setForm({ ...form, clusterId: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">{t('common.notSpecified')}</option>
-              {visibleClusters?.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
                 </option>
               ))}
             </select>

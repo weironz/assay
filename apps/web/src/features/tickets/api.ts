@@ -251,7 +251,6 @@ export function useCreateTicket() {
       categoryName?: string;
       queueId?: string;
       datacenterId?: string;
-      clusterId?: string;
       serialNumber?: string;
       contact?: TicketContact;
       saveContactAsDefault?: boolean;
@@ -260,7 +259,7 @@ export function useCreateTicket() {
   });
 }
 
-function useTicketMutation<T>(fn: (id: string, arg: T) => Promise<any>) {
+function useTicketMutation<T>(fn: (id: string, arg: T) => Promise<any>, extraKeys: string[] = []) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, arg }: { id: string; arg: T }) => fn(id, arg),
@@ -268,6 +267,7 @@ function useTicketMutation<T>(fn: (id: string, arg: T) => Promise<any>) {
       qc.invalidateQueries({ queryKey: ['ticket', id] });
       qc.invalidateQueries({ queryKey: ['tickets'] });
       qc.invalidateQueries({ queryKey: ['history', id] });
+      extraKeys.forEach(key => { void qc.invalidateQueries({ queryKey: [key] }); });
     },
   });
 }
@@ -285,10 +285,10 @@ export function useDeleteTicket() {
   });
 }
 
-/** 编辑工单基本字段（标题/优先级/类型/分类/队列） */
+/** 编辑属性；省略保留、null 清空选填值，不改动状态、处理人或 SLA。 */
 export const useUpdateTicket = () =>
   useTicketMutation<Record<string, unknown>>((id, patch) =>
-    api.patch(`/tickets/${id}`, patch),
+    api.patch(`/tickets/${id}`, patch), ['categories'],
   );
 
 /** 编辑某条消息正文 */

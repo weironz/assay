@@ -133,7 +133,7 @@ assay ticket comment --help
 
 JSON 与 [REST API 建单接口](04-API.md#32-创建工单) 的字段一致：`title` 和 `body` 必填，
 正文为 HTML；不传 `priority` 时默认 `MEDIUM`，不传 `typeId` 时使用系统兜底 SLA。
-`typeId`、`categoryId`、`datacenterId`、`clusterId` 等字段使用已有记录的数据库 ID，
+`typeId`、`categoryId`、`datacenterId` 等字段使用已有记录的数据库 ID，
 不能直接填展示名称。没有合适分类时可传 `categoryName`。联系方式 `contact`、设备序列号
 `serialNumber` 和已上传的草稿 `attachmentIds` 也受支持。
 

@@ -28,6 +28,21 @@ const zhCN: Resource = {
     description: '描述',
   },
 
+  metadata: {
+    incident: '故障', request: '需求', question: '咨询',
+    itSupport: 'IT 支持', network: '网络', accountAccess: '账号权限', software: '软件安装',
+    ibNetwork: 'IB 网络', ethernet: '以太网网络', gpu: 'GPU 卡', b300: 'B300', defaultQueue: '默认队列',
+  },
+  ticketAttributes: {
+    sectionTitle: '工单属性', title: '编辑工单属性', edit: '编辑属性',
+    hint: '补填或修正工单信息。这里不会更改状态、处理人或已有 SLA 截止时间。',
+    saved: '工单属性已保存。', saveFailed: '保存失败，请检查网络后重试。',
+    invalidValues: '请检查标题、分类和联系方式，邮箱须有效且最多五个。',
+    forbidden: '你已无权编辑此工单，请刷新页面。',
+    loadFailed: '选项加载失败，请重试后再保存。', retry: '重试',
+    contactEnabled: '填写联系方式（取消勾选可清空）', emailsHint: '每行填写一个邮箱，最多 {{max}} 个。',
+    discard: '放弃尚未保存的属性修改吗？',
+  },
   language: {
     label: '语言',
     select: '选择语言',

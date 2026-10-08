@@ -36,6 +36,9 @@ import Avatar from '../components/Avatar';
 import RichEditor from '../components/RichEditor';
 import SlaBadge from '../components/SlaBadge';
 import TicketShareDialog from '../components/TicketShareDialog';
+import TicketAttributesDialog from '../components/TicketAttributesDialog';
+import { canEditAttributes } from '../lib/ticket-attributes';
+import { metadataLabel } from '../lib/metadata-labels';
 
 export default function TicketDetailPage() {
   const { t } = useTranslation();
@@ -76,6 +79,8 @@ export default function TicketDetailPage() {
   const [participantRole, setParticipantRole] = useState<'COLLABORATOR' | 'FOLLOWER'>('COLLABORATOR');
   const [mentionUserIds, setMentionUserIds] = useState<string[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
+  const [attributesOpen, setAttributesOpen] = useState(false);
+  const [attributesSaved, setAttributesSaved] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !ticket)
@@ -83,16 +88,11 @@ export default function TicketDetailPage() {
 
   // 前后端滚动升级时旧 API 可能短暂未返回协作字段；详情页保持可用并展示空协作区。
   const participants = ticket.participants ?? [];
-  const isStaff =
-    user?.roles.includes('admin') ||
-    user?.roles.includes('supervisor') ||
-    user?.roles.includes('handler');
   const isSupervisorOrAdmin =
     !!user?.roles.includes('admin') || !!user?.roles.includes('supervisor');
   const canAssign =
     has('ticket:assign') && ['NEW', 'REOPENED'].includes(ticket.status);
-  const canEditTicket =
-    has('ticket:update') && (isStaff || ticket.requester?.id === user?.id);
+  const canEditTicket = canEditAttributes(user, ticket);
   const isCollaborator = participants.some(
     (participant) =>
       participant.userId === user?.id && participant.role === 'COLLABORATOR',
@@ -543,6 +543,11 @@ export default function TicketDetailPage() {
             </div>
           </section>
           <div className="rounded-lg border border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900 p-4 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <h2 className="font-medium">{t('ticketAttributes.sectionTitle')}</h2>
+              {canEditTicket && <button type="button" onClick={() => { setAttributesSaved(false); setAttributesOpen(true); }} className="min-h-11 rounded-md border border-gray-300 px-3 py-2 text-sm hover:border-brand-600 hover:text-brand-700 focus-visible:ring-2 focus-visible:ring-brand-500 dark:border-gray-700">{t('ticketAttributes.edit')}</button>}
+            </div>
+            {attributesSaved && <p role="status" className="text-sm text-brand-700 dark:text-brand-300">{t('ticketAttributes.saved')}</p>}
             <Meta label={t('ticketDetail.metaStatus')}>
               <span
                 className={`inline-block px-2 py-0.5 rounded text-xs ${STATUS_COLOR[ticket.status]}`}
@@ -591,32 +596,17 @@ export default function TicketDetailPage() {
               {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
             </Meta>
             <Meta label={t('ticketDetail.metaQueue')}>
-              {ticket.queue?.name ?? t('common.empty')}
+              {ticket.queue ? metadataLabel(t, 'queue', ticket.queue.name) : t('common.empty')}
             </Meta>
             <Meta label={t('ticketDetail.metaType')}>
-              {ticket.type?.name ?? t('common.empty')}
+              {ticket.type ? metadataLabel(t, 'type', ticket.type.name) : t('common.empty')}
             </Meta>
             <Meta label={t('ticketDetail.metaCategory')}>
-              {ticket.category?.name ?? t('common.empty')}
+              {ticket.category ? metadataLabel(t, 'category', ticket.category.name) : t('common.empty')}
             </Meta>
-            {/* IDC 定位信息：填了才显示，没填不占位 */}
-            {ticket.datacenter && (
-              <Meta label={t('ticketDetail.metaDatacenter')}>
-                {ticket.datacenter.name}
-              </Meta>
-            )}
-            {ticket.cluster && (
-              <Meta label={t('ticketDetail.metaCluster')}>
-                {ticket.cluster.name}
-              </Meta>
-            )}
-            {ticket.serialNumber && (
-              <Meta label={t('ticketDetail.metaSerialNumber')}>
-                <span className="break-all font-mono text-xs">
-                  {ticket.serialNumber}
-                </span>
-              </Meta>
-            )}
+            {/* 定位信息始终保留入口，未填写时也能发现并补齐。 */}
+            <Meta label={t('ticketDetail.metaDatacenter')}>{ticket.datacenter?.name ?? t('common.notSpecified')}</Meta>
+            <Meta label={t('ticketDetail.metaSerialNumber')}><span className="break-all font-mono text-xs">{ticket.serialNumber ?? t('common.notSpecified')}</span></Meta>
             {/* 首次响应：已响应就显示时间，未响应显示时限（超时标红），
                 让处理人一眼看到「还欠一个回复」 */}
             <Meta label={t('ticketDetail.metaFirstResponse')}>
@@ -740,6 +730,7 @@ export default function TicketDetailPage() {
         </div>
       </div>
       <TicketShareDialog ticketId={id} open={shareOpen} onClose={() => setShareOpen(false)} />
+      {attributesOpen && canEditTicket && <TicketAttributesDialog ticket={ticket} onClose={() => setAttributesOpen(false)} onSaved={() => { setAttributesOpen(false); setAttributesSaved(true); }} />}
     </div>
   );
 }

@@ -242,7 +242,6 @@ POST /api/tickets
 | `categoryName` | string | | 下拉里没有合适分类时自填（≤60 字符）。与 `categoryId` 二选一，同时给出以 `categoryId` 为准；服务端忽略大小写查重后复用或新建 |
 | `queueId` | string | | 队列 id |
 | `datacenterId` | string | | 机房 id |
-| `clusterId` | string | | 集群 id |
 | `serialNumber` | string | | 设备序列号（≤200 字符） |
 | `contact` | object | | 联系方式，见下 |
 | `saveContactAsDefault` | boolean | | 把该联系方式存为本人默认，下次建单自动带出 |
@@ -267,7 +266,6 @@ curl -s -b "$JAR" -X POST "$BASE/tickets" -H 'Content-Type: application/json' -d
   "priority": "HIGH",
   "typeId": "<故障类型id>",
   "datacenterId": "<机房id>",
-  "clusterId": "<集群id>",
   "serialNumber": "SN-B300-0042, SN-B300-0043",
   "contact": { "phone": "13800138021", "callTime": "ANY", "smsTime": "ANY", "emails": [] }
 }'
@@ -283,7 +281,7 @@ GET /api/tickets/:id
 权限：`ticket:read`
 
 在列表字段基础上额外包含：`messages`（往来消息，**提单人和关注人看不到内部备注**）、
-`participants`（协作成员 / 关注人）、`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、`cluster`、
+`participants`（协作成员 / 关注人）、`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、
 `serialNumber`、`contact`、`firstResponseAt`、`firstResponseDueAt`。
 
 ### 3.4 工单分享链接
@@ -318,10 +316,33 @@ GET /api/tickets/:id
 ```
 PATCH /api/tickets/:id
 ```
-权限：`ticket:update`（服务层还要求是本人工单或内部人员）
+权限：`ticket:update`，且必须是提单人、当前主处理人、管理员或主管。
+`ticket:read:all` 只扩大读取范围，不赋予编辑权；普通协作者也不会因此获得属性编辑权。
 
-可改字段：`title` `priority` `typeId` `categoryId` `queueId` `serialNumber`
-`datacenterId` `clusterId` `contact`。传 `contact: null` 可清空联系方式。
+可改字段：`title` `priority` `typeId` `categoryId` `categoryName` `queueId`
+`serialNumber` `datacenterId` `contact`。`categoryName` 与建单时相同：trim 后忽略大小写复用已有分类，找不到才创建；`categoryId` 优先。
+
+- **不传字段**表示保留原值；`typeId`、`categoryId`、`queueId`、`datacenterId`、`serialNumber`、`contact` 可传 `null` 清空。
+- 标题不可为空或仅空格，优先级必须是有效枚举；不存在的引用 ID 返回 400，不会部分保存。
+- 状态、处理人、提单人、SLA 截止时间不属于此接口；改变类型不会重新计算已启动的 SLA。
+- 属性与逐字段审计记录在同一数据库事务中保存，记录操作者及旧值/新值；实际未变化的字段不写重复记录。
+
+建单后补填 IDC / SN 示例：
+
+```json
+{ "datacenterId": "<机房id>", "serialNumber": "SN-B300-0042" }
+```
+
+Web 使用方式：打开工单详情，在右侧（手机端位于下方）**工单属性 → 编辑属性**，
+修改后保存。可编辑标题、优先级、类型、分类、队列、IDC、SN 和联系方式，选填项可清空。
+未保存关闭会提示确认；失败时保留草稿供重试。
+
+内置类型、分类和默认队列按全局语言显示（English / 简体中文 / 繁體中文 / ไทย），
+提交值仍为原数据库 ID。自定义分类/队列名称及 IDC 名称是业务数据，保持原名。
+
+**Cluster 已从新建、详情、公开分享界面移除，初始化不再创建集群。**
+新版本 CLI/MCP 的提单参数也不再包含 Cluster。为避免破坏存量记录和旧客户端，本次不删除数据库列或历史关系；REST 暂保留
+`clusterId` / `cluster` 与 `GET /api/clusters` 作为旧版兼容接口，新接入不再使用。
 
 ### 3.6 指派
 

@@ -28,6 +28,21 @@ const zhTW: Resource = {
     description: '描述',
   },
 
+  metadata: {
+    incident: '故障', request: '需求', question: '諮詢',
+    itSupport: 'IT 支援', network: '網路', accountAccess: '帳號權限', software: '軟體安裝',
+    ibNetwork: 'IB 網路', ethernet: '乙太網路', gpu: 'GPU 卡', b300: 'B300', defaultQueue: '預設佇列',
+  },
+  ticketAttributes: {
+    sectionTitle: '工單屬性', title: '編輯工單屬性', edit: '編輯屬性',
+    hint: '補填或修正工單資訊。此處不會變更狀態、處理人或既有 SLA 截止時間。',
+    saved: '工單屬性已儲存。', saveFailed: '儲存失敗，請檢查網路後重試。',
+    invalidValues: '請檢查標題、分類與聯絡資訊，電子郵件須有效且最多五個。',
+    forbidden: '你已無權編輯此工單，請重新整理頁面。',
+    loadFailed: '選項載入失敗，請重試後再儲存。', retry: '重試',
+    contactEnabled: '填寫聯絡資訊（取消勾選可清空）', emailsHint: '每行填寫一個電子郵件，最多 {{max}} 個。',
+    discard: '放棄尚未儲存的屬性變更嗎？',
+  },
   language: {
     label: '語言',
     select: '選擇語言',

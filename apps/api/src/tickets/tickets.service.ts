@@ -26,7 +26,7 @@ import { TicketContactDto } from './contact';
  * 前端「添加邮件地址」允许留空行，不清掉就会把 "" 存进去。
  */
 function normalizeContact(
-  contact?: TicketContactDto,
+  contact?: TicketContactDto | null,
 ): Prisma.InputJsonValue | typeof Prisma.JsonNull {
   if (!contact?.phone?.trim()) return Prisma.JsonNull;
   return {
@@ -192,15 +192,16 @@ export class TicketsService {
   private async resolveCategoryId(
     categoryId?: string,
     categoryName?: string,
+    database: Pick<Prisma.TransactionClient, 'category'> = this.prisma,
   ): Promise<string | undefined> {
     if (categoryId) return categoryId;
     const name = categoryName?.trim();
     if (!name) return undefined;
-    const existing = await this.prisma.category.findFirst({
+    const existing = await database.category.findFirst({
       where: { name: { equals: name, mode: 'insensitive' } },
     });
     if (existing) return existing.id;
-    const created = await this.prisma.category.create({ data: { name } });
+    const created = await database.category.create({ data: { name } });
     return created.id;
   }
 
@@ -429,26 +430,44 @@ export class TicketsService {
   async update(user: AuthUser, id: string, dto: UpdateTicketDto) {
     const ticket = await this.loadOrThrow(id);
     if (!this.canOperate(user, ticket)) throw new ForbiddenException('无权操作');
-    const updated = await this.prisma.ticket.update({
-      where: { id },
-      data: {
-        title: dto.title,
-        priority: dto.priority as any,
-        typeId: dto.typeId,
-        categoryId: dto.categoryId,
-        queueId: dto.queueId,
-        datacenterId: dto.datacenterId,
-        clusterId: dto.clusterId,
-        serialNumber:
-          dto.serialNumber === undefined
-            ? undefined
-            : dto.serialNumber.trim() || null,
-        // 清空联系方式要能落库，所以显式区分「没传」和「传了空值」
+    if (dto.title !== undefined && !dto.title?.trim()) throw new BadRequestException('标题不能为空');
+    if (dto.categoryName !== undefined && !dto.categoryId && !dto.categoryName?.trim()) throw new BadRequestException('分类名称不能为空');
+    await this.prisma.$transaction(async database => {
+      // Recheck ownership inside the same transaction as the change and audit.
+      const before = await database.ticket.findUnique({ where: { id } });
+      if (!before) throw new NotFoundException('工单不存在');
+      if (!this.canOperate(user, before)) throw new ForbiddenException('无权操作');
+      const references = [
+        { field: 'typeId', value: dto.typeId, find: () => database.ticketType.findUnique({ where: { id: dto.typeId! } }) },
+        { field: 'categoryId', value: dto.categoryId, find: () => database.category.findUnique({ where: { id: dto.categoryId! } }) },
+        { field: 'queueId', value: dto.queueId, find: () => database.queue.findUnique({ where: { id: dto.queueId! } }) },
+        { field: 'datacenterId', value: dto.datacenterId, find: () => database.datacenter.findUnique({ where: { id: dto.datacenterId! } }) },
+        { field: 'clusterId', value: dto.clusterId, find: () => database.cluster.findUnique({ where: { id: dto.clusterId! } }) },
+      ];
+      for (const reference of references) {
+        if (reference.value === undefined || reference.value === null) continue;
+        if (!reference.value || !(await reference.find())) throw new BadRequestException({ message: '属性选项不存在', code: 'INVALID_REFERENCE', field: reference.field });
+      }
+      const data = {
+        title: dto.title?.trim(), priority: dto.priority, typeId: dto.typeId,
+        categoryId: dto.categoryName !== undefined && !dto.categoryId
+          ? await this.resolveCategoryId(undefined, dto.categoryName, database) : dto.categoryId,
+        queueId: dto.queueId, datacenterId: dto.datacenterId, clusterId: dto.clusterId,
+        serialNumber: dto.serialNumber === undefined ? undefined : dto.serialNumber?.trim() || null,
         contact: dto.contact === undefined ? undefined : normalizeContact(dto.contact),
-      },
+      };
+      const serialize = (value: unknown): string | null => value == null || value === Prisma.JsonNull ? null : typeof value === 'string' ? value : JSON.stringify(value);
+      const changes = Object.entries(data).filter(([field, value]) => value !== undefined && serialize(before[field as keyof typeof before]) !== serialize(value));
+      if (!changes.length) return;
+      await database.ticket.update({ where: { id }, data });
+      for (const [field, value] of changes) {
+        await database.ticketHistory.create({ data: {
+          ticketId: id, userId: user.id, action: 'UPDATE', field,
+          oldValue: serialize(before[field as keyof typeof before]), newValue: serialize(value),
+        } });
+      }
     });
-    await this.history(id, user.id, 'UPDATE', 'fields', null, JSON.stringify(dto));
-    return this.findOne(user, updated.id);
+    return this.findOne(user, id);
   }
 
   // ---------- 指派 ----------

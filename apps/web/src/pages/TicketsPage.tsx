@@ -26,6 +26,7 @@ import { useAuth } from '../stores/auth';
 import { useCopy } from '../lib/use-copy';
 import SlaBadge from '../components/SlaBadge';
 import Toast from '../components/Toast';
+import { metadataLabel } from '../lib/metadata-labels';
 
 const TICKET_SCOPES: NonNullable<TicketQuery['scope']>[] = [
   'open',
@@ -214,7 +215,7 @@ export default function TicketsPage() {
           <select value={q.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value || undefined })} className={filterControlClass}>
             <option value="">{t('tickets.filterAll')} {t('tickets.colCategory')}</option>
             {categories?.map((category: any) => (
-              <option key={category.id} value={category.id}>{category.name}</option>
+              <option key={category.id} value={category.id}>{metadataLabel(t, 'category', category.name)}</option>
             ))}
           </select>
         </label>
@@ -223,7 +224,7 @@ export default function TicketsPage() {
           <select value={q.queueId ?? ''} onChange={(e) => set({ queueId: e.target.value || undefined })} className={filterControlClass}>
             <option value="">{t('tickets.allQueues')}</option>
             {queues?.map((queue: any) => (
-              <option key={queue.id} value={queue.id}>{queue.name}</option>
+              <option key={queue.id} value={queue.id}>{metadataLabel(t, 'queue', queue.name)}</option>
             ))}
           </select>
         </label>
@@ -292,7 +293,7 @@ export default function TicketsPage() {
               >
                 {ticket.ticketNo}
               </button>
-              {ticket.category && <span>· {ticket.category.name}</span>}
+              {ticket.category && <span>· {metadataLabel(t, 'category', ticket.category.name)}</span>}
               <span>· {fmt.compact(ticket.createdAt)}</span>
             </div>
             <div className="mt-2 flex items-center gap-3 border-t border-gray-100 pt-2 text-xs dark:border-gray-800">
@@ -361,7 +362,7 @@ export default function TicketsPage() {
                   <select value={q.categoryId ?? ''} onChange={(e) => set({ categoryId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
                     <option value="">{t('tickets.filterAll')}</option>
                     {categories?.map((category: any) => (
-                      <option key={category.id} value={category.id}>{category.name}</option>
+                      <option key={category.id} value={category.id}>{metadataLabel(t, 'category', category.name)}</option>
                     ))}
                   </select>
                 </label>
@@ -372,7 +373,7 @@ export default function TicketsPage() {
                   <select value={q.queueId ?? ''} onChange={(e) => set({ queueId: e.target.value || undefined })} className={`mt-1 ${filterControlClass}`}>
                     <option value="">{t('tickets.filterAll')}</option>
                     {queues?.map((queue: any) => (
-                      <option key={queue.id} value={queue.id}>{queue.name}</option>
+                      <option key={queue.id} value={queue.id}>{metadataLabel(t, 'queue', queue.name)}</option>
                     ))}
                   </select>
                 </label>
@@ -471,10 +472,10 @@ export default function TicketsPage() {
                   </Link>
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
-                  {ticket.category?.name ?? t('common.empty')}
+                  {ticket.category ? metadataLabel(t, 'category', ticket.category.name) : t('common.empty')}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2 text-gray-600 dark:text-gray-300">
-                  {ticket.queue?.name ?? t('common.empty')}
+                  {ticket.queue ? metadataLabel(t, 'queue', ticket.queue.name) : t('common.empty')}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <span

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useTypes, useUpdateType, type TicketType } from '../features/tickets/api';
+import { metadataLabel } from '../lib/metadata-labels';
 
 /**
  * 把分钟数说成人话：90 → 1 小时 30 分钟。
@@ -144,7 +145,7 @@ function Row({ type }: { type: TicketType }) {
 
   return (
     <tr className="border-t border-gray-100 dark:border-gray-800">
-      <td className="px-4 py-3 font-medium">{type.name}</td>
+      <td className="px-4 py-3 font-medium">{metadataLabel(t, 'type', type.name)}</td>
       <td className="px-4 py-3">
         {editing ? (
           <DurationInput

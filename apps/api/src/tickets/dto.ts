@@ -10,6 +10,7 @@ import {
   Min,
   MinLength,
   ValidateNested,
+  ValidateIf,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TicketContactDto } from './contact';
@@ -86,29 +87,35 @@ export class CreateTicketDto {
 }
 
 export class UpdateTicketDto {
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsString()
+  @MinLength(1)
   title?: string;
 
-  @IsOptional()
+  @ValidateIf((_object, value) => value !== undefined)
   @IsIn(PRIORITIES)
   priority?: (typeof PRIORITIES)[number];
 
   @IsOptional()
   @IsString()
-  typeId?: string;
+  typeId?: string | null;
 
   @IsOptional()
   @IsString()
-  categoryId?: string;
+  categoryId?: string | null;
 
   @IsOptional()
   @IsString()
-  queueId?: string;
+  @MaxLength(60)
+  categoryName?: string;
 
   @IsOptional()
   @IsString()
-  datacenterId?: string;
+  queueId?: string | null;
+
+  @IsOptional()
+  @IsString()
+  datacenterId?: string | null;
 
   @IsOptional()
   @IsString()
@@ -117,12 +124,12 @@ export class UpdateTicketDto {
   @IsOptional()
   @IsString()
   @MaxLength(200)
-  serialNumber?: string;
+  serialNumber?: string | null;
 
   @IsOptional()
   @ValidateNested()
   @Type(() => TicketContactDto)
-  contact?: TicketContactDto;
+  contact?: TicketContactDto | null;
 }
 
 export class AssignDto {
