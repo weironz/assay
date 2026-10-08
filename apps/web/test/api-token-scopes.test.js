@@ -17,6 +17,20 @@ test('selecting create or comment also selects read and prevents removing it', (
   }
 });
 
+test('comment checkbox toggles from the default read selection without duplicate scopes', () => {
+  // Regression: the old onChange appended ticket:read instead of ticket:comment.
+  const permissions = [...API_TOKEN_SCOPES];
+  let selected = ['ticket:read'];
+  for (let click = 0; click < 6; click++) {
+    selected = toggleTokenScope(selected, 'ticket:comment', permissions);
+    expect(selected).toEqual(click % 2 === 0 ? ['ticket:read', 'ticket:comment'] : ['ticket:read']);
+    expect(new Set(selected).size).toBe(selected.length);
+  }
+  selected = toggleTokenScope(['ticket:read', 'ticket:create'], 'ticket:comment', permissions);
+  expect(selected).toEqual(['ticket:read', 'ticket:create', 'ticket:comment']);
+  expect(toggleTokenScope(selected, 'ticket:comment', permissions)).toEqual(['ticket:read', 'ticket:create']);
+});
+
 test('scope selection cannot grant a permission the account lacks, including stale selections', () => {
   const readOnly = ['ticket:read'];
   expect(toggleTokenScope(readOnly, 'ticket:create', readOnly)).toEqual(readOnly);
