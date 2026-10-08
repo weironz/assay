@@ -75,10 +75,40 @@ Token。
 创建示例：
 
 ```json
-{ "name": "Codex workstation", "scopes": ["ticket:read", "ticket:comment"], "expiresInDays": 90 }
+{ "name": "Codex workstation", "scopes": ["ticket:read", "ticket:create", "ticket:comment"], "expiresInDays": 90 }
 ```
 
-目前允许的 scope 为 `ticket:read`、`ticket:comment`；勾选评论会自动附带读取权限。
+允许的权限范围：
+
+| Scope | 能力 |
+| --- | --- |
+| `ticket:read` | 读取当前账号可见工单、讨论、附件和建单选项 |
+| `ticket:create` | 创建本人名下工单，以及通过 `/api/uploads` 上传建单草稿附件 |
+| `ticket:comment` | 回复当前账号可评论的工单，以及向已有工单上传附件 |
+
+选择创建或评论会自动附带 `ticket:read`。创建 Token 时，账号缺少所选权限会返回 `403`；
+请求时还会与账号的**实时**角色权限取交集，因此账号撤权、禁用以及 Token 过期或吊销均不能绕过。
+新增的创建范围不额外授予 `ticket:assign`、`ticket:update`、`user:manage` 等权限。
+
+已有只读 Token 不会因系统升级自动获得创建权限；“轮换”也会保留原范围。
+需要提单时，请在 **设置 → API Token** 新建 Token，勾选 **创建工单 (`ticket:create`)**，
+更新 CLI/MCP 的凭据并验证后，再吊销旧 Token。设置页会禁用账号没有的权限选项。
+
+### 1.6 使用 Token 提单
+
+向 `/api/tickets` 发送与 Cookie 认证相同的 JSON，服务端会将 Token 所属账号记为提单人：
+
+```bash
+curl --fail-with-body -sS -X POST "$BASE/tickets" \
+  -H "Authorization: Bearer $ASSAY_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"title":"B300 掉卡","body":"<p>节点重启后缺少两张 GPU。</p>","priority":"HIGH"}'
+```
+
+图片/附件可先用同一个带有 `ticket:create` 的 Token 调用 `POST /api/uploads`（multipart 字段
+`file`），再把返回的 ID 放入建单 JSON 的 `attachmentIds`。仍执行格式、512MB 单文件、
+最多 5 个普通附件以及草稿归属限制；不能关联其他账号的草稿。接口详情见 §5。
+建单后的回复、补充附件需要另行勾选 `ticket:comment`。
 
 ---
 

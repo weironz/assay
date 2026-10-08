@@ -74,6 +74,10 @@ printf '%s' "$ASSAY_TOKEN" | assay auth token --token-stdin
 assay auth whoami
 ```
 
+Token 用于提单时，在 **设置 → API Token** 勾选 **创建工单 (`ticket:create`)**；系统会同时
+选中读取权限。需要后续回复时也勾选 `ticket:comment`。账号本身必须拥有对应权限，
+例如提单人角色。已有只读 Token 以及它的轮换版本不会自动获得新权限，需要新建并更新凭据。
+
 默认访问 `https://assay.cloudcele.com/api`。连接测试环境可任选一种方式：
 
 ```bash
@@ -93,6 +97,7 @@ ASSAY_BASE_URL=http://localhost:3000/api assay auth whoami
 ```text
 assay --help
 assay ticket --help
+assay ticket create --help
 assay ticket comment --help
 ```
 
@@ -115,12 +120,39 @@ assay ticket comment --help
 
 | 命令 | 参数 | 说明 |
 | --- | --- | --- |
+| `assay ticket create --input <JSON文件>` | `--dry-run` | 以当前身份创建工单，返回工单 ID 和工单号等详情；`--dry-run` 仅校验并输出请求预览，不要求登录。 |
+| `assay ticket create --input -` | 标准输入 | 从管道读取 UTF-8 JSON 请求。 |
 | `assay ticket list` | `--status` `--priority` `--keyword` `--assignee-id` `--page` `--page-size` | 返回当前身份可见的工单；`page-size` 最大 100。 |
 | `assay ticket get <id>` | 工单数据库 ID 或工单号 | 返回详情、讨论、附件、SLA 与协作成员。 |
 | `assay ticket comment <id> --body <文本>` | `--internal` `--mention-user-id <用户ID>` | 立即写入一条评论；`--internal` 为内部备注；提及参数可重复。 |
 | `assay ticket comment <id> --body -` | 标准输入 | 从管道读取评论正文，例如 `printf '...' | assay ticket comment WO-... --body -`。 |
 
 工单权限始终由服务端执行。CLI 不会绕过提单人、处理人、主管、观察员和管理员的 RBAC 规则。
+
+### 提单示例
+
+JSON 与 [REST API 建单接口](04-API.md#32-创建工单) 的字段一致：`title` 和 `body` 必填，
+正文为 HTML；不传 `priority` 时默认 `MEDIUM`，不传 `typeId` 时使用系统兜底 SLA。
+`typeId`、`categoryId`、`datacenterId`、`clusterId` 等字段使用已有记录的数据库 ID，
+不能直接填展示名称。没有合适分类时可传 `categoryName`。联系方式 `contact`、设备序列号
+`serialNumber` 和已上传的草稿 `attachmentIds` 也受支持。
+
+```bash
+# 先预览，确认输入有效；不会提交
+assay ticket create --input ticket.json --dry-run
+
+# 提交同一份文件
+assay ticket create --input ticket.json
+
+# 或从标准输入提交
+printf '%s' '{"title":"B300 掉卡","body":"<p>节点重启后缺少两张 GPU。</p>","priority":"HIGH","categoryName":"GPU卡"}' \
+  | assay ticket create --input -
+```
+
+CLI 建单参数校验失败会在 stderr 输出 JSON 错误并非零退出，API 的 `401`/`403` 也会作为失败返回。
+预览只校验请求字段和格式；记录是否存在、联系方式邮箱、附件归属及权限由服务端验证。
+CLI 不会自动重试建单。网络超时或响应丢失时，先用 `assay ticket list --keyword <标题>`
+检查是否已建单，再决定是否重新提交，避免重复工单。
 
 ## 4. 自动更新
 
@@ -167,11 +199,21 @@ Shell 脚本。若 MCP 宿主有专用服务身份，建议注入最小权限、
 
 | 工具 | 行为 | 风险级别 |
 | --- | --- | --- |
+| `assay_ticket_create` | 以当前身份创建工单，字段与 REST API 相同；`dryRun: true` 时仅返回请求预览 | 写操作；用户已授权提单时调用，需要 `ticket:create` |
 | `assay_ticket_get` | 读取详情、讨论、附件元数据和协作成员；传 `includeImages: true` 时也返回图片内容 | 只读 |
 | `assay_ticket_search` | 搜索当前身份可见的工单 | 只读 |
 | `assay_ticket_add_comment` | 写入评论或内部备注，并可提及用户 | 写操作；AI 必须先获得用户明确确认 |
 
 MCP 工具会经过与 Web 相同的 API 鉴权、权限检查和审计记录。AI 不应持有管理员账号；生产环境建议为它创建权限最小化的专用服务账号。
+
+创建工具示例：
+
+```json
+{ "title": "B300 掉卡", "body": "<p>节点重启后缺少两张 GPU。</p>", "priority": "HIGH", "dryRun": true }
+```
+
+提交时去掉 `dryRun` 或设为 `false`。成功返回工单详情；API 拒绝会返回 MCP `isError: true`。
+结果未知时先搜索确认，工具声明为非幂等操作，不应自动重复调用。
 
 ### 5.1 工单图片读取
 

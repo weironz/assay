@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod mcp;
+mod ticket_create;
 mod update;
 
 use anyhow::{Context, Result, bail};
@@ -48,7 +49,7 @@ enum Command {
         #[command(subcommand)]
         command: ConfigCommand,
     },
-    /// 查询和回复工单
+    /// 创建、查询和回复工单
     Ticket {
         #[command(subcommand)]
         command: TicketCommand,
@@ -101,12 +102,24 @@ enum ConfigCommand {
 
 #[derive(Subcommand, Debug)]
 enum TicketCommand {
+    /// 提交工单（立即写入）；可先用 --dry-run 预览，超时后请先搜索再重试
+    Create(TicketCreateArgs),
     /// 列出或搜索工单
     List(TicketListArgs),
     /// 读取一张工单的完整详情、讨论和参与人
     Get { id: String },
     /// 在工单讨论中发表评论
     Comment(TicketCommentArgs),
+}
+
+#[derive(Args, Debug)]
+struct TicketCreateArgs {
+    /// UTF-8 JSON 文件路径，或 - 从标准输入读取；必填 title、body（HTML）
+    #[arg(long)]
+    input: String,
+    /// 校验并输出请求预览，不发送请求，不要求登录
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Args, Debug, Default)]
@@ -239,6 +252,18 @@ fn run(cli: Cli) -> Result<()> {
         Command::Auth {
             command: AuthCommand::Whoami,
         } => ApiClient::from_config(&store.config)?.get("/me")?,
+        Command::Ticket {
+            command: TicketCommand::Create(args),
+        } => {
+            let text = if args.input == "-" {
+                read_stdin()?
+            } else {
+                std::fs::read_to_string(&args.input)
+                    .with_context(|| format!("读取 {} 失败", args.input))?
+            };
+            let input = serde_json::from_str(&text).context("建单输入必须为有效的 JSON")?;
+            ticket_create::create(&store.config, input, args.dry_run)?
+        }
         Command::Ticket {
             command: TicketCommand::List(args),
         } => {

@@ -25,7 +25,7 @@ pub fn serve(config: Config) -> Result<()> {
                     "protocolVersion": message.pointer("/params/protocolVersion").and_then(Value::as_str).unwrap_or("2025-11-25"),
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "assay", "version": VERSION },
-                    "instructions": "Assay 工单助手。先读取工单，再生成建议；写入评论前应获得用户确认。"
+                    "instructions": "Assay 工单助手。先读取工单，再生成建议；用户授权提单后可创建工单，评论须经用户授权。创建前可用 dryRun 预览；写入结果未知时先搜索确认，避免重复提交。"
                 }),
             ),
             "tools/list" => ok(id, json!({ "tools": tools() })),
@@ -45,6 +45,17 @@ pub fn serve(config: Config) -> Result<()> {
 
 fn tools() -> Vec<Value> {
     vec![
+        {
+            let mut input_schema = crate::ticket_create::schema();
+            input_schema["properties"]["dryRun"] = json!({"type":"boolean","default":false,"description":"只校验并预览请求，不创建工单"});
+            let mut definition = tool(
+                "assay_ticket_create",
+                "创建工单，以当前身份作为提单人。需要 ticket:create；用户已授权提单时调用。dryRun=true 可先预览；提交结果未知时先搜索确认，不自动重试。",
+                input_schema,
+            );
+            definition["annotations"] = json!({"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false});
+            definition
+        },
         tool(
             "assay_ticket_get",
             "读取工单详情、讨论、附件和参与人。只读。需要分析截图时设置 includeImages=true；默认不下载图片。",
@@ -72,10 +83,25 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
         .get("name")
         .and_then(Value::as_str)
         .context("缺少工具名称")?;
-    let args = params
+    let mut args = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+    if name == "assay_ticket_create" {
+        let dry_run = match args
+            .as_object_mut()
+            .context("arguments 必须是对象")?
+            .remove("dryRun")
+        {
+            None => false,
+            Some(Value::Bool(value)) => value,
+            Some(_) => anyhow::bail!("dryRun 必须为布尔值"),
+        };
+        let value = crate::ticket_create::create(config, args, dry_run)?;
+        return Ok(
+            json!({"content":[{"type":"text","text":serde_json::to_string_pretty(&value)?}]}),
+        );
+    }
     let client = ApiClient::from_config(config)?;
     let value = match name {
         "assay_ticket_get" => {

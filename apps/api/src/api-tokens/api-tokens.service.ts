@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import type { AuthUser } from '../auth/auth.types';
@@ -27,6 +27,8 @@ export class ApiTokensService {
 
   async create(user: AuthUser, dto: CreateApiTokenDto) {
     const scopes = this.normalizeScopes(dto.scopes);
+    const missing = scopes.filter((scope) => !user.permissions.includes(scope));
+    if (missing.length) throw new ForbiddenException(`缺少权限: ${missing.join(', ')}`);
     return this.createSecret(user.id, dto.name.trim(), scopes, dto.expiresInDays);
   }
 
@@ -75,7 +77,9 @@ export class ApiTokensService {
 
   private normalizeScopes(scopes: ApiTokenScope[]) {
     const unique = [...new Set(scopes)];
-    if (unique.includes('ticket:comment') && !unique.includes('ticket:read')) unique.unshift('ticket:read');
+    if ((unique.includes('ticket:create') || unique.includes('ticket:comment')) && !unique.includes('ticket:read')) {
+      unique.unshift('ticket:read');
+    }
     return unique;
   }
 
