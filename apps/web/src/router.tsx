@@ -1,3 +1,8 @@
+import AssetsPage, { AssetDetailPage } from './features/cop/AssetsPage';
+import PartsPage, { PartDetailPage } from './features/cop/PartsPage';
+import InventoryPage from './features/cop/InventoryPage';
+import OrganizationPage from './features/cop/OrganizationPage';
+import AssetImportPage from './features/cop/AssetImportPage';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -6,6 +11,7 @@ import ProfilePage from './pages/ProfilePage';
 import AppLayout from './components/AppLayout';
 import ProtectedRoute from './components/ProtectedRoute';
 import DashboardPage from './pages/DashboardPage';
+import PlatformOverviewPage from './pages/PlatformOverviewPage';
 import TicketsPage from './pages/TicketsPage';
 import NewTicketPage from './pages/NewTicketPage';
 import TicketDetailPage from './pages/TicketDetailPage';
@@ -28,10 +34,18 @@ export const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
-      { path: 'dashboard', element: <DashboardPage /> },
+      { path: 'dashboard', element: <PlatformOverviewPage /> },
       { path: 'settings', element: <ProfilePage /> },
       { path: 'profile', element: <Navigate to="/settings" replace /> },
+      { path: 'assets', element: <ProtectedRoute permission="asset:read"><AssetsPage /></ProtectedRoute> },
+      { path: 'assets/import', element: <ProtectedRoute permission="asset:manage"><AssetImportPage /></ProtectedRoute> },
+      { path: 'assets/:id', element: <ProtectedRoute permission="asset:read"><AssetDetailPage /></ProtectedRoute> },
+      { path: 'spare-parts', element: <ProtectedRoute permission="inventory:read"><PartsPage /></ProtectedRoute> },
+      { path: 'spare-parts/:id', element: <ProtectedRoute permission="inventory:read"><PartDetailPage /></ProtectedRoute> },
+      { path: 'inventory', element: <ProtectedRoute permission="inventory:read"><InventoryPage /></ProtectedRoute> },
+      { path: 'organization', element: <ProtectedRoute permission="organization:manage"><OrganizationPage /></ProtectedRoute> },
       { path: 'tickets', element: <TicketsPage /> },
+      { path: 'tickets/dashboard', element: <ProtectedRoute permission="ticket:read"><DashboardPage /></ProtectedRoute> },
       { path: 'tickets/new', element: <NewTicketPage /> },
       { path: 'tickets/:id', element: <TicketDetailPage /> },
       {

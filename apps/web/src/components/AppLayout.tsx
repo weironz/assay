@@ -1,33 +1,24 @@
 import { useEffect, useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../stores/auth';
 import { signOut } from '../lib/auth-client';
-import Avatar from './Avatar';
+import {
+  BUSINESS_MODULES,
+  PLATFORM_MODULE,
+  allowedItems,
+  moduleForPath,
+  activeMenuItem,
+  menuHref,
+  type MenuItem,
+} from '../lib/business-navigation';
+import AccountMenu from './AccountMenu';
 import BrandMark from './BrandMark';
 import NotificationBell from './NotificationBell';
 import ThemeToggle from './ThemeToggle';
 import LanguageSwitcher from './LanguageSwitcher';
 
-interface MenuItem {
-  to: string;
-  /** i18n key, resolved at render so the sidebar follows the active language */
-  labelKey: string;
-  permission?: string;
-}
-
-const MENU: MenuItem[] = [
-  { to: '/dashboard', labelKey: 'nav.dashboard' },
-  { to: '/tickets', labelKey: 'nav.tickets' },
-  { to: '/users', labelKey: 'nav.users', permission: 'user:manage' },
-  { to: '/queues', labelKey: 'nav.queues', permission: 'queue:manage' },
-  { to: '/sla', labelKey: 'nav.sla', permission: 'queue:manage' },
-];
-
-/** lg 断点，与下面所有 lg: 类保持一致 */
 const DESKTOP = '(min-width: 1024px)';
-
-/** 汉堡图标。三条线是「打开导航」的通用符号，不需要再配文字 */
 const MenuIcon = () => (
   <svg
     width="20"
@@ -45,140 +36,193 @@ const MenuIcon = () => (
 
 export default function AppLayout() {
   const { t } = useTranslation();
-  const { user, has, clear } = useAuth();
+  const { has, clear } = useAuth();
   const navigate = useNavigate();
-
-  // 默认展开——但只在桌面。手机上 256px 的侧栏会盖住整个内容区，
-  // 所以窄屏默认收起，点汉堡按钮再以抽屉方式盖出来。
-  const [open, setOpen] = useState(
-    () => window.matchMedia(DESKTOP).matches,
+  const location = useLocation();
+  const params = new URLSearchParams(location.search);
+  const modules = BUSINESS_MODULES.filter(
+    (module) => allowedItems(module.items, has).length > 0,
   );
+  const requestedModule = moduleForPath(location.pathname);
+  const platformItems = allowedItems(PLATFORM_MODULE.items, has);
+  const currentModule =
+    requestedModule?.id === PLATFORM_MODULE.id && platformItems.length
+      ? PLATFORM_MODULE
+      : modules.find((module) => module.id === requestedModule?.id);
+  const moduleItems = currentModule
+    ? allowedItems(currentModule.items, has)
+    : [];
+  const activeItem = activeMenuItem(moduleItems, location.pathname, params);
+  const [open, setOpen] = useState(() => window.matchMedia(DESKTOP).matches);
 
-  // 跨越断点时重置：从手机转到桌面应该看得见导航，反之应该让开位置
   useEffect(() => {
     const mq = window.matchMedia(DESKTOP);
-    const sync = (e: MediaQueryListEvent) => setOpen(e.matches);
+    const sync = (event: MediaQueryListEvent) => setOpen(event.matches);
     mq.addEventListener('change', sync);
     return () => mq.removeEventListener('change', sync);
   }, []);
-
-  /** 手机上点导航后要收起抽屉，否则内容还被盖着 */
-  const closeOnMobile = () => {
+  // Also close on route changes caused by notifications, browser history or deep links.
+  useEffect(() => {
     if (!window.matchMedia(DESKTOP).matches) setOpen(false);
-  };
+  }, [location.pathname, location.search]);
+  useEffect(() => {
+    if (!open || window.matchMedia(DESKTOP).matches) return;
+    const close = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [open]);
 
   const logout = async () => {
     await signOut();
     clear();
     navigate('/login', { replace: true });
   };
-
-  return (
-    <div className="min-h-screen flex bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100">
-      {/* 手机抽屉展开时的遮罩，点击关闭。桌面不需要，侧栏是常驻的 */}
-      {open && (
-        <div
-          onClick={() => setOpen(false)}
-          className="fixed inset-0 z-30 bg-black/40 lg:hidden"
-          aria-hidden
-        />
-      )}
-
-      {/* 左侧导航 */}
-      {/* 256px 而非 240：品牌 lockup + 副标题在英文/泰语下装不进 240，见 BrandMark */}
-      {/* 手机上是浮在内容之上的抽屉（fixed + 位移），桌面回到文档流里占位 */}
-      <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-64 shrink-0 flex-col border-r border-gray-200 bg-white transition-transform duration-200 lg:static lg:translate-x-0 dark:border-gray-800 dark:bg-gray-900 ${
-          open ? 'translate-x-0' : '-translate-x-full lg:hidden'
+  const closeOnMobile = () => {
+    if (!window.matchMedia(DESKTOP).matches) setOpen(false);
+  };
+  const moduleLinks = () =>
+    modules.map((module) => (
+      <Link
+        key={module.id}
+        to={allowedItems(module.items, has)[0].to}
+        onClick={closeOnMobile}
+        aria-current={currentModule?.id === module.id ? 'page' : undefined}
+        className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${
+          currentModule?.id === module.id
+            ? 'border-brand-500 text-brand-800 dark:text-brand-300'
+            : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
         }`}
       >
-        <div className="h-14 flex items-center px-4 border-b border-gray-200 dark:border-gray-800">
-          <BrandMark />
-        </div>
-        <nav className="flex-1 p-2 space-y-0.5">
-          {MENU.filter((m) => !m.permission || has(m.permission)).map((m) => (
-            <NavLink
-              key={m.to}
-              to={m.to}
-              onClick={closeOnMobile}
-              className={({ isActive }) =>
-                // 选中态用「品牌绿竖条 + 淡绿底」而不是整块实心：
-                // 侧栏里大块饱和色会和主区内容抢注意力，细指示条足够表明位置
-                `relative block rounded-md px-3 py-2 text-sm transition-colors ${
-                  isActive
-                    ? 'bg-brand-50 font-medium text-brand-800 dark:bg-brand-950/60 dark:text-brand-300'
-                    : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-                }`
-              }
+        {t(module.labelKey)}
+      </Link>
+    ));
+  const sidebarLink = (item: MenuItem) => {
+    const active = activeItem === item.to;
+    return (
+      <Link
+        key={item.to}
+        to={menuHref(item, location.pathname, params)}
+        onClick={closeOnMobile}
+        aria-current={active ? 'page' : undefined}
+        className={`relative block rounded-md px-3 py-2.5 text-sm transition-colors ${
+          active
+            ? 'bg-brand-50 font-medium text-brand-800 dark:bg-brand-950/60 dark:text-brand-300'
+            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+        }`}
+      >
+        {active && (
+          <span className="absolute bottom-2 left-0 top-2 w-[3px] rounded-full bg-brand-500" />
+        )}
+        {t(item.labelKey)}
+      </Link>
+    );
+  };
+
+  return (
+    <div className="flex min-h-screen flex-col bg-gray-50 text-gray-900 dark:bg-gray-950 dark:text-gray-100">
+      <header className="sticky top-0 z-50 shrink-0 border-b border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex h-14 items-center gap-2 px-3 sm:gap-4 sm:px-5">
+          {currentModule ? (
+            <button
+              onClick={() => setOpen((value) => !value)}
+              aria-expanded={open}
+              aria-controls="workspace-sidebar"
+              aria-label={t('nav.toggleSidebar')}
+              title={t('nav.toggleSidebar')}
+              className="shrink-0 rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
             >
-              {({ isActive }) => (
-                <>
-                  {isActive && (
-                    <span className="absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-full bg-brand-500" />
-                  )}
-                  {t(m.labelKey)}
-                </>
-              )}
-            </NavLink>
-          ))}
-        </nav>
-
-        {/* 手机上顶栏放不下「退出登录」，挪到抽屉底部；桌面仍在顶栏，
-            两处用 lg 断点互斥，不会同时出现 */}
-        <div className="border-t border-gray-200 p-2 lg:hidden dark:border-gray-800">
-          <button
-            onClick={logout}
-            className="w-full rounded-md px-3 py-2 text-left text-sm text-gray-600 hover:bg-gray-100 hover:text-red-600 dark:text-gray-400 dark:hover:bg-gray-800"
-          >
-            {t('nav.signOut')}
-          </button>
-        </div>
-      </aside>
-
-      {/* 右侧主区 */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-14 flex items-center gap-2 sm:gap-4 px-3 sm:px-6 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-900">
-          <button
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            aria-label={t('nav.toggleSidebar')}
-            title={t('nav.toggleSidebar')}
-            className="-ml-1 shrink-0 rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
-          >
-            <MenuIcon />
-          </button>
-          {/* 抽屉收起时手机上就看不到品牌了，顶栏补一个只有图标的版本 */}
-          <div className="min-w-0 lg:hidden">
+              <MenuIcon />
+            </button>
+          ) : (
+            <span className="w-9 shrink-0" aria-hidden />
+          )}
+          <div className="hidden min-w-0 shrink-0 sm:block lg:max-w-60">
+            <BrandMark />
+          </div>
+          <div className="shrink-0 sm:hidden">
             <BrandMark variant="mark" />
           </div>
-
-          <div className="ml-auto flex shrink-0 items-center gap-2 sm:gap-4">
+          <nav
+            aria-label={t('nav.businessModules')}
+            className="ml-3 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex"
+          >
+            {moduleLinks()}
+          </nav>
+          <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-3">
             <LanguageSwitcher />
             <ThemeToggle />
             <NotificationBell />
-            <NavLink
-              to="/settings"
-              className="flex items-center gap-2 text-sm text-gray-500 transition-colors hover:text-brand-700 dark:hover:text-brand-400"
-              title={t('nav.profile')}
-            >
-              <Avatar
-                name={user?.name}
-                email={user?.email}
-                image={user?.image}
-                size={28}
-              />
-              {/* 窄屏只留头像，名字换来的宽度更值钱 */}
-              <span className="hidden lg:inline">{user?.name}</span>
-            </NavLink>
-            <button
-              onClick={logout}
-              className="hidden whitespace-nowrap text-sm text-gray-600 hover:text-red-600 lg:block dark:text-gray-300"
-            >
-              {t('nav.signOut')}
-            </button>
+            {platformItems.length > 0 && (
+              <Link
+                to={platformItems[0].to}
+                onClick={closeOnMobile}
+                aria-label={t('nav.platformManagement')}
+                title={t('nav.platformManagement')}
+                aria-current={
+                  currentModule?.id === 'platform' ? 'page' : undefined
+                }
+                className={`flex items-center gap-1.5 rounded-md p-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+                  currentModule?.id === 'platform'
+                    ? 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300'
+                    : 'text-gray-500 hover:bg-gray-100 hover:text-brand-700 dark:hover:bg-gray-800 dark:hover:text-brand-400'
+                }`}
+              >
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                >
+                  <path d="M10 2h4l.5 3.2 2.1 1.2 3-1.1 2 3.4-2.5 2v2.6l2.5 2-2 3.4-3-1.1-2.1 1.2L14 22h-4l-.5-3.2-2.1-1.2-3 1.1-2-3.4 2.5-2v-2.6l-2.5-2 2-3.4 3 1.1 2.1-1.2Z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <span className="hidden xl:inline">
+                  {t('nav.platformManagement')}
+                </span>
+              </Link>
+            )}
+            <AccountMenu onLogout={logout} />
           </div>
-        </header>
-        <main className="flex-1 p-4 sm:p-6 overflow-auto">
+        </div>
+        <nav
+          aria-label={t('nav.businessModules')}
+          className="flex h-14 items-stretch gap-1 overflow-x-auto px-3 lg:hidden"
+        >
+          {moduleLinks()}
+        </nav>
+      </header>
+      <div className="flex min-w-0 flex-1">
+        {currentModule && open && (
+          <div
+            onClick={() => setOpen(false)}
+            className="fixed inset-0 z-30 bg-black/40 lg:hidden"
+            aria-hidden
+          />
+        )}
+        {currentModule && (
+          <aside
+            id="workspace-sidebar"
+            aria-label={t('nav.moduleMenu')}
+            className={`fixed bottom-0 left-0 top-28 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white transition-transform duration-200 lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] lg:self-start lg:translate-x-0 dark:border-gray-800 dark:bg-gray-900 ${open ? 'translate-x-0' : '-translate-x-full lg:hidden'}`}
+          >
+            <h2 className="border-b border-gray-100 px-5 py-4 text-sm font-semibold dark:border-gray-800">
+              {t(currentModule.labelKey)}
+            </h2>
+            <div className="flex-1 overflow-y-auto p-3">
+              <nav aria-label={t(currentModule.labelKey)} className="space-y-1">
+                {moduleItems.map(sidebarLink)}
+              </nav>
+            </div>
+          </aside>
+        )}
+        <main className="min-w-0 flex-1 p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

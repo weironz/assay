@@ -1,7 +1,9 @@
+import { copZhTW } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 繁體中文（台港用語，非簡轉繁字元對映） */
 const zhTW: Resource = {
+  cop: copZhTW,
   common: {
     loading: '載入中…',
     save: '儲存',
@@ -54,11 +56,29 @@ const zhTW: Resource = {
   },
 
   brand: {
-    subtitle: '工單系統',
-    ariaHome: 'Greenstor 工單系統 — 首頁',
+    subtitle: '營運服務平台',
+    ariaHome: 'GreenStor COP — 首頁',
   },
 
   nav: {
+    platformManagement: '平台管理',
+    userPermissions: '使用者與權限',
+    accountMenu: '帳戶選單',
+    personalSettings: '個人設定',
+    securitySettings: '安全驗證',
+
+    businessModules: '業務模組',
+    ticketSystem: '工單系統',
+    ticketList: '工單列表',
+    newTicket: '建立工單',
+    assetRegister: '資產台帳',
+    sparesInventory: '備品備件與庫存',
+    partsCatalogue: '備件目錄',
+    platformOverview: '平台概覽',
+    platformNavigation: '平台導航',
+    commonMenu: '公共選單',
+    moduleMenu: '模組選單',
+
     dashboard: '儀表板',
     tickets: '工單',
     users: '使用者管理',

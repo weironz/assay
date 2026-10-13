@@ -1,3 +1,4 @@
+import { hasPrivilegedRole } from '../auth/role-policy';
 import {
   BadRequestException,
   Injectable,
@@ -41,7 +42,7 @@ export class UsersService {
   }
 
   async create(dto: CreateUserDto) {
-    if (privilegedMfaMode() === 'enforce' && dto.roleNames.some((r) => r === 'admin' || r === 'supervisor')) {
+    if (privilegedMfaMode() === 'enforce' && hasPrivilegedRole(dto.roleNames)) {
       throw new BadRequestException('强制 MFA 模式下请先创建普通账号、完成 TOTP 绑定，再授予特权角色');
     }
     const exists = await this.prisma.user.findUnique({
@@ -87,7 +88,7 @@ export class UsersService {
   async update(id: string, dto: UpdateUserDto) {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('用户不存在');
-    if (privilegedMfaMode() === 'enforce' && dto.roleNames?.some((r) => r === 'admin' || r === 'supervisor') && !user.twoFactorEnabled) {
+    if (privilegedMfaMode() === 'enforce' && (dto.roleNames && hasPrivilegedRole(dto.roleNames)) && !user.twoFactorEnabled) {
       throw new BadRequestException('目标用户需先完成 TOTP 绑定才能获得特权角色');
     }
     if (dto.status === 'DISABLED' || (dto.roleNames && !dto.roleNames.includes('admin'))) {

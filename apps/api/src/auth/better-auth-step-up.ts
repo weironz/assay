@@ -1,3 +1,4 @@
+import { hasPrivilegedRole } from './role-policy';
 import { APIError } from 'better-auth';
 import { consumeStepUp, privilegedMfaMode } from './step-up-store';
 
@@ -41,7 +42,7 @@ export async function enforceBetterAuthSensitiveStepUp(
   if ((path === '/two-factor/enable' || path === '/two-factor/get-totp-uri') &&
       !user.twoFactorEnabled && !user.twoFactor?.verified) return;
   if (path === '/two-factor/disable' && privilegedMfaMode() === 'enforce' &&
-      user.roles.some((r) => r.role.name === 'admin' || r.role.name === 'supervisor')) {
+      hasPrivilegedRole(user.roles.map(r => r.role.name))) {
     throw new APIError('FORBIDDEN', { message: '强制 MFA 模式下需先移除特权角色才能停用 TOTP' });
   }
   try {

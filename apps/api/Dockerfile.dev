@@ -23,8 +23,8 @@ COPY . .
 
 EXPOSE 3000
 
-# 启动前用 db push 同步表结构（P0 便捷方式），再热更新启动
-# 正式迁移文件在后续阶段用 `prisma migrate dev` 生成
+# Deploy migrations before startup: COP also requires its sequence and SQL CHECKs.
+# Existing db-push-only databases must be verified and baselined before upgrading.
 # The named node_modules volume masks the image's dependencies. Reconcile it with
 # the mounted lockfile and regenerate Prisma Client before compiling on each start.
-CMD ["sh", "-c", "pnpm install --frozen-lockfile --ignore-scripts && pnpm prisma generate && pnpm prisma db push --skip-generate && { pnpm db:seed:dev || true; } && exec pnpm start:dev"]
+CMD ["sh", "-c", "pnpm install --frozen-lockfile --ignore-scripts && pnpm prisma generate && pnpm prisma migrate deploy && pnpm db:seed:dev && exec pnpm start:dev"]

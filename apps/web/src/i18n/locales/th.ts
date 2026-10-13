@@ -1,7 +1,9 @@
+import { copTh } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** ไทย (Thai) */
 const th: Resource = {
+  cop: copTh,
   common: {
     loading: 'กำลังโหลด…',
     save: 'บันทึก',
@@ -54,11 +56,29 @@ const th: Resource = {
   },
 
   brand: {
-    subtitle: 'ระบบทิกเก็ต',
-    ariaHome: 'ระบบทิกเก็ต Greenstor — หน้าแรก',
+    subtitle: 'แพลตฟอร์มบริการดำเนินงาน',
+    ariaHome: 'GreenStor COP — หน้าแรก',
   },
 
   nav: {
+    platformManagement: 'การจัดการแพลตฟอร์ม',
+    userPermissions: 'ผู้ใช้และสิทธิ์',
+    accountMenu: 'เมนูบัญชี',
+    personalSettings: 'การตั้งค่าส่วนบุคคล',
+    securitySettings: 'การตั้งค่าความปลอดภัย',
+
+    businessModules: 'โมดูลธุรกิจ',
+    ticketSystem: 'ระบบทิกเก็ต',
+    ticketList: 'รายการทิกเก็ต',
+    newTicket: 'สร้างทิกเก็ต',
+    assetRegister: 'ทะเบียนสินทรัพย์',
+    sparesInventory: 'อะไหล่และสินค้าคงคลัง',
+    partsCatalogue: 'รายการอะไหล่',
+    platformOverview: 'ภาพรวมแพลตฟอร์ม',
+    platformNavigation: 'เมนูแพลตฟอร์ม',
+    commonMenu: 'แพลตฟอร์ม',
+    moduleMenu: 'เมนูโมดูล',
+
     dashboard: 'แดชบอร์ด',
     tickets: 'ทิกเก็ต',
     users: 'จัดการผู้ใช้',

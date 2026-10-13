@@ -2,10 +2,11 @@
   "name": "api",
   "version": "1.3.9",
   "private": true,
-  "description": "工单系统后端 (NestJS)",
+  "description": "GreenStor COP 后端 (NestJS)",
   "scripts": {
     "build": "nest build",
     "test": "node scripts/run-tests.cjs",
+    "test:cop": "node scripts/run-cop-tests.cjs",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",

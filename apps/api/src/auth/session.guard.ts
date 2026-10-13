@@ -1,3 +1,4 @@
+import { hasPrivilegedRole } from './role-policy';
 import {
   CanActivate,
   ExecutionContext,
@@ -37,7 +38,7 @@ export class SessionGuard implements CanActivate {
       throw new UnauthorizedException('账号已被禁用');
     }
     if (privilegedMfaMode() === 'enforce' &&
-        user.roles.some((role) => role === 'admin' || role === 'supervisor') &&
+        hasPrivilegedRole(user.roles) &&
         !user.twoFactorEnabled &&
         !['/api/me', '/api/me/security', '/api/me/security/step-up'].includes(req.path)) {
       throw new ForbiddenException('请先完成 TOTP 绑定，才能使用特权账号');

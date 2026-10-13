@@ -7,6 +7,9 @@ export const SYSTEM_ROLE_NAMES = [
   'handler',
   'supervisor',
   'ticket_viewer_all',
+  'asset_manager',
+  'inventory_manager',
+  'cop_viewer',
   'admin',
 ] as const;
 
@@ -17,6 +20,9 @@ export const SYSTEM_ROLE_DESCRIPTIONS: Record<SystemRoleName, string> = {
   handler: '处理人',
   supervisor: '主管',
   ticket_viewer_all: '工单观察员（全局只读）',
+  asset_manager: '资产管理员',
+  inventory_manager: '仓库管理员',
+  cop_viewer: '运营平台观察员',
   admin: '管理员',
 };
 
@@ -45,7 +51,11 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, string[]> = {
   ],
   // 仅扩大全局阅读范围；工单操作仍由岗位角色与工单归属共同控制。
   ticket_viewer_all: ['ticket:read', 'ticket:read:all'],
+  asset_manager: ['asset:read', 'asset:manage', 'platform:directory', 'ticket:read'],
+  inventory_manager: ['inventory:read', 'inventory:manage', 'asset:read', 'platform:directory', 'ticket:read'],
+  cop_viewer: ['asset:read', 'inventory:read', 'platform:directory'],
   admin: [
+    'asset:read', 'asset:manage', 'inventory:read', 'inventory:manage', 'organization:manage', 'platform:directory',
     'ticket:create',
     'ticket:read',
     'ticket:read:all',
@@ -63,3 +73,6 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, string[]> = {
 export function isSystemRoleName(name: string): name is SystemRoleName {
   return SYSTEM_ROLE_NAMES.includes(name as SystemRoleName);
 }
+
+export const PRIVILEGED_ROLE_NAMES = ['admin', 'supervisor', 'asset_manager', 'inventory_manager'] as const;
+export const hasPrivilegedRole = (roles: string[]) => roles.some(role => (PRIVILEGED_ROLE_NAMES as readonly string[]).includes(role));

@@ -21,11 +21,16 @@ export default function ProfilePage() {
   const { t, i18n } = useTranslation();
   const showMsg = useMsg();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, fetchMe, clear } = useAuth();
   const fileRef = useRef<HTMLInputElement>(null);
-  const [section, setSection] = useState<Section>(searchParams.get('tab') === 'security' ? 'security' : 'account');
-  useEffect(() => { if (searchParams.get('tab') === 'security') setSection('security'); }, [searchParams]);
+  const tab = searchParams.get('tab');
+  const section: Section = tab === 'security' || tab === 'tokens' ? tab : 'account';
+  const setSection = (next: Section) => setSearchParams(current => {
+    const params = new URLSearchParams(current);
+    if (next === 'account') params.delete('tab'); else params.set('tab', next);
+    return params;
+  });
   const [name, setName] = useState(user?.name ?? '');
   const [msg, setMsg] = useState<Msg>(null); const [busy, setBusy] = useState(false);
   const [cur, setCur] = useState(''); const [next, setNext] = useState(''); const [confirm, setConfirm] = useState('');

@@ -20,7 +20,7 @@ async function bootstrap() {
   expressApp.all(/^\/api\/auth\//, toNodeHandler(auth));
 
   // 其余接口恢复 JSON / 表单解析
-  app.use(json());
+  app.use(json({ limit: '2mb' }));
   app.use(urlencoded({ extended: true }));
 
   // 所有 Nest 接口加 /api 前缀（与 better-auth 的 /api/auth 同域，且与前端 SPA 路由隔离）

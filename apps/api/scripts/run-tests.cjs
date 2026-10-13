@@ -52,6 +52,6 @@ child.on('close', (code) => {
     if (!testCount || !passCount) console.error('API test runner did not report a nonzero number of passing tests.');
     process.exitCode = 1;
   } else {
-    console.log(`Verified ${testCount} API tests passed.`);
+    console.log(`Verified ${passCount} passing API tests (${testCount} total; see TAP for skipped tests).`);
   }
 });

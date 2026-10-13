@@ -1,3 +1,4 @@
+import { hasPrivilegedRole } from './role-policy';
 import { ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { fromNodeHeaders } from 'better-auth/node';
 import type { Request } from 'express';
@@ -24,7 +25,7 @@ export class StepUpService {
 
   async status(req: Request, user: AuthUser) {
     await this.session(req, user);
-    const privileged = user.roles.some((role) => role === 'admin' || role === 'supervisor');
+    const privileged = hasPrivilegedRole(user.roles);
     return {
       privilegedMfaMode: privilegedMfaMode(),
       privileged,
@@ -48,7 +49,7 @@ export class StepUpService {
       where: { id: user.id }, select: { twoFactorEnabled: true, status: true },
     });
     if (!actual || actual.status !== 'ACTIVE') throw new UnauthorizedException('账号无效');
-    if (privilegedMfaMode() === 'enforce' && user.roles.some((r) => r === 'admin' || r === 'supervisor') && !actual.twoFactorEnabled) {
+    if (privilegedMfaMode() === 'enforce' && hasPrivilegedRole(user.roles) && !actual.twoFactorEnabled) {
       throw new ForbiddenException('请先启用并验证 TOTP，之后才能执行敏感操作');
     }
     if (actual.twoFactorEnabled) {

@@ -65,7 +65,7 @@ i18n
  */
 function syncDocument(lng: string) {
   document.documentElement.lang = localeOf(lng);
-  document.title = `Greenstor ${i18n.t('brand.subtitle')}`;
+  document.title = `GreenStor COP · ${i18n.t('brand.subtitle')}`;
 }
 
 i18n.on('languageChanged', syncDocument);

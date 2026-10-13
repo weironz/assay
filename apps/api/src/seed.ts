@@ -9,6 +9,12 @@ const prisma = new PrismaClient();
 
 // 权限点清单
 const PERMISSIONS: [string, string][] = [
+  ['asset:read', '查看资产'],
+  ['asset:manage', '管理资产'],
+  ['inventory:read', '查看备件与库存'],
+  ['inventory:manage', '管理备件与库存'],
+  ['organization:manage', '管理组织'],
+  ['platform:directory', '查看业务人员目录'],
   ['ticket:create', '创建工单'],
   ['ticket:read', '查看工单'],
   ['ticket:read:all', '查看全部工单'],

@@ -1,7 +1,9 @@
+import { copZhCN } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 简体中文 */
 const zhCN: Resource = {
+  cop: copZhCN,
   common: {
     loading: '加载中…',
     save: '保存',
@@ -54,11 +56,29 @@ const zhCN: Resource = {
   },
 
   brand: {
-    subtitle: '工单系统',
-    ariaHome: 'Greenstor 工单系统 — 首页',
+    subtitle: '运营服务平台',
+    ariaHome: 'GreenStor COP — 首页',
   },
 
   nav: {
+    platformManagement: '平台管理',
+    userPermissions: '用户与权限',
+    accountMenu: '账户菜单',
+    personalSettings: '个人设置',
+    securitySettings: '安全验证',
+
+    businessModules: '业务模块',
+    ticketSystem: '工单系统',
+    ticketList: '工单列表',
+    newTicket: '新建工单',
+    assetRegister: '资产台账',
+    sparesInventory: '备品备件与库存',
+    partsCatalogue: '备件目录',
+    platformOverview: '平台概览',
+    platformNavigation: '平台导航',
+    commonMenu: '公共菜单',
+    moduleMenu: '模块菜单',
+
     dashboard: '仪表盘',
     tickets: '工单',
     users: '用户管理',

@@ -59,25 +59,32 @@ enum HistoryAction {
 // User 同时是 better-auth 的用户表：核心字段 name/email/emailVerified/image
 // 由 better-auth 管理，密码存于 account 表；username/phone/status 为业务扩展。
 model User {
-  id             String     @id @default(cuid())
-  name           String
-  email          String     @unique
-  emailVerified  Boolean    @default(false)
-  twoFactorEnabled Boolean   @default(false)
-  sessionEpoch   Int        @default(0) @map("session_epoch")
-  image          String?
+  id               String     @id @default(cuid())
+  name             String
+  email            String     @unique
+  emailVerified    Boolean    @default(false)
+  twoFactorEnabled Boolean    @default(false)
+  sessionEpoch     Int        @default(0) @map("session_epoch")
+  image            String?
   // 业务扩展字段
-  username       String?    @unique
-  phone          String?
+  username         String?    @unique
+  phone            String?
   // 勾选「设为默认联系方式」时存这里，下次建单自动带出。与 Ticket.contact 同结构
-  defaultContact Json?      @map("default_contact")
-  status         UserStatus @default(ACTIVE)
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  defaultContact   Json?      @map("default_contact")
+  status           UserStatus @default(ACTIVE)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  departmentId        String?
+  department          Department?          @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  assets              Asset[]
+  inventoryOperations InventoryOperation[]
+  businessActivities  BusinessActivity[]
+  businessAttachments BusinessAttachment[]
 
   // better-auth 关系
-  sessions Session[]
-  accounts Account[]
+  sessions  Session[]
+  accounts  Account[]
   twoFactor TwoFactor?
 
   // 业务关系
@@ -287,6 +294,7 @@ model Datacenter {
   id       String    @id @default(cuid())
   name     String    @unique
   clusters Cluster[]
+  assets   Asset[]
   tickets  Ticket[]
 
   @@map("datacenters")
@@ -299,6 +307,8 @@ model Cluster {
 
   datacenter Datacenter? @relation(fields: [datacenterId], references: [id])
   tickets    Ticket[]
+
+  assets Asset[]
 
   @@map("clusters")
 }
@@ -372,13 +382,15 @@ model Ticket {
   datacenter Datacenter? @relation(fields: [datacenterId], references: [id])
   cluster    Cluster?    @relation(fields: [clusterId], references: [id])
 
-  messages      TicketMessage[]
-  attachments   TicketAttachment[]
-  history       TicketHistory[]
-  tags          TicketTag[]
-  notifications Notification[]
-  participants  TicketParticipant[]
-  shares        TicketShare[]
+  messages            TicketMessage[]
+  attachments         TicketAttachment[]
+  history             TicketHistory[]
+  tags                TicketTag[]
+  notifications       Notification[]
+  participants        TicketParticipant[]
+  shares              TicketShare[]
+  assets              TicketAsset[]
+  inventoryOperations InventoryOperation[]
 
   @@index([status])
   @@index([assigneeId])
@@ -480,14 +492,16 @@ model TicketHistory {
 
 // ============ 通知 ============
 model Notification {
-  id        String   @id @default(cuid())
-  userId    String   @map("user_id")
-  ticketId  String?  @map("ticket_id")
-  type      String
-  title     String
-  content   String?
-  isRead    Boolean  @default(false) @map("is_read")
-  createdAt DateTime @default(now()) @map("created_at")
+  subjectKind String?
+  subjectId   String?
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  ticketId    String?  @map("ticket_id")
+  type        String
+  title       String
+  content     String?
+  isRead      Boolean  @default(false) @map("is_read")
+  createdAt   DateTime @default(now()) @map("created_at")
 
   user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   ticket Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
@@ -507,4 +521,231 @@ model SavedView {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("saved_views")
+}
+
+// ============ GreenStor COP: 组织、资产与库存 ============
+enum AssetStatus {
+  PENDING_REGISTRATION
+  IN_STOCK
+  IN_USE
+  MAINTENANCE
+  RETIRED
+}
+
+enum InventoryOperationType {
+  RECEIVE
+  ISSUE
+  RETURN
+  TRANSFER
+  ADJUST
+  REVERSAL
+}
+
+model Department {
+  id         String       @id @default(cuid())
+  name       String       @unique
+  parentId   String?
+  active     Boolean      @default(true)
+  createdAt  DateTime     @default(now())
+  parent     Department?  @relation("DepartmentTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children   Department[] @relation("DepartmentTree")
+  users      User[]
+  assets     Asset[]
+  warehouses Warehouse[]
+
+  @@map("departments")
+}
+
+model Asset {
+  sourceStatus   String?
+  ownerName      String?
+  ownership      String               @default("UNCONFIRMED")
+  rackName       String?
+  rackUnit       String?
+  sourceSystem   String?
+  sourceRecordId String?
+  sourceUrl      String?
+  lastSyncedAt   DateTime?
+  labelVerified  Boolean              @default(false)
+  id             String               @id @default(cuid())
+  code           String?              @unique
+  name           String
+  category       String?
+  manufacturer   String?
+  model          String?
+  serialNumber   String?
+  location       String?
+  description    String?
+  status         AssetStatus          @default(PENDING_REGISTRATION)
+  custodianId    String?
+  departmentId   String?
+  datacenterId   String?
+  clusterId      String?
+  purchaseDate   DateTime?
+  purchaseCost   Decimal?             @db.Decimal(14, 2)
+  currency       String               @default("CNY")
+  warrantyUntil  DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  custodian      User?                @relation(fields: [custodianId], references: [id], onDelete: SetNull)
+  department     Department?          @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  datacenter     Datacenter?          @relation(fields: [datacenterId], references: [id], onDelete: Restrict)
+  cluster        Cluster?             @relation(fields: [clusterId], references: [id], onDelete: Restrict)
+  tickets        TicketAsset[]
+  operations     InventoryOperation[]
+
+  @@unique([sourceSystem, sourceRecordId])
+  @@index([status, departmentId])
+  @@index([serialNumber])
+  @@map("assets")
+}
+
+model TicketAsset {
+  ticketId  String
+  assetId   String
+  createdAt DateTime @default(now())
+  ticket    Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  asset     Asset    @relation(fields: [assetId], references: [id], onDelete: Restrict)
+
+  @@id([ticketId, assetId])
+  @@index([assetId])
+  @@map("ticket_assets")
+}
+
+model SparePart {
+  id           String               @id @default(cuid())
+  sku          String               @unique
+  name         String
+  category     String?
+  manufacturer String?
+  model        String?
+  unit         String               @default("件")
+  minimumStock Int                  @default(0)
+  description  String?
+  active       Boolean              @default(true)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  balances     StockBalance[]
+  movements    StockMovement[]
+  operations   InventoryOperation[]
+
+  @@index([active, category])
+  @@map("spare_parts")
+}
+
+model Warehouse {
+  id           String          @id @default(cuid())
+  code         String          @unique
+  name         String
+  location     String?
+  departmentId String?
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  department   Department?     @relation(fields: [departmentId], references: [id], onDelete: Restrict)
+  balances     StockBalance[]
+  movements    StockMovement[]
+
+  @@map("warehouses")
+}
+
+model StockBalance {
+  warehouseId String
+  sparePartId String
+  quantity    Int       @default(0)
+  updatedAt   DateTime  @updatedAt
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  sparePart   SparePart @relation(fields: [sparePartId], references: [id], onDelete: Restrict)
+
+  @@id([warehouseId, sparePartId])
+  @@map("stock_balances")
+}
+
+model InventoryOperation {
+  id             String                 @id @default(cuid())
+  type           InventoryOperationType
+  sparePartId    String
+  actorId        String
+  actorName      String
+  idempotencyKey String                 @unique
+  requestHash    String
+  reason         String
+  ticketId       String?
+  assetId        String?
+  reversesId     String?                @unique
+  createdAt      DateTime               @default(now())
+  sparePart      SparePart              @relation(fields: [sparePartId], references: [id], onDelete: Restrict)
+  actor          User                   @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  ticket         Ticket?                @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+  asset          Asset?                 @relation(fields: [assetId], references: [id], onDelete: Restrict)
+  reverses       InventoryOperation?    @relation("InventoryReversal", fields: [reversesId], references: [id], onDelete: Restrict)
+  reversedBy     InventoryOperation?    @relation("InventoryReversal")
+  movements      StockMovement[]
+
+  @@index([sparePartId, createdAt])
+  @@index([assetId])
+  @@map("inventory_operations")
+}
+
+model StockMovement {
+  id          String             @id @default(cuid())
+  operationId String
+  warehouseId String
+  sparePartId String
+  delta       Int
+  before      Int
+  after       Int
+  createdAt   DateTime           @default(now())
+  operation   InventoryOperation @relation(fields: [operationId], references: [id], onDelete: Restrict)
+  warehouse   Warehouse          @relation(fields: [warehouseId], references: [id], onDelete: Restrict)
+  sparePart   SparePart          @relation(fields: [sparePartId], references: [id], onDelete: Restrict)
+
+  @@index([warehouseId, sparePartId, createdAt])
+  @@map("stock_movements")
+}
+
+// Public platform infrastructure; controlled adapters enforce subject existence
+// and module authorization. Subjects are archived, not deleted.
+model BusinessActivity {
+  id        String   @id @default(cuid())
+  kind      String
+  entityId  String
+  action    String
+  actorId   String?
+  actorName String
+  before    Json?
+  after     Json?
+  createdAt DateTime @default(now())
+  actor     User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([kind, entityId, createdAt])
+  @@map("business_activities")
+}
+
+model BusinessAttachment {
+  id           String   @id @default(cuid())
+  kind         String
+  entityId     String
+  fileName     String
+  objectKey    String   @unique
+  fileSize     Int
+  mime         String
+  uploaderId   String?
+  uploaderName String
+  createdAt    DateTime @default(now())
+  uploader     User?    @relation(fields: [uploaderId], references: [id], onDelete: SetNull)
+
+  @@index([kind, entityId])
+  @@map("business_attachments")
+}
+
+model AssetImportBatch {
+  id          String   @id
+  actorId     String
+  actorName   String
+  requestHash String
+  result      Json
+  createdAt   DateTime @default(now())
+
+  @@map("asset_import_batches")
 }

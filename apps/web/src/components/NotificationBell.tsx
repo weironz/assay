@@ -7,6 +7,7 @@ import {
   useNotifications,
   useMarkRead,
   useMarkAllRead,
+  type Notification,
 } from '../features/notifications/api';
 
 export default function NotificationBell() {
@@ -19,11 +20,17 @@ export default function NotificationBell() {
   const markRead = useMarkRead();
   const markAll = useMarkAllRead();
 
-  const openNotif = (id: string, ticketId: string | null) => {
-    markRead.mutate(id);
-    if (ticketId) {
+  const openNotif = (notification: Notification) => {
+    markRead.mutate(notification.id);
+    const paths: Record<string, string> = {asset: '/assets/', spare_part: '/spare-parts/'};
+    const path = notification.ticketId ? `/tickets/${notification.ticketId}`
+      : notification.subjectId && notification.subjectKind && Object.hasOwn(paths, notification.subjectKind)
+        ? paths[notification.subjectKind] + encodeURIComponent(notification.subjectId)
+        : ['warehouse', 'inventory_operation'].includes(notification.subjectKind || '') ? '/inventory'
+        : notification.subjectKind === 'department' ? '/organization' : null;
+    if (path) {
       setOpen(false);
-      navigate(`/tickets/${ticketId}`);
+      navigate(path);
     }
   };
 
@@ -67,7 +74,7 @@ export default function NotificationBell() {
               {list?.map((n) => (
                 <li
                   key={n.id}
-                  onClick={() => openNotif(n.id, n.ticketId)}
+                  onClick={() => openNotif(n)}
                   className={`px-3 py-2 border-b border-gray-50 dark:border-gray-800 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${
                     n.isRead ? 'opacity-60' : ''
                   }`}

@@ -212,3 +212,27 @@ test('privileged MFA enforcement blocks app routes only when opted in', async ()
     else process.env.PRIVILEGED_MFA_MODE = previous;
   }
 });
+
+test('COP administrators are protected by MFA enforcement and cannot disable enrolled MFA', async () => {
+  const previous = process.env.PRIVILEGED_MFA_MODE;
+  const context = () => ({ switchToHttp: () => ({ getRequest: () => ({ path: '/api/assets' }) }), getHandler: () => null, getClass: () => null });
+  try {
+    process.env.PRIVILEGED_MFA_MODE = 'enforce';
+    for (const role of ['asset_manager', 'inventory_manager']) {
+      const user = { status: 'ACTIVE', roles: [role], twoFactorEnabled: false };
+      const guard = new SessionGuard({ getAllAndOverride: () => false }, { getUserFromRequest: async () => user });
+      await assert.rejects(guard.canActivate(context()), { status: 403 });
+      user.twoFactorEnabled = true;
+      assert.equal(await guard.canActivate(context()), true);
+      const lookup = {
+        session: async () => ({ user: { id: 'u' }, session: { token: 's' } }),
+        user: async () => ({ status: 'ACTIVE', twoFactorEnabled: true, roles: [{ role: { name: role } }] }),
+        consume: async () => { throw Error('must not consume'); },
+      };
+      await assert.rejects(enforceBetterAuthSensitiveStepUp('/two-factor/disable', new Headers(), lookup), { status: 'FORBIDDEN' });
+    }
+  } finally {
+    if (previous === undefined) delete process.env.PRIVILEGED_MFA_MODE;
+    else process.env.PRIVILEGED_MFA_MODE = previous;
+  }
+});

@@ -1,3 +1,4 @@
+import { adapter, BusinessRef } from '../operations/business';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
@@ -7,6 +8,7 @@ export interface NotifyInput {
   title: string;
   content?: string;
   ticketId?: string;
+  subject?: BusinessRef;
 }
 
 const esc = (s = '') =>
@@ -31,6 +33,7 @@ export class NotificationsService {
         title: input.title,
         content: input.content,
         ticketId: input.ticketId,
+        ...(input.subject ? {subjectKind: input.subject.kind, subjectId: input.subject.id} : {}),
       },
     });
 
@@ -42,12 +45,14 @@ export class NotificationsService {
           select: { email: true },
         });
         if (!user?.email) return;
-        const link = this.mail.ticketUrl(input.ticketId);
+        const subject = input.subject;
+        const base=(process.env.APP_URL||'http://localhost:5173').replace(/\/$/,'');
+        const link = subject ? base+adapter(subject.kind).path+(adapter(subject.kind).path.endsWith('/')?encodeURIComponent(subject.id):'') : this.mail.ticketUrl(input.ticketId);
         const html = `
           <p>${esc(input.title)}</p>
           ${input.content ? `<p>${esc(input.content)}</p>` : ''}
-          <p><a href="${link}">查看工单</a></p>
-          <hr><p style="color:#888;font-size:12px">来自工单管理系统的自动通知</p>`;
+          <p><a href="${link}">查看详情</a></p>
+          <hr><p style="color:#888;font-size:12px">来自 GreenStor COP 的自动通知</p>`;
         await this.mail.send(user.email, input.title, html);
       })();
     }

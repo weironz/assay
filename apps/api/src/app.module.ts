@@ -1,3 +1,4 @@
+import { OperationsModule } from './operations/operations.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
@@ -23,6 +24,7 @@ import { PermissionsGuard } from './auth/permissions.guard';
 
 @Module({
   imports: [
+    OperationsModule,
     ConfigModule.forRoot({ isGlobal: true }),
     BullModule.forRoot({
       connection: {

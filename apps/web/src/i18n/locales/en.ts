@@ -1,3 +1,4 @@
+import { copEn } from '../../features/cop/strings';
 /**
  * English — the reference locale.
  *
@@ -6,6 +7,7 @@
  * demand it everywhere else.
  */
 const en = {
+  cop: copEn,
   common: {
     loading: 'Loading…',
     save: 'Save',
@@ -58,11 +60,29 @@ const en = {
   },
 
   brand: {
-    subtitle: 'Ticket System',
-    ariaHome: 'Greenstor Ticket System — home',
+    subtitle: 'Operations Platform',
+    ariaHome: 'GreenStor COP — home',
   },
 
   nav: {
+    platformManagement: 'Platform administration',
+    userPermissions: 'Users & permissions',
+    accountMenu: 'Account menu',
+    personalSettings: 'Personal settings',
+    securitySettings: 'Security settings',
+
+    businessModules: 'Business modules',
+    ticketSystem: 'Ticket system',
+    ticketList: 'Ticket list',
+    newTicket: 'New ticket',
+    assetRegister: 'Asset register',
+    sparesInventory: 'Spare parts & inventory',
+    partsCatalogue: 'Parts catalogue',
+    platformOverview: 'Platform overview',
+    platformNavigation: 'Platform navigation',
+    commonMenu: 'Platform',
+    moduleMenu: 'Module menu',
+
     dashboard: 'Dashboard',
     tickets: 'Tickets',
     users: 'Users',

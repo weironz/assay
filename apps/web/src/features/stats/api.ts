@@ -11,8 +11,9 @@ export interface Overview {
   byStatus: Record<string, number>;
 }
 
-export const useOverview = () =>
+export const useOverview = (enabled=true) =>
   useQuery({
+    enabled,
     queryKey: ['stats', 'overview'],
     queryFn: async () => (await api.get('/stats/overview')).data as Overview,
     refetchInterval: 30_000,

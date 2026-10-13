@@ -1,3 +1,13 @@
+# GreenStor COP
+
+GreenStor Company Operations Platform（公司运营服务平台）。在现有 Assay 工单系统基础上增量增加资产、备品备件、库存和组织管理。现有认证/MFA、工单、分享与 CLI/MCP 接口保持兼容；请假、报销的业务与审批扩展协议已预留，本期未实现对应流程。
+
+- [改造方案与实施计划](docs/cop/01-改造方案与实施计划.md)
+- [开发验证与运维](docs/cop/02-开发验证与运维.md)
+- [API 与扩展约定](docs/cop/03-API与扩展约定.md)
+
+以下为沿用的 Assay 工单模块与基础部署说明；COP 的迁移/导入注意事项以以上文档为准。
+
 # 工单管理系统 (Assay Ticket System)
 
 前后端分离的工单管理系统。前端 React + Vite，后端 NestJS + Prisma + PostgreSQL，附件走 RustFS（S3 兼容），会话用 better-auth + Redis。
@@ -42,7 +52,7 @@ docker compose -f docker-compose.dev.yml up -d --build
 > 端口在 `.env` 里可改。默认已避开常见占用：postgres 主机端口 5433、adminer 8090、
 > RustFS 9100/9101（容器间仍走内部 `rustfs:9000`，不受主机端口影响）。
 
-表结构会在 api 容器启动时自动同步（`prisma db push`）并灌入种子数据。
+API 容器启动时执行 `prisma migrate deploy` 并灌入种子数据；COP 的编号 sequence 和库存约束必须通过迁移安装。历史仅使用 `db push` 的数据库升级前须备份、校验并建立迁移基线，见 [COP 运维说明](docs/cop/02-开发验证与运维.md)。
 `/health` 返回 `{"status":"ok","db":"up","storage":"s3"}` 即表示全链路就绪。
 
 ### 初始化数据（seed）

@@ -1,8 +1,8 @@
 {
-  "name": "assay-ticket-system",
+  "name": "greenstor-cop",
   "version": "1.3.9",
   "private": true,
-  "description": "工单管理系统 - monorepo (NestJS + React)",
+  "description": "公司运营服务平台 - 工单、资产和备品备件管理 (NestJS + React)",
   "scripts": {
     "dev:api": "pnpm --filter api start:dev",
     "dev:web": "pnpm --filter web dev",

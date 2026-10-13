@@ -99,7 +99,8 @@ const CLOSED_STATUSES = [...DONE_STATUSES, 'CANCELLED'];
 export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuth((s) => s.user);
-  const { data, isLoading } = useOverview();
+  const canReadTickets=!!user?.permissions.includes('ticket:read');
+  const { data, isLoading } = useOverview(canReadTickets);
 
   const byStatus = data?.byStatus ?? {};
   const sum = (list: string[]) =>
@@ -119,7 +120,7 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {isLoading || !data ? (
+      {!canReadTickets ? null : isLoading || !data ? (
         <div className="text-gray-400">{t('common.loading')}</div>
       ) : (
         <>

@@ -8,6 +8,8 @@ export interface Notification {
   content: string | null;
   isRead: boolean;
   ticketId: string | null;
+  subjectKind?: string | null;
+  subjectId?: string | null;
   createdAt: string;
 }
 
