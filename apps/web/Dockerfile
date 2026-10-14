@@ -6,7 +6,9 @@ WORKDIR /app
 
 # 先只拷依赖清单，命中缓存后源码改动不必重装依赖
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    bun install --frozen-lockfile
 
 COPY . .
 # 单域名部署：API 走相对路径 /api（由 Nginx 反代），故 base 留空

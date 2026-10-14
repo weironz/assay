@@ -7,7 +7,7 @@ import { AuthUser } from './auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   checkStepUpRate, consumeStepUp, issueStepUp, privilegedMfaMode,
-  reserveTotpCode, StepUpPurpose, STEP_UP_TTL_SECONDS,
+  reserveTotpCode, releaseSuccessfulStepUpAttempt, StepUpPurpose, STEP_UP_TTL_SECONDS,
 } from './step-up-store';
 
 @Injectable()
@@ -32,7 +32,7 @@ export class StepUpService {
       enrolled: user.twoFactorEnabled,
       enrollmentRequired: privileged && privilegedMfaMode() === 'enforce' && !user.twoFactorEnabled,
       stepUpTtlSeconds: STEP_UP_TTL_SECONDS,
-      purposes: ['roles', 'api-tokens', 'two-factor', 'account'],
+      purposes: ['roles', 'api-tokens', 'two-factor', 'account', 'samba'],
     };
   }
 
@@ -63,6 +63,7 @@ export class StepUpService {
       }
       await reserveTotpCode(user.id, body.code);
     }
+    await releaseSuccessfulStepUpAttempt(user.id);
     return {
       stepUpToken: await issueStepUp(user.id, session.token, body.purpose),
       expiresInSeconds: STEP_UP_TTL_SECONDS,

@@ -173,3 +173,7 @@ docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" 
 - [x] P4 站内通知(铃铛/未读) + SLA 超时提醒(BullMQ) + 优先级升级 + SLA 倒计时徽章
 - [x] P5 仪表盘统计 + 保存筛选视图 + 深色模式 + 管理员删除工单
 - [x] P6 生产打包:多阶段镜像 + Nginx 单域名反代 + Prisma 迁移 + 备份脚本
+
+### 可选 Samba 管理
+
+Rust Agent、Web 管理与独立 IP 测试环境见 [设计方案](docs/samba/01-设计与实施计划.md)、[部署与运维](docs/samba/02-测试部署与运维.md)、[测试验收](docs/samba/03-测试验收记录.md) 和 [Agent 文档](agents/samba/README.md)。默认不启用 Samba 集成，不自动接管现有域或共享。

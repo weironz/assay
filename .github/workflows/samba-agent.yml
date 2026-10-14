@@ -1,0 +1,25 @@
+name: Samba Agent
+on:
+  push:
+    branches: [main]
+    paths: ['agents/samba/**', '.github/workflows/samba-agent.yml']
+  pull_request:
+    paths: ['agents/samba/**', '.github/workflows/samba-agent.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agents/samba
+      - run: cargo fmt --manifest-path agents/samba/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path agents/samba/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path agents/samba/Cargo.toml
+      - run: docker build -t assay-samba-agent:ci agents/samba

@@ -1,6 +1,6 @@
 import { api, apiOrigin } from './api';
 
-export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account';
+export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account' | 'samba';
 export type SecurityStatus = {
   privilegedMfaMode: 'optional' | 'enforce';
   privileged: boolean;

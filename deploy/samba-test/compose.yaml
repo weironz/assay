@@ -1,0 +1,149 @@
+name: assay-samba-test
+services:
+  ad:
+    image: ${SAMBA_TEST_IMAGE:-quay.io/samba.org/samba-ad-server:default-fedora-amd64}
+    pull_policy: never
+    hostname: ad
+    domainname: assay.test
+    dns: [172.30.225.10]
+    entrypoint: ["/usr/bin/samba", "--interactive", "--no-process-group"]
+    restart: unless-stopped
+    cap_add: [SYS_ADMIN]
+    environment:
+      KRB5_CONFIG: /var/lib/samba/private/krb5.conf
+    volumes:
+      - ./ad-etc:/etc/samba
+      - ./ad-state:/var/lib/samba
+      - ./ad-run:/run/samba-pids
+      - ./shares:/shares
+      - ./managed:/managed:ro
+      - ./tls/ad.key:/tls/ad.key:ro
+      - ./tls/ad.crt:/tls/ad.crt:ro
+      - ./tls/ca.crt:/tls/ca.crt:ro
+    ports:
+      - "127.0.0.1:1445:445"
+      - "127.0.0.1:1636:636"
+    healthcheck:
+      test: [CMD-SHELL, "smbcontrol samba ping >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+    networks:
+      directory:
+        ipv4_address: 172.30.225.10
+  helper:
+    image: ${SAMBA_AGENT_IMAGE:-assay-samba-agent:test}
+    command: [/config/agent.json, --helper]
+    user: "0:0"
+    network_mode: none
+    pid: service:ad
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [KILL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./agent.json:/config/agent.json:ro
+      - ./shares:/shares
+      - ./managed:/managed
+      - ./agent-state:/state
+      - ./helper-run:/helper-run
+      - ./ad-run:/samba-run:ro
+    depends_on:
+      ad:
+        condition: service_healthy
+  agent:
+    image: ${SAMBA_AGENT_IMAGE:-assay-samba-agent:test}
+    user: "10001:10001"
+    command: [/config/agent.json]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./agent.json:/config/agent.json:ro
+      - ./secrets/agent-token:/secrets/agent-token:ro
+      - ./secrets/ad-password:/secrets/ad-password:ro
+      - ./tls/ca.crt:/tls/ca.crt:ro
+      - ./shares:/shares:ro
+      - ./managed:/managed:ro
+      - ./agent-state:/state
+      - ./helper-run:/helper-run:ro
+    depends_on: [helper]
+    networks: [directory, management]
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file: database.env
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U assay -d assay"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [management]
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes: ["redis-data:/data"]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [management]
+  api:
+    image: ${ASSAY_API_IMAGE:-assay-api:samba-test}
+    restart: unless-stopped
+    env_file: api.env
+    environment:
+      SAMBA_ENABLED: "true"
+      SAMBA_AGENT_URL: http://agent:8080
+      SAMBA_AGENT_TOKEN_FILE: /secrets/agent-token
+      NODE_ENV: production
+      REDIS_HOST: redis
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: /data/attachments
+    volumes:
+      - ./secrets/agent-token:/secrets/agent-token:ro
+      - attachments:/data/attachments
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      agent:
+        condition: service_started
+    networks: [management]
+  web:
+    image: ${ASSAY_WEB_IMAGE:-assay-web:samba-test}
+    restart: unless-stopped
+    ports:
+      - "${TEST_LAN_IP:?set TEST_LAN_IP}:8446:443"
+      - "${TEST_VPN_IP:?set TEST_VPN_IP}:8446:443"
+      - "${TEST_LAN_IP}:8096:80"
+      - "${TEST_VPN_IP}:8096:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./tls/web.crt:/tls/web.crt:ro
+      - ./tls/web.key:/tls/web.key:ro
+      - ./tls/ca.crt:/usr/share/nginx/html/test-ca.crt:ro
+    depends_on: [api]
+    healthcheck:
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1/test-ca.crt >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [management, edge]
+volumes:
+  pg-data:
+  redis-data:
+  attachments:
+networks:
+  edge: {}
+  directory:
+    internal: true
+    ipam:
+      config: [{subnet: 172.30.225.0/24}]
+  management:
+    internal: true

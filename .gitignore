@@ -14,3 +14,7 @@ storage-data/
 backups/
 *.tsbuildinfo
 .oidc-test/
+
+.samba-test/
+
+__pycache__/

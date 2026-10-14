@@ -10,6 +10,7 @@ export const SYSTEM_ROLE_NAMES = [
   'asset_manager',
   'inventory_manager',
   'cop_viewer',
+  'samba_manager',
   'admin',
 ] as const;
 
@@ -23,6 +24,7 @@ export const SYSTEM_ROLE_DESCRIPTIONS: Record<SystemRoleName, string> = {
   asset_manager: '资产管理员',
   inventory_manager: '仓库管理员',
   cop_viewer: '运营平台观察员',
+  samba_manager: '公司账号与文件共享管理员',
   admin: '管理员',
 };
 
@@ -54,7 +56,9 @@ export const SYSTEM_ROLE_PERMISSIONS: Record<SystemRoleName, string[]> = {
   asset_manager: ['asset:read', 'asset:manage', 'platform:directory', 'ticket:read'],
   inventory_manager: ['inventory:read', 'inventory:manage', 'asset:read', 'platform:directory', 'ticket:read'],
   cop_viewer: ['asset:read', 'inventory:read', 'platform:directory'],
+  samba_manager: ['samba:read', 'samba:manage'],
   admin: [
+    'samba:read', 'samba:manage',
     'asset:read', 'asset:manage', 'inventory:read', 'inventory:manage', 'organization:manage', 'platform:directory',
     'ticket:create',
     'ticket:read',
@@ -74,5 +78,5 @@ export function isSystemRoleName(name: string): name is SystemRoleName {
   return SYSTEM_ROLE_NAMES.includes(name as SystemRoleName);
 }
 
-export const PRIVILEGED_ROLE_NAMES = ['admin', 'supervisor', 'asset_manager', 'inventory_manager'] as const;
+export const PRIVILEGED_ROLE_NAMES = ['admin', 'supervisor', 'asset_manager', 'inventory_manager', 'samba_manager'] as const;
 export const hasPrivilegedRole = (roles: string[]) => roles.some(role => (PRIVILEGED_ROLE_NAMES as readonly string[]).includes(role));

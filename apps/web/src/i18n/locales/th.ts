@@ -61,6 +61,7 @@ const th: Resource = {
   },
 
   nav: {
+    companyAccounts: 'บัญชีบริษัทและไฟล์ที่แชร์',
     platformManagement: 'การจัดการแพลตฟอร์ม',
     userPermissions: 'ผู้ใช้และสิทธิ์',
     accountMenu: 'เมนูบัญชี',

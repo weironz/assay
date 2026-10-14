@@ -65,6 +65,7 @@ const en = {
   },
 
   nav: {
+    companyAccounts: 'Company accounts & file shares',
     platformManagement: 'Platform administration',
     userPermissions: 'Users & permissions',
     accountMenu: 'Account menu',

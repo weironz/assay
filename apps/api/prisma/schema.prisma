@@ -750,3 +750,29 @@ model AssetImportBatch {
 
   @@map("asset_import_batches")
 }
+
+// Optional external identity; no external password is stored in Assay.
+model SambaIdentity {
+  userId       String @id
+  adObjectId   String @unique
+  domain       String
+  accountName  String
+  linkedBy     String
+  linkedAt     DateTime @default(now())
+  @@map("samba_identities")
+}
+
+model SambaOperation {
+  id          String @id
+  actorId     String
+  actorName   String
+  action      String
+  requestHash String
+  metadata    Json
+  state       String @default("pending")
+  result      Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  @@index([createdAt])
+  @@map("samba_operations")
+}

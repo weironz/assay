@@ -61,6 +61,7 @@ const zhTW: Resource = {
   },
 
   nav: {
+    companyAccounts: '公司帳號與檔案共享',
     platformManagement: '平台管理',
     userPermissions: '使用者與權限',
     accountMenu: '帳戶選單',

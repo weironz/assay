@@ -7,7 +7,7 @@ import { StepUpService } from './step-up.service';
 import type { StepUpPurpose } from './step-up-store';
 
 class StepUpDto {
-  @IsIn(['roles', 'api-tokens', 'two-factor', 'account'])
+  @IsIn(['roles', 'api-tokens', 'two-factor', 'account', 'samba'])
   purpose!: StepUpPurpose;
 
   @IsString()

@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'crypto';
 import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
 import { authRedis } from './auth-redis';
 
-export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account';
+export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account' | 'samba';
 export const STEP_UP_TTL_SECONDS = 300;
 const STEP_UP_ATTEMPT_WINDOW_SECONDS = 900;
 // A single Redis command prevents INCR succeeding without an expiry when a
@@ -25,6 +25,12 @@ export async function checkStepUpRate(userId: string): Promise<void> {
     keys: [key], arguments: [String(STEP_UP_ATTEMPT_WINDOW_SECONDS)],
   }));
   if (attempts > 5) throw new HttpException('安全验证尝试过多，请稍后重试', HttpStatus.TOO_MANY_REQUESTS);
+}
+
+export async function releaseSuccessfulStepUpAttempt(userId: string): Promise<void> {
+  await authRedis.eval(`local n = tonumber(redis.call('GET', KEYS[1]) or '0'); if n > 0 then return redis.call('DECR', KEYS[1]) end; return 0`, {
+    keys: [`assay:step-up:attempts:${digest(userId)}`], arguments: [],
+  });
 }
 
 export async function issueStepUp(userId: string, sessionToken: string, purpose: StepUpPurpose): Promise<string> {

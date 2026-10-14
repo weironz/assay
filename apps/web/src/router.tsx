@@ -1,3 +1,4 @@
+import SambaPage from './features/samba/SambaPage';
 import AssetsPage, { AssetDetailPage } from './features/cop/AssetsPage';
 import PartsPage, { PartDetailPage } from './features/cop/PartsPage';
 import InventoryPage from './features/cop/InventoryPage';
@@ -43,6 +44,7 @@ export const router = createBrowserRouter([
       { path: 'spare-parts', element: <ProtectedRoute permission="inventory:read"><PartsPage /></ProtectedRoute> },
       { path: 'spare-parts/:id', element: <ProtectedRoute permission="inventory:read"><PartDetailPage /></ProtectedRoute> },
       { path: 'inventory', element: <ProtectedRoute permission="inventory:read"><InventoryPage /></ProtectedRoute> },
+      { path: 'samba', element: <ProtectedRoute permission="samba:read"><SambaPage /></ProtectedRoute> },
       { path: 'organization', element: <ProtectedRoute permission="organization:manage"><OrganizationPage /></ProtectedRoute> },
       { path: 'tickets', element: <TicketsPage /> },
       { path: 'tickets/dashboard', element: <ProtectedRoute permission="ticket:read"><DashboardPage /></ProtectedRoute> },

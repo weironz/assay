@@ -9,6 +9,8 @@ const prisma = new PrismaClient();
 
 // 权限点清单
 const PERMISSIONS: [string, string][] = [
+  ['samba:read', '查看公司账号与文件共享'],
+  ['samba:manage', '管理公司账号与文件共享'],
   ['asset:read', '查看资产'],
   ['asset:manage', '管理资产'],
   ['inventory:read', '查看备件与库存'],

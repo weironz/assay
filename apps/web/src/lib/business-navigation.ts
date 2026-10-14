@@ -81,8 +81,9 @@ export const BUSINESS_MODULES: BusinessModule[] = [
 export const PLATFORM_MODULE: BusinessModule = {
   id: 'platform',
   labelKey: 'nav.platformManagement',
-  areas: ['/organization', '/users'],
+  areas: ['/organization', '/users', '/samba'],
   items: [
+    { to: '/samba', labelKey: 'nav.companyAccounts', permission: 'samba:read' },
     {
       to: '/organization',
       labelKey: 'cop.organization',

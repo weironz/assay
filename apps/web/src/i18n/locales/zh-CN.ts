@@ -61,6 +61,7 @@ const zhCN: Resource = {
   },
 
   nav: {
+    companyAccounts: '公司账号与文件共享',
     platformManagement: '平台管理',
     userPermissions: '用户与权限',
     accountMenu: '账户菜单',

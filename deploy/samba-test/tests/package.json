@@ -1,0 +1,1 @@
+{"private":true,"scripts":{"test":"node web-e2e.cjs"},"dependencies":{"playwright":"1.62.1"}}
