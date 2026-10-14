@@ -7,6 +7,7 @@
     "build": "nest build",
     "test": "node scripts/run-tests.cjs",
     "test:cop": "node scripts/run-cop-tests.cjs",
+    "test:oidc": "node scripts/run-oidc-tests.cjs",
     "start": "nest start",
     "start:dev": "nest start --watch",
     "start:prod": "node dist/main.js",
@@ -35,11 +36,13 @@
     "express": "^5.0.0",
     "multer": "^2.0.1",
     "nodemailer": "^6.9.16",
+    "openid-client": "6.8.8",
     "prisma": "^6.11.0",
     "redis": "^4.7.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",
-    "sanitize-html": "^2.13.1"
+    "sanitize-html": "^2.13.1",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@nestjs/cli": "^11.0.0",

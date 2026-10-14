@@ -1,0 +1,68 @@
+# Assay / GreenStor COP 企业 OIDC 登录
+
+支持一个由运维配置的标准 OIDC 身份提供方，包括 Keycloak。后端使用 `openid-client` 6.8.8 的 Authorization Code Flow，启用 S256 PKCE、浏览器绑定的 state、nonce、ID Token 签名/JWKS、issuer、audience 和有效期校验。浏览器只获得现有 Better Auth httpOnly 会话 Cookie，会话继续保存在 Redis；不向前端返回、也不在 accounts 表保留 IdP access/refresh/ID token。
+
+## 配置
+
+默认关闭，未配置时登录页不显示企业登录按钮，本地账号登录照常工作。仅在后端 `.env` 设置，不使用 `VITE_` 变量保存任何密钥：
+
+```dotenv
+AUTH_BASE_URL=https://assay.example.com
+AUTH_TRUST_ORIGINS=https://assay.example.com
+OIDC_ENABLED=true
+OIDC_ISSUER_URL=https://sso.example.com/realms/company
+OIDC_CLIENT_ID=assay
+OIDC_CLIENT_SECRET=<在本地配置客户端密钥，不提交>
+OIDC_DISPLAY_NAME=企业账号
+OIDC_AUTO_PROVISION=true
+OIDC_EMAIL_DOMAINS=example.com
+OIDC_TOKEN_AUTH_METHOD=client_secret_basic
+```
+
+`AUTH_BASE_URL` 是浏览器可访问的 API 根源站，不带 `/api/auth`。前后端同域时使用站点的 HTTPS 地址；开发前后端分离时使用实际 API 地址，并将 Web 源站列入 `AUTH_TRUST_ORIGINS`。可信源必须是精确 origin，不接受通配符、路径或 query。反向代理须保留 `/api/auth/*` 路由及原有安全 Cookie/CORS 配置。
+
+`OIDC_ISSUER_URL` 填 realm 的 issuer，不是 discovery、授权或 token endpoint URL。Discovery 自动取得端点。开启但缺少必需配置会阻止启动；身份服务临时不可达时只拒绝企业登录，已运行的本地登录保持可用，并可重试 discovery。
+
+生产必须使用 HTTPS。仅本机开发/测试可同时设置 `NODE_ENV=development` 和 `OIDC_ALLOW_HTTP=true`，使用 localhost/127.0.0.1/[::1] 的 HTTP IdP；生产和非 loopback HTTP IdP 不接受此开关。客户端使用服务端 confidential client，支持 `client_secret_basic`（默认）或 `client_secret_post`。
+
+## Keycloak 设置
+
+1. 在目标 realm 创建 OpenID Connect client，Client ID 与 `OIDC_CLIENT_ID` 一致，开启 Client authentication 和 Standard flow。
+2. 使用 Authorization Code Flow，配置 PKCE S256；不需要 Implicit flow、Direct access grants 或 service account。
+3. Valid redirect URIs 只填写精确地址：`https://assay.example.com/api/auth/oidc/callback`。开发使用实际 `AUTH_BASE_URL` 对应的同一路径，不使用 `*`。
+4. 保留 `openid`、`email`、`profile` scopes。用户须有 email，且 `email_verified` 为布尔值 true；LDAP 联邦用户须由企业流程确认邮箱归属，再配置相应验证状态，不盲目将任意来源邮箱标为可信。
+5. 若只允许公司邮箱，配置 `OIDC_EMAIL_DOMAINS`；多个域逗号分隔，匹配完整域名。留空代表接受该 IdP 返回的所有已验证邮箱。
+6. Client secret 放入后端配置，并重建/重启 API。企业登录成功后返回 `/dashboard`。
+
+后端与浏览器均需能解析和访问 IdP 公网/内网域名，后端还需访问 discovery、token、JWKS 和 UserInfo。配置完成后用真实账号复测。
+
+## 账号、关联和权限
+
+- 身份主键为 issuer 对应的 providerId + IdP 的稳定 `sub`，不会因为邮箱或显示名变动创建第二个用户。更换 issuer（包括 realm）属于新的身份来源，不复用旧关联；不要随意重命名 issuer URL。
+- 首次新身份登录在一个数据库事务中创建本地用户、OIDC 关联和固定 `requester` 角色。忽略 IdP 的组/角色 claims；管理员继续在 Assay 分配业务权限。
+- `OIDC_AUTO_PROVISION=false` 时不创建用户，只允许已关联身份登录。
+- 同邮箱本地账号不会自动合并。先使用本地账号登录并完成邮箱验证，在“个人设置 → 安全 → 企业账号”点击“关联企业账号”，通过现有密码/TOTP 安全验证，再登录同邮箱企业账号。
+- 关联操作的 step-up ticket 只能使用一次。回调同时校验原网页登录会话、用户状态与撤销版本；邮箱不一致、身份已关联他人、会话过期或账号停用都会拒绝。
+- 已开启本地 TOTP/恢复码的账号，在 OIDC 验证后仍需完成本地 MFA，再获得 Assay 会话。IdP 的 MFA 策略由 Keycloak 配置，本期不会用未经策略约定的 `amr`/`acr` 自动替代本地 MFA。
+- 纯 OIDC 新账号没有本地密码。现有密码/TOTP step-up 机制保持原样；需要特权敏感操作的人员应优先关联已有本地账号，或按已有受控账号恢复流程建立本地凭据并绑定 MFA。不要在前端伪造密码或绕过安全验证。
+
+## 会话和当前范围
+
+本地停用、密码变更/重置与 Redis/持久化 session epoch 撤销机制继续生效。OAuth state 在服务端保存、绑定浏览器 Cookie、限时有效；回调有额外原子防重放保护。错误跳转只带固定错误标志，不携带 IdP 原始错误、令牌或用户资料。登录落地地址仅允许可信 Web origin 的 `/dashboard`；关联回到 `/settings`。
+
+退出登录只注销 Assay 会话，不注销 IdP 的全局 SSO 会话；再次企业登录可能直接登录，符合本期本地退出语义。本期未实现 RP/back-channel logout、AD/LDAP 用户同步、IdP 停用事件导致的即时本地会话撤销、用户组到业务角色映射或 AD/文件 ACL 管理。仅在 IdP 停用账号不会自动撤销已存在的 Assay 会话；需同时在 Assay 停用，后续可增加生命周期联动。
+
+## 升级和验证
+
+先备份数据库，再执行 `prisma migrate deploy`。新迁移为 accounts 的 `(providerId, accountId)` 增加唯一索引，防止并发首次登录产生重复身份。若旧数据存在重复身份，迁移会明确失败，应调查、确认归属后处理；迁移不自动删除或合并账号。
+
+OIDC 集成测试使用独立 PostgreSQL 库，名字必须以 `_oidc_test` 结尾，禁止配置成真实业务库。部署全部迁移、生成 Prisma Client 后执行：
+
+```bash
+cd apps/api
+OIDC_TEST_DATABASE_URL=<隔离测试库连接串> pnpm test:oidc
+```
+
+测试启动本机模拟 OIDC 服务，实际完成 discovery、签名 ID Token、JWKS、PKCE、nonce、UserInfo、账号关联和 Redis 会话，覆盖错误签名/issuer/audience/有效期/nonce、缺少 ID Token、邮箱未验证、UserInfo sub 不匹配、state/Cookie 错误、并发重放、同邮箱账号保护、step-up、账号停用、会话撤销与本地 MFA。本机测试不能代替公司 Keycloak/Samba AD 的真实联调。
+
+2026-10-14 验证：全部 106 项 API 测试通过，零失败、零跳过；单独 `test:oidc` 的 21 项测试通过；32 项 Web 测试及前后端编译、Web 生产构建通过。使用本地构建产物、隔离数据库和模拟 IdP 做 Chromium 验证，企业入口成功落地会话、失败返回通用提示，零页面脚本错误；浏览器页面与跳转通过测试路由模拟，不访问公司的真实 IdP。开发服务健康检查正常，OIDC 默认保持关闭，待实际客户端配置后联调。

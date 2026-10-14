@@ -102,6 +102,14 @@ const en = {
   },
 
   auth: {
+    oidcSignIn: "Sign in with {{provider}}",
+    oidcLocalAlternative: "Or sign in with a local account",
+    oidcFailed: "Enterprise sign-in could not be completed. Try again. If a local account uses this email, link it in personal settings first.",
+    oidcAccountTitle: "Enterprise account",
+    oidcLinked: "Linked to {{provider}}. You can sign in with your enterprise account.",
+    oidcLinkHint: "Verify your local account, then sign in with an enterprise account using the same email to link it.",
+    oidcLink: "Link enterprise account",
+    oidcLinkUnavailable: "Verify your email and complete security verification using your local account first.",
     tabLogin: 'Sign in',
     tabRegister: 'Sign up',
     email: 'Email',

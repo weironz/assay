@@ -98,6 +98,14 @@ const zhTW: Resource = {
   },
 
   auth: {
+    oidcSignIn: "使用 {{provider}} 登入",
+    oidcLocalAlternative: "或使用本機帳號登入",
+    oidcFailed: "企業登入未完成，請重試。同信箱本機帳號請先在個人設定中關聯企業帳號。",
+    oidcAccountTitle: "企業帳號",
+    oidcLinked: "已關聯 {{provider}}，可使用企業帳號登入。",
+    oidcLinkHint: "先驗證本機帳號，再登入同信箱企業帳號完成關聯。",
+    oidcLink: "關聯企業帳號",
+    oidcLinkUnavailable: "請先驗證信箱，並使用本機帳號完成安全驗證。",
     tabLogin: '登入',
     tabRegister: '註冊',
     email: '電子郵件',

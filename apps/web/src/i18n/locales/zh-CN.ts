@@ -98,6 +98,14 @@ const zhCN: Resource = {
   },
 
   auth: {
+    oidcSignIn: "使用 {{provider}} 登录",
+    oidcLocalAlternative: "或使用本地账号登录",
+    oidcFailed: "企业登录未完成，请重试。同邮箱本地账号请先在个人设置中关联企业账号。",
+    oidcAccountTitle: "企业账号",
+    oidcLinked: "已关联 {{provider}}，可使用企业账号登录。",
+    oidcLinkHint: "先验证本地账号，再登录同邮箱企业账号完成关联。",
+    oidcLink: "关联企业账号",
+    oidcLinkUnavailable: "请先验证邮箱，并使用本地账号完成安全验证。",
     tabLogin: '登录',
     tabRegister: '注册',
     email: '邮箱',

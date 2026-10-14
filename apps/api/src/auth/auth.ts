@@ -9,6 +9,8 @@ import { authRedis } from './auth-redis';
 import { enforceBetterAuthSensitiveStepUp } from './better-auth-step-up';
 import { assertCanLoseActiveAdmin } from './last-admin';
 import { captureAuthEpoch, readValidatedSession, refreshSessionMarker, stampSessionEpoch, stampTwoFactorChallenge } from './session-epoch';
+import { readOidcSettings } from './oidc-config';
+import { oidcPlugin } from './oidc';
 
 /**
  * 是否强制邮箱验证后才能登录。
@@ -22,6 +24,7 @@ const REQUIRE_EMAIL_VERIFICATION =
 
 // better-auth 使用独立的 PrismaClient（在 Nest DI 之外，模块加载时即需就绪）
 const prisma = new PrismaClient();
+const oidcSettings = readOidcSettings();
 
 // Redis 二级存储：会话数据存 Redis，可即时撤销（删 key 即失效）
 export const auth = betterAuth({
@@ -33,7 +36,9 @@ export const auth = betterAuth({
     ',',
   ),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
-  plugins: [twoFactor({ issuer: 'Greenstor Assay' })],
+  plugins: [twoFactor({ issuer: 'Greenstor Assay' }), oidcPlugin(oidcSettings, prisma)],
+  account: { storeStateStrategy: 'database', accountLinking: { enabled: false } },
+  ...(oidcSettings ? { onAPIError: { errorURL: `${oidcSettings.origins[0]}/login?oidc_error=1` } } : {}),
   // These routes are handled directly by Better Auth before Nest's guards.
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
@@ -184,6 +189,8 @@ export const auth = betterAuth({
     storage: 'secondary-storage',
     customRules: {
       '/sign-in/email': { window: 60, max: 5 }, // 登录：每 IP 每分钟最多 5 次
+      '/sign-in/oidc': { window: 60, max: 10 },
+      '/oidc/link': { window: 60, max: 5 },
       '/sign-up/email': { window: 3600, max: 5 }, // 注册：每 IP 每小时 5 个账号
       '/request-password-reset': { window: 3600, max: 5 }, // 防邮件轰炸
       '/forget-password': { window: 3600, max: 5 }, // 旧版别名

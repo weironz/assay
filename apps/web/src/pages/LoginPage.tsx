@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authClient, signIn } from '../lib/auth-client';
@@ -6,6 +6,7 @@ import BrandMark from '../components/BrandMark';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { useAuth } from '../stores/auth';
 import { type Msg, useMsg } from '../lib/messages';
+import { beginOidc, oidcProvider, type OidcProvider } from '../lib/oidc';
 
 type Tab = 'login' | 'register';
 
@@ -25,15 +26,29 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [confirm, setConfirm] = useState('');
   const [remember, setRemember] = useState(true);
-  const [error, setError] = useState<Msg>(null);
+  const [error, setError] = useState<Msg>(params.get('oidc_error') === '1' ? { key: 'auth.oidcFailed' } : null);
+  const [provider, setProvider] = useState<OidcProvider | null>(null);
   const [info, setInfo] = useState<Msg>(
     params.get('verified') ? { key: 'auth.verifiedInfo' } : null,
   );
   const [needVerify, setNeedVerify] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [twoFactorPending, setTwoFactorPending] = useState(false);
+  const [twoFactorPending, setTwoFactorPending] = useState(params.get('oidc_mfa') === '1');
   const [factorCode, setFactorCode] = useState('');
   const [backupMode, setBackupMode] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void oidcProvider().then(value => { if (active) setProvider(value); }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  const doOidcLogin = async () => {
+    reset();
+    setLoading(true);
+    try { window.location.assign(await beginOidc(window.location.origin)); }
+    catch { setError({ key: 'auth.oidcFailed' }); setLoading(false); }
+  };
 
   const reset = () => {
     setError(null);
@@ -224,6 +239,12 @@ export default function LoginPage() {
             onSubmit={tab === 'login' ? doLogin : doRegister}
             className="p-6 space-y-4"
           >
+            {tab === 'login' && provider?.enabled && <>
+              <button type="button" onClick={doOidcLogin} disabled={loading} className="min-h-11 w-full rounded-md border border-brand-600 px-3 py-2 text-sm font-medium text-brand-700 disabled:opacity-60 dark:text-brand-400">
+                {t('auth.oidcSignIn', { provider: provider.name })}
+              </button>
+              <p className="text-center text-xs text-gray-500">{t('auth.oidcLocalAlternative')}</p>
+            </>}
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
                 {t('auth.email')}

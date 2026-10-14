@@ -22,7 +22,7 @@ export async function enforceBetterAuthSensitiveStepUp(
   if (![
     '/two-factor/disable', '/two-factor/enable',
     '/two-factor/generate-backup-codes', '/two-factor/get-totp-uri',
-    '/delete-user', '/delete-user/callback',
+    '/delete-user', '/delete-user/callback', '/unlink-account',
   ].includes(path)) return;
   // No deletion email callback is configured; do not leave a future alternate
   // route that can complete deletion without a fresh account step-up.
@@ -48,7 +48,7 @@ export async function enforceBetterAuthSensitiveStepUp(
   try {
     await (lookup.consume ?? consumeStepUp)(
       headers.get('x-step-up-token'), current.user.id, current.session.token,
-      path === '/delete-user' ? 'account' : 'two-factor',
+      path === '/delete-user' || path === '/unlink-account' ? 'account' : 'two-factor',
     );
   } catch {
     throw new APIError('FORBIDDEN', { message: '需要有效且未使用的安全验证' });

@@ -5,6 +5,7 @@ GreenStor Company Operations Platform（公司运营服务平台）。在现有 
 - [改造方案与实施计划](docs/cop/01-改造方案与实施计划.md)
 - [开发验证与运维](docs/cop/02-开发验证与运维.md)
 - [API 与扩展约定](docs/cop/03-API与扩展约定.md)
+- [OIDC 企业登录与 Keycloak 配置](docs/04-OIDC企业登录.md)
 
 以下为沿用的 Assay 工单模块与基础部署说明；COP 的迁移/导入注意事项以以上文档为准。
 
