@@ -13,3 +13,4 @@ storage-data/
 .playwright-mcp/
 backups/
 *.tsbuildinfo
+.oidc-test/

@@ -1,0 +1,66 @@
+name: assay-oidc-test
+
+# Independent development/test stack. No shared volumes with docker-compose.dev.yml.
+# Generate the private env/realm files with apps/api/scripts/setup-keycloak-test.cjs.
+services:
+  keycloak-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: keycloak
+      POSTGRES_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD:?Generate the test environment first}
+    volumes:
+      - keycloak-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U keycloak -d keycloak]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:79c623a22abacf3fe6c00a5fb30f5b7843d717b234033b80995891c06116d244
+    command: [start-dev, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DATABASE_PASSWORD:?Generate the test environment first}
+      KC_BOOTSTRAP_ADMIN_USERNAME: assay-test-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Generate the test environment first}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_PORT:-8180}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8180}:8080"
+    volumes:
+      - ${OIDC_TEST_RUNTIME_DIR:?Generate the test environment first}/realm.json:/opt/keycloak/data/import/assay-test-realm.json:ro
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+
+  assay-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: assay_keycloak_oidc_test
+      POSTGRES_USER: assay_test
+      POSTGRES_PASSWORD: ${ASSAY_TEST_DATABASE_PASSWORD:?Generate the test environment first}
+    ports:
+      - "127.0.0.1:${ASSAY_TEST_POSTGRES_PORT:-5434}:5432"
+    volumes:
+      - assay-db:/var/lib/postgresql/data
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U assay_test -d assay_keycloak_oidc_test]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  assay-redis:
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:${ASSAY_TEST_REDIS_PORT:-6382}:6379"
+    volumes:
+      - assay-redis:/data
+
+volumes:
+  keycloak-db:
+  assay-db:
+  assay-redis:

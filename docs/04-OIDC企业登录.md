@@ -66,3 +66,35 @@ OIDC_TEST_DATABASE_URL=<隔离测试库连接串> pnpm test:oidc
 测试启动本机模拟 OIDC 服务，实际完成 discovery、签名 ID Token、JWKS、PKCE、nonce、UserInfo、账号关联和 Redis 会话，覆盖错误签名/issuer/audience/有效期/nonce、缺少 ID Token、邮箱未验证、UserInfo sub 不匹配、state/Cookie 错误、并发重放、同邮箱账号保护、step-up、账号停用、会话撤销与本地 MFA。本机测试不能代替公司 Keycloak/Samba AD 的真实联调。
 
 2026-10-14 验证：全部 106 项 API 测试通过，零失败、零跳过；单独 `test:oidc` 的 21 项测试通过；32 项 Web 测试及前后端编译、Web 生产构建通过。使用本地构建产物、隔离数据库和模拟 IdP 做 Chromium 验证，企业入口成功落地会话、失败返回通用提示，零页面脚本错误；浏览器页面与跳转通过测试路由模拟，不访问公司的真实 IdP。开发服务健康检查正常，OIDC 默认保持关闭，待实际客户端配置后联调。
+
+## 真实 Keycloak Compose 联调
+
+提供独立的 `docker-compose.oidc-test.yml`，固定使用官方 Keycloak 26.8.1 镜像及 digest。它启动 Keycloak、专用 Keycloak PostgreSQL、独立 Assay PostgreSQL 和 Redis，不共享原开发环境的数据库或卷。仅绑定本机端口：8180（Keycloak）、5434（测试库）、6382（测试 Redis）。这是使用 `start-dev` 的本机联调环境，不是生产部署。
+
+先在 Linux 主机安装 API/Web 依赖，要求支持 ESM require 的 Node 22.12+、pnpm、Bun 和 Docker Compose。从仓库根目录执行：
+
+```bash
+node apps/api/scripts/setup-keycloak-test.cjs .oidc-test
+docker compose --env-file .oidc-test/compose.env -f docker-compose.oidc-test.yml up -d
+node --env-file=.oidc-test/assay.env apps/api/scripts/start-keycloak-test.cjs .oidc-test
+node --env-file=.oidc-test/assay.env apps/api/scripts/test-keycloak.cjs .oidc-test
+```
+
+配置生成器随机生成客户端密钥、管理员与测试账号密码，保存在被 Git 忽略的 `.oidc-test/`，文件权限 0600；不会打印凭据。不要提交 `realm.json`、env 文件或 `fixtures.json`。realm 挂载文件须能被 Keycloak 容器的 UID 1000 读取。重复运行配置生成器保留已有凭据，避免 realm 导入跳过已存在 realm 后客户端密钥不一致。
+
+启动脚本在私有目录编译隔离的 API，执行测试库迁移与 seed，API 使用 3190，独立 Web 使用 5190；不覆盖正常开发服务的 dist 或 `.env`。等待 Keycloak discovery、API `http://localhost:3190/health` 和 Web `http://localhost:5190/api/auth/oidc/provider` 就绪后运行测试。Web 页为 `http://localhost:5190`，Keycloak 为 `http://localhost:8180`。远程云环境需要将两个端口一起转发到本机，保持 localhost issuer 与回调地址一致；不要仅更换浏览器 URL。
+
+联调脚本通过真实 HTTP 请求提交 Keycloak 登录表单，再经真实 API 完成回调、签名/JWKS/UserInfo 校验、账号关联和 MFA。没有模拟身份服务、授权码或令牌。脚本只操作生成的 `assay-test` realm 和以 `_oidc_test` 结尾的隔离数据库；会重新建立隔离库中的生成账号，不用于真实业务数据。它保留原登录限流，触发 429 时遵守正常重试窗口，并在测试管理员 token 过期后重新认证。
+
+使用停止脚本终止自己创建的 API/Web 进程；它会核对 PID 对应的进程，拒绝停止无关进程。再关闭独立 Compose 服务，默认保留测试数据库卷：
+
+```bash
+node apps/api/scripts/stop-keycloak-test.cjs .oidc-test
+docker compose --env-file .oidc-test/compose.env -f docker-compose.oidc-test.yml down
+```
+
+Keycloak 的版本和容器参数参考 [官方镜像文档](https://www.keycloak.org/server/containers) 与 [官方下载页](https://www.keycloak.org/downloads)。
+
+2026-10-14 真实联调：15 项检查全部通过，覆盖实际登录表单、授权码/token/JWKS/UserInfo、Redis/httpOnly 会话、外部角色不能提升本地权限、Keycloak SSO 会话复用、state/Cookie/回调重放保护、同邮箱本地账号保护、真实密码 step-up 关联、TOTP 绑定与 OIDC 后本地 MFA、恢复码不可复用、未验证/域外邮箱拒绝、本地停用即时撤销、IdP 停用拒绝新登录、强制 PKCE、错误客户端密钥拒绝以及本地退出后的 IdP SSO 语义。Keycloak 缺少 PKCE 时可以通过带 error 的 302 回调拒绝请求，测试同时校验没有返回 code 且 Assay 拒绝登录。
+
+启动、停止、重新启动及重复迁移/seed 已验证；原开发服务继续使用原数据库、端口和配置，OIDC 仍为关闭状态。私有测试配置、结果和日志位于当前云工作区 `/workspace/assay-cloud/keycloak-test`，不随代码提交。**在 Keycloak 停用账号不会立即注销已存在的 Assay 会话**，本期尚未实现停用事件/back-channel logout；需在 Assay 同时停用或撤销会话。该边界已通过真实 Keycloak 验证。
