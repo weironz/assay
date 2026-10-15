@@ -12,7 +12,7 @@ let browser;
 function pass(name) { results.push(name); console.log('PASS ' + name); }
 async function login(page, email, pwd) {
  await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
- await page.goto(origin + '/login'); if ((await (await page.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await page.getByRole('button', { name: '本地账号', exact: true }).click(); await page.locator('form input').first().fill(email);
+ await page.goto(origin + '/login'); await page.locator('form input').first().fill(email);
  await page.locator('input[type=password]').fill(pwd); await page.locator('form button[type=submit]').click(); await page.waitForURL('**/dashboard');
 }
 async function token(page, purpose = 'samba', pwd = password) {

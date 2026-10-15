@@ -6,6 +6,7 @@ const isolatedUrl = process.env.SESSION_EPOCH_TEST_DATABASE_URL;
 if (!isolatedUrl) {
   test('session epoch integration requires an isolated PostgreSQL URL', { skip: true }, () => {});
 } else {
+  process.env.AUTH_ALLOW_REGISTRATION = 'true';
   process.env.DATABASE_URL = isolatedUrl;
   process.env.AUTH_BASE_URL = 'http://localhost:3000';
   process.env.REQUIRE_EMAIL_VERIFICATION = 'false';

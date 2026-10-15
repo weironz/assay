@@ -24,6 +24,18 @@ test('SID decoding preserves stable directory identities', () => {
   assert.equal(sidString(sid), 'S-1-5-21-1-2-3-1000');
   assert.throws(() => sidString(sid.subarray(0, 8)));
 });
+test('first AD sign-in accepts UPN or mail while preserving literal filters and rejecting ambiguous search results', async () => {
+  const client = new DirectoryClient(readDirectorySettings(env));
+  client.lookup = async filter => {
+    assert.deepEqual(filter.filters.map(f => f.attribute), ['userPrincipalName', 'mail']);
+    assert(filter.filters.every(f => f.value === 'alice*)(mail=*)@example.test'));
+    return 'unique-profile';
+  };
+  assert.equal(await client.findAccount('alice*)(mail=*)@example.test'), 'unique-profile');
+  client.reader = async action => action({ search: async () => ({ searchEntries: [{ dn: 'CN=one' }, { dn: 'CN=two' }] }) });
+  delete client.lookup;
+  await assert.rejects(client.findAccount('shared@example.test'));
+});
 test('GUID lookup preserves non-UTF8 octets and names stay literal LDAP filter values', async () => {
   const client = new DirectoryClient(readDirectorySettings(env));
   const id = '0080fffe0011aabbccddeeff12345678';

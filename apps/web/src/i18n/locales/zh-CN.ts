@@ -114,6 +114,15 @@ const zhCN: Resource = {
   },
 
   auth: {
+    account: "账号",
+    accountPlaceholder: "用户名或邮箱",
+    emergencyTitle: "管理员应急登录",
+    emergencyHint: "仅供独立本地管理员在身份服务不可用时使用。",
+    emergencyLink: "管理员应急登录",
+    backToLogin: "返回登录",
+    registerAccount: "注册账号",
+    resetDirectoryHint: "公司账号的密码请联系管理员重置；本地账号可通过邮箱找回。",
+
     directoryLocalHint: '已关联公司身份的员工请使用“公司账号”登录；本地入口用于独立的本地账号。',
     directoryLogin: '公司账号',
     localLogin: '本地账号',
@@ -123,7 +132,7 @@ const zhCN: Resource = {
     directoryLinkRequired: '此公司账号已有文件访问关联。请联系管理员在“身份与访问”中明确配置登录身份关联；文件关联不会自动切换本地账号的登录方式。',
 
     oidcSignIn: "使用 {{provider}} 登录",
-    oidcLocalAlternative: "或使用本地账号登录",
+    oidcLocalAlternative: "或使用账号密码登录",
     oidcFailed: "企业登录未完成，请重试。同邮箱本地账号请先在个人设置中关联企业账号。",
     oidcAccountTitle: "企业账号",
     oidcLinked: "已关联 {{provider}}，可使用企业账号登录。",
@@ -148,7 +157,7 @@ const zhCN: Resource = {
     verificationResent: '验证邮件已重新发送至 {{email}}，请查收。',
     errTooManyLogin: '登录尝试过于频繁，请稍后再试',
     errEmailNotVerified: '邮箱尚未验证，请先完成邮箱验证',
-    errInvalidCredentials: '邮箱或密码错误',
+    errInvalidCredentials: '账号或密码错误',
     errSessionFailed: '会话获取失败',
     errLoginFailed: '登录失败',
     errTooManyRegister: '注册过于频繁，请稍后再试',

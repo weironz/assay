@@ -14,7 +14,7 @@ function pass(message) { results.push(message); console.log('PASS ' + message); 
   await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
   const page = await context.newPage();
   await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
-  await page.goto(origin + '/login'); if ((await (await page.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await page.getByRole('button', { name: '本地账号', exact: true }).click();
+  await page.goto(origin + '/login');
   await page.locator('form input').first().fill('admin@assay.test');
   await page.locator('input[type=password]').fill(password);
   await page.locator('form button[type=submit]').click();

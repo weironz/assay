@@ -19,7 +19,7 @@ async function checked(r, status) { assert.equal(r.status(), status); return r; 
   const context = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await context.newPage();
   await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
   await page.goto(origin + '/login');
-  if ((await (await page.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await page.getByRole('button', { name: '本地账号', exact: true }).click();
+
   await page.locator('form input').first().fill('admin@assay.test');
   await page.locator('input[type=password]').fill(adminPassword);
   await page.locator('form button[type=submit]').click(); await page.waitForURL('**/dashboard');

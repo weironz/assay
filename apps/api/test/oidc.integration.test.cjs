@@ -8,6 +8,7 @@ if (!isolated) {
   test('OIDC integration requires an isolated PostgreSQL URL', { skip: true }, () => {});
 } else {
   assert.match(new URL(isolated).pathname, /_oidc_test$/, 'Refuse to run against a live database');
+  process.env.AUTH_ALLOW_REGISTRATION = 'true';
   process.env.DATABASE_URL = isolated;
   process.env.AUTH_BASE_URL = 'http://localhost:3000';
   process.env.AUTH_TRUST_ORIGINS = 'http://localhost:5173';

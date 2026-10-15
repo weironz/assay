@@ -15,6 +15,8 @@ import { oidcPlugin } from './oidc';
 import { directoryPlugin } from './directory';
 import { directorySettings, stampDirectorySession, validatedDirectorySession, verifyDirectoryPassword } from './directory-runtime';
 import { checkStepUpRate, releaseSuccessfulStepUpAttempt } from './step-up-store';
+import { unifiedLoginPlugin } from './unified-login';
+import { publicRegistrationBlocked, registrationEnabled } from './login-policy';
 
 /**
  * 是否强制邮箱验证后才能登录。
@@ -29,6 +31,7 @@ const REQUIRE_EMAIL_VERIFICATION =
 // better-auth 使用独立的 PrismaClient（在 Nest DI 之外，模块加载时即需就绪）
 const prisma = new PrismaClient();
 const oidcSettings = readOidcSettings();
+const directory = directoryPlugin(prisma);
 
 // Redis 二级存储：会话数据存 Redis，可即时撤销（删 key 即失效）
 export const auth = betterAuth({
@@ -40,12 +43,14 @@ export const auth = betterAuth({
     ',',
   ),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
-  plugins: [twoFactor({ issuer: 'Greenstor Assay', allowPasswordless: true }), oidcPlugin(oidcSettings, prisma), directoryPlugin(prisma)],
+  plugins: [twoFactor({ issuer: 'Greenstor Assay', allowPasswordless: true }), oidcPlugin(oidcSettings, prisma), directory, unifiedLoginPlugin(prisma, directory.endpoints!.directorySignIn)],
   account: { storeStateStrategy: 'database', accountLinking: { enabled: false } },
   ...(oidcSettings ? { onAPIError: { errorURL: `${oidcSettings.origins[0]}/login?oidc_error=1` } } : {}),
   // These routes are handled directly by Better Auth before Nest's guards.
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path === '/sign-up/email' && publicRegistrationBlocked(registrationEnabled(), ctx))
+        throw new APIError('FORBIDDEN', { code: 'REGISTRATION_DISABLED', message: '注册未开放，请联系管理员创建账号' });
       await captureAuthEpoch(prisma, ctx);
       if (directorySettings && ctx.path === '/sign-in/email') {
         const email = (ctx.body as any)?.email;
@@ -97,12 +102,13 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
     revokeSessionsOnPasswordReset: true,
-    // 开放邮箱自助注册；配了发信服务时要求先验证邮箱才能登录
+    // Public signup is controlled in the hook; headerless internal admin provisioning remains available.
     disableSignUp: false,
     requireEmailVerification: REQUIRE_EMAIL_VERIFICATION,
     minPasswordLength: 6,
     // 忘记密码：发重置链接
     sendResetPassword: async ({ user, url }) => {
+      if (directorySettings && await prisma.directoryIdentity.findUnique({ where: { userId: user.id } })) return;
       await sendMail(
         user.email,
         '重置你的密码 · 工单管理系统',
@@ -237,6 +243,8 @@ export const auth = betterAuth({
     storage: 'secondary-storage',
     customRules: {
       '/sign-in/email': { window: 60, max: 5 }, // 登录：每 IP 每分钟最多 5 次
+      '/sign-in/unified': { window: 60, max: 5 },
+      '/sign-in/local-admin': { window: 60, max: 5 },
       '/sign-in/directory': { window: 60, max: 5 },
       '/sign-in/oidc': { window: 60, max: 10 },
       '/oidc/link': { window: 60, max: 5 },

@@ -118,6 +118,15 @@ const en = {
   },
 
   auth: {
+    account: "Account",
+    accountPlaceholder: "Username or email",
+    emergencyTitle: "Administrator recovery sign-in",
+    emergencyHint: "For independent local administrators when the identity service is unavailable.",
+    emergencyLink: "Administrator recovery sign-in",
+    backToLogin: "Back to sign in",
+    registerAccount: "Create an account",
+    resetDirectoryHint: "Ask your administrator to reset a company account password. Local accounts can recover access by email.",
+
     directoryLocalHint: 'Employees linked to the company directory use company sign-in. This entry is for independent local accounts.',
     directoryLogin: 'Company account',
     localLogin: 'Local account',
@@ -127,7 +136,7 @@ const en = {
     directoryLinkRequired: 'This company account has an existing file-access link. Ask an administrator to configure its login identity in Identity and Access. A file-access link does not change local sign-in.',
 
     oidcSignIn: "Sign in with {{provider}}",
-    oidcLocalAlternative: "Or sign in with a local account",
+    oidcLocalAlternative: "Or sign in with your account and password",
     oidcFailed: "Enterprise sign-in could not be completed. Try again. If a local account uses this email, link it in personal settings first.",
     oidcAccountTitle: "Enterprise account",
     oidcLinked: "Linked to {{provider}}. You can sign in with your enterprise account.",
@@ -154,7 +163,7 @@ const en = {
     errTooManyLogin: 'Too many sign-in attempts. Please try again later.',
     errEmailNotVerified:
       'Your email address is not verified yet. Please complete email verification first.',
-    errInvalidCredentials: 'Incorrect email or password.',
+    errInvalidCredentials: 'Incorrect account or password.',
     errSessionFailed: 'Could not establish a session.',
     errLoginFailed: 'Sign-in failed.',
     errTooManyRegister: 'Too many sign-up attempts. Please try again later.',

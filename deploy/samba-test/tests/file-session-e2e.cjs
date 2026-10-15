@@ -25,7 +25,6 @@ async function api(path, method = 'GET', data, expected = 200) {
       assert.equal(await page.getByText(text, { exact: true }).count(), 0);
   };
   const companySignIn = async (filesUnavailable = false) => {
-    await page.getByRole('button', { name: '公司账号', exact: true }).click();
     await page.locator('form input').first().fill(f.ad_name); await page.locator('input[type=password]').fill(f.ad_password);
     await page.locator('form button[type=submit]').click(); await page.waitForURL('**/files');
     if (filesUnavailable) await page.getByRole('heading', { name: '文件服务暂不可用', exact: true }).waitFor();
@@ -75,7 +74,7 @@ async function api(path, method = 'GET', data, expected = 200) {
 
   // A normal login can succeed while its optional file service is unavailable.
   // Override response metadata only, without changing AD or gateway configuration.
-  const loginRoute = '**/api/auth/sign-in/directory';
+  const loginRoute = '**/api/auth/sign-in/unified';
   await page.route(loginRoute, async route => {
     const response = await route.fetch(); assert.equal(response.status(), 200);
     const data = await response.json();

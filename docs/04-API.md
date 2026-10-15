@@ -23,13 +23,17 @@ Authorization: Bearer ast_...
 ### 1.1 登录
 
 ```
-POST /api/auth/sign-in/email
+POST /api/auth/sign-in/unified
 Content-Type: application/json
 
-{ "email": "you@example.com", "password": "••••••" }
+{ "username": "you@example.com", "password": "••••••", "rememberMe": true }
 ```
 
 响应 `200`，并通过 `Set-Cookie` 下发会话。后续请求带上该 Cookie 即可。
+
+统一入口按已有身份关联选择本地或 AD 认证，验证失败不会转试另一种密码。启用 MFA 时先返回 `twoFactorRedirect`（本地挑战 Cookie）或 `twoFactorRequired`（AD，再提交 `code`），完成第二因子后才获得会话。独立本地管理员可用相同请求体调用 `/api/auth/sign-in/local-admin`；旧 `/sign-in/email`（`email` 字段）和 `/sign-in/directory`（`username` 字段）保持兼容。
+
+`GET /api/auth/login/options` 返回 `registrationEnabled`、`directoryEnabled`。公开注册默认关闭；仅当 API 设置 `AUTH_ALLOW_REGISTRATION=true` 时显示注册链接并放行 `/api/auth/sign-up/email`。服务端管理员自举与受保护的账号创建接口不受公开注册开关影响。
 
 ### 1.2 curl 完整示例
 

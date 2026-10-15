@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { AndFilter, Client, EqualityFilter, type Entry, type Filter } from 'ldapts';
+import { AndFilter, OrFilter, Client, EqualityFilter, type Entry, type Filter } from 'ldapts';
 import { directorySecret, type DirectorySettings } from './directory-config';
 
 export interface DirectoryProfile {
@@ -93,7 +93,9 @@ export class DirectoryClient {
       name = parts[1];
     }
     if (!name || name.length > 254 || /[\x00-\x1f\x7f]/.test(name)) throw new DirectoryRejected();
-    return this.lookup(new EqualityFilter({ attribute: name.includes('@') ? 'userPrincipalName' : 'sAMAccountName', value: name }));
+    return this.lookup(name.includes('@') ? new OrFilter({ filters: [
+      new EqualityFilter({ attribute: 'userPrincipalName', value: name }), new EqualityFilter({ attribute: 'mail', value: name }),
+    ] }) : new EqualityFilter({ attribute: 'sAMAccountName', value: name }));
   }
   async authenticate(username: string, password: string) {
     return this.verify(await this.findAccount(username), password);

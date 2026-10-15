@@ -1,62 +1,85 @@
-import { FormEvent, useEffect, useState } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { authClient, signIn } from '../lib/auth-client';
-import BrandMark from '../components/BrandMark';
-import LanguageSwitcher from '../components/LanguageSwitcher';
-import { useAuth } from '../stores/auth';
-import { DirectorySignInError, directoryProvider, directorySignIn, type DirectoryProvider } from '../lib/directory-auth';
-import { SecurityRequestError } from '../lib/security-step-up';
-import { type Msg, useMsg } from '../lib/messages';
-import { beginOidc, oidcProvider, type OidcProvider } from '../lib/oidc';
+import { FormEvent, useEffect, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { authClient } from "../lib/auth-client";
+import BrandMark from "../components/BrandMark";
+import LanguageSwitcher from "../components/LanguageSwitcher";
+import { useAuth } from "../stores/auth";
+import { LoginError, loginOptions, unifiedSignIn } from "../lib/unified-login";
+import { SecurityRequestError } from "../lib/security-step-up";
+import { type Msg, useMsg } from "../lib/messages";
+import { beginOidc, oidcProvider, type OidcProvider } from "../lib/oidc";
 
-type Tab = 'login' | 'register';
+type Tab = "login" | "register";
 
 const inputCls =
-  'w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm';
+  "w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm";
 
 export default function LoginPage() {
   const { t } = useTranslation();
   const msg = useMsg();
   const navigate = useNavigate();
   const location = useLocation();
-  const returnToFiles = location.state?.returnTo === '/files';
+  const emergency = location.pathname === "/login/admin";
+  const returnToFiles = location.state?.returnTo === "/files";
   const setDirectoryFilesReady = useAuth((s) => s.setDirectoryFilesReady);
   const [params] = useSearchParams();
   const fetchMe = useAuth((s) => s.fetchMe);
 
-  const [tab, setTab] = useState<Tab>('login');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
-  const [confirm, setConfirm] = useState('');
+  const [tab, setTab] = useState<Tab>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
+  const [confirm, setConfirm] = useState("");
   const [remember, setRemember] = useState(true);
-  const [error, setError] = useState<Msg>(params.get('oidc_error') === '1' ? { key: 'auth.oidcFailed' } : null);
+  const [error, setError] = useState<Msg>(
+    params.get("oidc_error") === "1" ? { key: "auth.oidcFailed" } : null,
+  );
   const [provider, setProvider] = useState<OidcProvider | null>(null);
-  const [directory, setDirectory] = useState<DirectoryProvider | null>(null);
-  const [loginSource, setLoginSource] = useState<'local' | 'directory'>('local');
+  const [allowRegistration, setAllowRegistration] = useState(false);
   const [directoryMfa, setDirectoryMfa] = useState(false);
   const [info, setInfo] = useState<Msg>(
-    params.get('verified') ? { key: 'auth.verifiedInfo' } : null,
+    params.get("verified") ? { key: "auth.verifiedInfo" } : null,
   );
   const [needVerify, setNeedVerify] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [twoFactorPending, setTwoFactorPending] = useState(params.get('oidc_mfa') === '1');
-  const [factorCode, setFactorCode] = useState('');
+  const [twoFactorPending, setTwoFactorPending] = useState(
+    params.get("oidc_mfa") === "1",
+  );
+  const [factorCode, setFactorCode] = useState("");
   const [backupMode, setBackupMode] = useState(false);
 
   useEffect(() => {
     let active = true;
-    void oidcProvider().then(value => { if (active) setProvider(value); }).catch(() => {});
-    void directoryProvider().then(value => { if (active) { setDirectory(value); if (value.enabled) setLoginSource('directory'); } }).catch(() => {});
-    return () => { active = false; };
+    void oidcProvider()
+      .then((value) => {
+        if (active) setProvider(value);
+      })
+      .catch(() => {});
+    void loginOptions()
+      .then((value) => {
+        if (active) setAllowRegistration(value.registrationEnabled);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, []);
 
   const doOidcLogin = async () => {
     reset();
     setLoading(true);
-    try { window.location.assign(await beginOidc(window.location.origin)); }
-    catch { setError({ key: 'auth.oidcFailed' }); setLoading(false); }
+    try {
+      window.location.assign(await beginOidc(window.location.origin));
+    } catch {
+      setError({ key: "auth.oidcFailed" });
+      setLoading(false);
+    }
   };
 
   const reset = () => {
@@ -70,51 +93,60 @@ export default function LoginPage() {
     reset();
     setLoading(true);
     try {
-      if (loginSource === 'directory') {
-        const result = await directorySignIn(email, password, remember, directoryMfa ? factorCode.trim() : undefined);
-        if (result.twoFactorRequired) { setDirectoryMfa(true); return; }
-        setPassword(''); setFactorCode(''); setDirectoryMfa(false);
-        const me = await fetchMe();
-        if (me) {
-          setDirectoryFilesReady(result.filesConnected === true);
-          navigate(returnToFiles || result.destination === '/files' ? '/files' : '/dashboard', { replace: true });
-        }
-        else setError({ key: 'auth.errSessionFailed' });
+      const result = await unifiedSignIn(
+        email.trim(),
+        password,
+        remember,
+        directoryMfa ? factorCode.trim() : undefined,
+        emergency,
+      );
+      if (result.twoFactorRequired) {
+        setDirectoryMfa(true);
         return;
       }
-      const res = await signIn.email({ email, password, rememberMe: remember });
-      if (res.error) {
-        const code = (res.error as any).code;
-        if (res.error.status === 429) {
-          setError({ key: 'auth.errTooManyLogin' });
-        } else if (code === 'EMAIL_NOT_VERIFIED') {
-          setError({ key: 'auth.errEmailNotVerified' });
-          setNeedVerify(true);
-        } else {
-          setError({ key: 'auth.errInvalidCredentials' });
-        }
-        return;
-      }
-      if (res.data && 'twoFactorRedirect' in res.data && res.data.twoFactorRedirect) {
-        setPassword('');
-        setFactorCode('');
+      setPassword("");
+      setFactorCode("");
+      setDirectoryMfa(false);
+      if (result.twoFactorRedirect) {
         setBackupMode(false);
         setTwoFactorPending(true);
         return;
       }
       const me = await fetchMe();
-      if (me) navigate('/dashboard', { replace: true });
-      else setError({ key: 'auth.errSessionFailed' });
-    } catch (err: any) {
-      if (loginSource === 'directory') {
-        setPassword(''); setFactorCode('');
-        const status = err instanceof SecurityRequestError ? err.status : undefined;
-        setError({ key: err instanceof DirectorySignInError && err.code === 'DIRECTORY_LINK_REQUIRED' ? 'auth.directoryLinkRequired' : status === 429 ? 'auth.errTooManyLogin' : status === 503 ? 'auth.directoryUnavailable' : directoryMfa ? 'auth.twoFactorInvalid' : 'auth.errInvalidCredentials' });
-        return;
-      }
-      setError(
-        err?.message ? { raw: err.message } : { key: 'auth.errLoginFailed' },
-      );
+      if (me) {
+        if (typeof result.filesConnected === "boolean")
+          setDirectoryFilesReady(result.filesConnected);
+        navigate(
+          returnToFiles || result.destination === "/files"
+            ? "/files"
+            : "/dashboard",
+          { replace: true },
+        );
+      } else setError({ key: "auth.errSessionFailed" });
+    } catch (err) {
+      setPassword("");
+      setFactorCode("");
+      const status =
+        err instanceof SecurityRequestError ? err.status : undefined;
+      const code = err instanceof LoginError ? err.code : undefined;
+      if (code === "EMAIL_NOT_VERIFIED") {
+        setNeedVerify(true);
+        setError({ key: "auth.errEmailNotVerified" });
+      } else
+        setError({
+          key:
+            code === "DIRECTORY_LINK_REQUIRED"
+              ? "auth.directoryLinkRequired"
+              : status === 429
+                ? "auth.errTooManyLogin"
+                : status === 503
+                  ? "auth.directoryUnavailable"
+                  : directoryMfa
+                    ? "auth.twoFactorInvalid"
+                    : status === 401 || status === 403
+                      ? "auth.errInvalidCredentials"
+                      : "auth.errLoginFailed",
+        });
     } finally {
       setLoading(false);
     }
@@ -130,14 +162,20 @@ export default function LoginPage() {
         ? await authClient.twoFactor.verifyBackupCode({ code })
         : await authClient.twoFactor.verifyTotp({ code });
       if (res.error) {
-        setError({ key: res.error.status === 429 ? 'auth.twoFactorTooMany' : 'auth.twoFactorInvalid' });
+        setError({
+          key:
+            res.error.status === 429
+              ? "auth.twoFactorTooMany"
+              : "auth.twoFactorInvalid",
+        });
         return;
       }
       const me = await fetchMe();
-      if (me) navigate('/dashboard', { replace: true });
-      else setError({ key: 'auth.errSessionFailed' });
+      if (me)
+        navigate(returnToFiles ? "/files" : "/dashboard", { replace: true });
+      else setError({ key: "auth.errSessionFailed" });
     } catch {
-      setError({ key: 'auth.twoFactorInvalid' });
+      setError({ key: "auth.twoFactorInvalid" });
     } finally {
       setLoading(false);
     }
@@ -145,29 +183,30 @@ export default function LoginPage() {
 
   const doRegister = async (e: FormEvent) => {
     e.preventDefault();
+    if (!allowRegistration || emergency) return;
     reset();
     if (password.length < 6)
-      return setError({ key: 'auth.errPasswordTooShort' });
+      return setError({ key: "auth.errPasswordTooShort" });
     if (password !== confirm)
-      return setError({ key: 'auth.errPasswordMismatch' });
+      return setError({ key: "auth.errPasswordMismatch" });
     setLoading(true);
     try {
       const res = await authClient.signUp.email({
         email,
         password,
-        name: name.trim() || email.split('@')[0],
+        name: name.trim() || email.split("@")[0],
         callbackURL: `${window.location.origin}/login?verified=1`,
       });
       if (res.error) {
         if (res.error.status === 429) {
-          setError({ key: 'auth.errTooManyRegister' });
-        } else if ((res.error as any).code === 'USER_ALREADY_EXISTS') {
-          setError({ key: 'auth.errUserExists' });
+          setError({ key: "auth.errTooManyRegister" });
+        } else if ((res.error as any).code === "USER_ALREADY_EXISTS") {
+          setError({ key: "auth.errUserExists" });
         } else {
           setError(
             res.error.message
               ? { raw: res.error.message }
-              : { key: 'auth.errRegisterFailed' },
+              : { key: "auth.errRegisterFailed" },
           );
         }
         return;
@@ -175,16 +214,16 @@ export default function LoginPage() {
       // 已开启邮箱验证：注册后不会自动登录
       if (res.data && (res.data as any).token) {
         await fetchMe();
-        navigate('/dashboard', { replace: true });
+        navigate("/dashboard", { replace: true });
       } else {
-        setTab('login');
-        setPassword('');
-        setConfirm('');
-        setInfo({ key: 'auth.verificationSent', params: { email } });
+        setTab("login");
+        setPassword("");
+        setConfirm("");
+        setInfo({ key: "auth.verificationSent", params: { email } });
       }
     } catch (err: any) {
       setError(
-        err?.message ? { raw: err.message } : { key: 'auth.errRegisterFailed' },
+        err?.message ? { raw: err.message } : { key: "auth.errRegisterFailed" },
       );
     } finally {
       setLoading(false);
@@ -200,34 +239,100 @@ export default function LoginPage() {
       });
       setError(null);
       setNeedVerify(false);
-      setInfo({ key: 'auth.verificationResent', params: { email } });
+      setInfo({ key: "auth.verificationResent", params: { email } });
     } catch {
-      setError({ key: 'auth.errSendFailed' });
+      setError({ key: "auth.errSendFailed" });
     } finally {
       setLoading(false);
     }
   };
 
-  if (twoFactorPending) return (
-    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
-      <div className="absolute right-4 top-4"><LanguageSwitcher /></div>
-      <div className="w-full max-w-sm space-y-8">
-        <div className="flex justify-center"><BrandMark variant="stack" /></div>
-        <form onSubmit={verifyTwoFactor} className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <h1 className="text-lg font-semibold">{t('auth.twoFactorTitle')}</h1>
-          <p className="text-sm text-gray-500">{t(backupMode ? 'auth.twoFactorBackupHint' : 'auth.twoFactorTotpHint')}</p>
-          <label className="block text-sm font-medium" htmlFor="two-factor-code">{t(backupMode ? 'auth.twoFactorBackupCode' : 'auth.twoFactorCode')}</label>
-          <input id="two-factor-code" autoFocus required value={factorCode} onChange={(e) => setFactorCode(e.target.value)} inputMode={backupMode ? 'text' : 'numeric'} autoComplete="one-time-code" maxLength={backupMode ? 64 : 6} className={inputCls} />
-          {error && <p role="alert" className="text-sm text-red-600">{msg(error)}</p>}
-          <button disabled={loading} className="w-full rounded-md bg-brand-700 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-60">{loading ? t('common.processing') : t('auth.twoFactorVerify')}</button>
-          <div className="flex justify-between text-sm">
-            <button type="button" onClick={() => { setBackupMode(!backupMode); setFactorCode(''); setError(null); }} className="text-brand-700 hover:underline">{t(backupMode ? 'auth.twoFactorUseApp' : 'auth.twoFactorUseBackup')}</button>
-            <button type="button" onClick={() => { setTwoFactorPending(false); setFactorCode(''); setError(null); }} className="text-gray-500 hover:underline">{t('auth.twoFactorBack')}</button>
+  if (twoFactorPending)
+    return (
+      <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-950">
+        <div className="absolute right-4 top-4">
+          <LanguageSwitcher />
+        </div>
+        <div className="w-full max-w-sm space-y-8">
+          <div className="flex justify-center">
+            <BrandMark variant="stack" />
           </div>
-        </form>
+          <form
+            onSubmit={verifyTwoFactor}
+            className="space-y-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-800 dark:bg-gray-900"
+          >
+            <h1 className="text-lg font-semibold">
+              {t("auth.twoFactorTitle")}
+            </h1>
+            <p className="text-sm text-gray-500">
+              {t(
+                backupMode
+                  ? "auth.twoFactorBackupHint"
+                  : "auth.twoFactorTotpHint",
+              )}
+            </p>
+            <label
+              className="block text-sm font-medium"
+              htmlFor="two-factor-code"
+            >
+              {t(
+                backupMode ? "auth.twoFactorBackupCode" : "auth.twoFactorCode",
+              )}
+            </label>
+            <input
+              id="two-factor-code"
+              autoFocus
+              required
+              value={factorCode}
+              onChange={(e) => setFactorCode(e.target.value)}
+              inputMode={backupMode ? "text" : "numeric"}
+              autoComplete="one-time-code"
+              maxLength={backupMode ? 64 : 6}
+              className={inputCls}
+            />
+            {error && (
+              <p role="alert" className="text-sm text-red-600">
+                {msg(error)}
+              </p>
+            )}
+            <button
+              disabled={loading}
+              className="w-full rounded-md bg-brand-700 py-2 text-sm font-medium text-white hover:bg-brand-800 disabled:opacity-60"
+            >
+              {loading ? t("common.processing") : t("auth.twoFactorVerify")}
+            </button>
+            <div className="flex justify-between text-sm">
+              <button
+                type="button"
+                onClick={() => {
+                  setBackupMode(!backupMode);
+                  setFactorCode("");
+                  setError(null);
+                }}
+                className="text-brand-700 hover:underline"
+              >
+                {t(
+                  backupMode
+                    ? "auth.twoFactorUseApp"
+                    : "auth.twoFactorUseBackup",
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setTwoFactorPending(false);
+                  setFactorCode("");
+                  setError(null);
+                }}
+                className="text-gray-500 hover:underline"
+              >
+                {t("auth.twoFactorBack")}
+              </button>
+            </div>
+          </form>
+        </div>
       </div>
-    </div>
-  );
+    );
 
   return (
     <div className="relative min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 px-4">
@@ -242,92 +347,104 @@ export default function LoginPage() {
         </div>
 
         <div className="bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-hidden">
-          {/* 登录 / 注册 切换 */}
-          <div className="grid grid-cols-2 text-sm border-b border-gray-200 dark:border-gray-800">
-            {(['login', 'register'] as Tab[]).map((tabKey) => (
-              <button
-                key={tabKey}
-                onClick={() => {
-                  setTab(tabKey);
-                  if (tabKey === 'register') setLoginSource('local');
-                  setPassword(''); setEmail(''); setDirectoryMfa(false); setFactorCode('');
-                  reset();
-                }}
-                className={`py-3 font-medium transition ${
-                  tab === tabKey
-                    ? 'text-brand-700 border-b-2 border-brand-600'
-                    : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                }`}
-              >
-                {tabKey === 'login' ? t('auth.tabLogin') : t('auth.tabRegister')}
-              </button>
-            ))}
+          <div className="border-b border-gray-100 px-6 pt-6 pb-4 dark:border-gray-800">
+            <h1 className="text-lg font-semibold">
+              {t(
+                emergency
+                  ? "auth.emergencyTitle"
+                  : tab === "register"
+                    ? "auth.tabRegister"
+                    : "auth.tabLogin",
+              )}
+            </h1>
+            {emergency && (
+              <p className="mt-2 text-sm text-gray-500">
+                {t("auth.emergencyHint")}
+              </p>
+            )}
           </div>
 
           <form
-            onSubmit={tab === 'login' ? doLogin : doRegister}
+            onSubmit={tab === "login" ? doLogin : doRegister}
             className="p-6 space-y-4"
           >
-            {tab === 'login' && directory?.enabled && <>
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
-                {(['directory', 'local'] as const).map(source => <button key={source} type="button" aria-pressed={loginSource === source} onClick={() => { setLoginSource(source); setEmail(''); setPassword(''); setDirectoryMfa(false); setFactorCode(''); reset(); }} className={`min-h-10 rounded-md text-sm ${loginSource === source ? 'bg-white font-medium shadow-sm dark:bg-gray-700' : 'text-gray-500'}`}>{t(source === 'directory' ? 'auth.directoryLogin' : 'auth.localLogin')}</button>)}
-              </div>
-              <p className="text-sm text-gray-500">{t(loginSource === 'directory' ? 'auth.directoryHint' : 'auth.directoryLocalHint')}</p>
-            </>}
-            {tab === 'login' && provider?.enabled && <>
-              <button type="button" onClick={doOidcLogin} disabled={loading} className="min-h-11 w-full rounded-md border border-brand-600 px-3 py-2 text-sm font-medium text-brand-700 disabled:opacity-60 dark:text-brand-400">
-                {t('auth.oidcSignIn', { provider: provider.name })}
-              </button>
-              <p className="text-center text-xs text-gray-500">{t('auth.oidcLocalAlternative')}</p>
-            </>}
+            {tab === "login" && !emergency && provider?.enabled && (
+              <>
+                <button
+                  type="button"
+                  onClick={doOidcLogin}
+                  disabled={loading}
+                  className="min-h-11 w-full rounded-md border border-brand-600 px-3 py-2 text-sm font-medium text-brand-700 disabled:opacity-60 dark:text-brand-400"
+                >
+                  {t("auth.oidcSignIn", { provider: provider.name })}
+                </button>
+                <p className="text-center text-xs text-gray-500">
+                  {t("auth.oidcLocalAlternative")}
+                </p>
+              </>
+            )}
             <div>
-              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                {t(tab === 'login' && loginSource === 'directory' ? 'auth.directoryUsername' : 'auth.email')}
+              <label
+                htmlFor="login-account"
+                className="block text-sm text-gray-600 dark:text-gray-400 mb-1"
+              >
+                {t(tab === "login" ? "auth.account" : "auth.email")}
               </label>
               <input
-                type={tab === 'login' && loginSource === 'directory' ? 'text' : 'email'}
+                id="login-account"
+                type={tab === "login" ? "text" : "email"}
+                placeholder={
+                  tab === "login" ? t("auth.accountPlaceholder") : undefined
+                }
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                autoComplete={loginSource === 'directory' ? 'username' : 'email'}
+                autoComplete={tab === "login" ? "username" : "email"}
+                maxLength={254}
+                disabled={loading}
                 className={inputCls}
               />
             </div>
 
-            {tab === 'register' && (
+            {tab === "register" && (
               <div>
                 <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                  {t('auth.name')}
+                  {t("auth.name")}
                 </label>
                 <input
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder={t('auth.namePlaceholder')}
+                  placeholder={t("auth.namePlaceholder")}
                   className={inputCls}
                 />
               </div>
             )}
 
             <div>
-              <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                {t('auth.password')}
+              <label
+                htmlFor="login-password"
+                className="block text-sm text-gray-600 dark:text-gray-400 mb-1"
+              >
+                {t("auth.password")}
               </label>
               <input
+                id="login-password"
+                disabled={loading}
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
                 autoComplete={
-                  tab === 'login' ? 'current-password' : 'new-password'
+                  tab === "login" ? "current-password" : "new-password"
                 }
                 className={inputCls}
               />
             </div>
 
-            {tab === 'register' && (
+            {tab === "register" && (
               <div>
                 <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                  {t('auth.confirmPassword')}
+                  {t("auth.confirmPassword")}
                 </label>
                 <input
                   type="password"
@@ -340,8 +457,45 @@ export default function LoginPage() {
               </div>
             )}
 
-            {tab === 'login' && loginSource === 'directory' && directoryMfa && <div className="space-y-2"><label className="block text-sm">{t(backupMode ? 'auth.twoFactorBackupCode' : 'auth.twoFactorCode')}<input autoFocus required inputMode={backupMode ? 'text' : 'numeric'} autoComplete="one-time-code" pattern={backupMode ? '[A-Za-z0-9]{5}-[A-Za-z0-9]{5}' : '[0-9]{6}'} maxLength={backupMode ? 11 : 6} value={factorCode} onChange={e => setFactorCode(e.target.value)} className={inputCls} /></label><button type="button" className="text-sm text-brand-700 hover:underline" onClick={() => { setBackupMode(!backupMode); setFactorCode(''); }}>{t(backupMode ? 'auth.twoFactorUseApp' : 'auth.twoFactorUseBackup')}</button></div>}
-            {tab === 'login' && (
+            {tab === "login" && directoryMfa && (
+              <div className="space-y-2">
+                <label className="block text-sm">
+                  {t(
+                    backupMode
+                      ? "auth.twoFactorBackupCode"
+                      : "auth.twoFactorCode",
+                  )}
+                  <input
+                    autoFocus
+                    required
+                    inputMode={backupMode ? "text" : "numeric"}
+                    autoComplete="one-time-code"
+                    pattern={
+                      backupMode ? "[A-Za-z0-9]{5}-[A-Za-z0-9]{5}" : "[0-9]{6}"
+                    }
+                    maxLength={backupMode ? 11 : 6}
+                    value={factorCode}
+                    onChange={(e) => setFactorCode(e.target.value)}
+                    className={inputCls}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="text-sm text-brand-700 hover:underline"
+                  onClick={() => {
+                    setBackupMode(!backupMode);
+                    setFactorCode("");
+                  }}
+                >
+                  {t(
+                    backupMode
+                      ? "auth.twoFactorUseApp"
+                      : "auth.twoFactorUseBackup",
+                  )}
+                </button>
+              </div>
+            )}
+            {tab === "login" && (
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
                   <input
@@ -349,18 +503,24 @@ export default function LoginPage() {
                     checked={remember}
                     onChange={(e) => setRemember(e.target.checked)}
                   />
-                  {t('auth.rememberMe')}
+                  {t("auth.rememberMe")}
                 </label>
-                {loginSource === 'local' && <Link
-                  to="/forgot-password"
-                  className="text-brand-700 hover:underline"
-                >
-                  {t('auth.forgotPassword')}
-                </Link>}
+                {
+                  <Link
+                    to="/forgot-password"
+                    className="text-brand-700 hover:underline"
+                  >
+                    {t("auth.forgotPassword")}
+                  </Link>
+                }
               </div>
             )}
 
-            {error && <p className="text-sm text-red-500">{msg(error)}</p>}
+            {error && (
+              <p role="alert" className="text-sm text-red-500">
+                {msg(error)}
+              </p>
+            )}
             {info && <p className="text-sm text-green-600">{msg(info)}</p>}
             {needVerify && (
               <button
@@ -368,7 +528,7 @@ export default function LoginPage() {
                 onClick={resendVerify}
                 className="text-sm text-brand-700 hover:underline"
               >
-                {t('auth.resendVerification')}
+                {t("auth.resendVerification")}
               </button>
             )}
 
@@ -378,12 +538,53 @@ export default function LoginPage() {
               className="w-full rounded-md bg-brand-700 text-white py-2 text-sm font-medium hover:bg-brand-800 disabled:opacity-60"
             >
               {loading
-                ? t('common.processing')
-                : tab === 'login'
-                  ? t('auth.submitLogin')
-                  : t('auth.submitRegister')}
+                ? t("common.processing")
+                : tab === "login"
+                  ? t("auth.submitLogin")
+                  : t("auth.submitRegister")}
             </button>
+            {tab === "register" ? (
+              <button
+                type="button"
+                disabled={loading}
+                className="w-full text-sm text-brand-700 hover:underline"
+                onClick={() => {
+                  setTab("login");
+                  setPassword("");
+                  setConfirm("");
+                  reset();
+                }}
+              >
+                {t("auth.backToLogin")}
+              </button>
+            ) : (
+              allowRegistration &&
+              !emergency && (
+                <button
+                  type="button"
+                  disabled={loading}
+                  className="w-full text-sm text-brand-700 hover:underline"
+                  onClick={() => {
+                    setTab("register");
+                    setPassword("");
+                    setDirectoryMfa(false);
+                    reset();
+                  }}
+                >
+                  {t("auth.registerAccount")}
+                </button>
+              )
+            )}
           </form>
+        </div>
+        <div className="mt-5 text-center text-xs text-gray-500">
+          <Link
+            to={emergency ? "/login" : "/login/admin"}
+            state={returnToFiles ? { returnTo: "/files" } : undefined}
+            className="hover:text-gray-700 hover:underline dark:hover:text-gray-300"
+          >
+            {t(emergency ? "auth.backToLogin" : "auth.emergencyLink")}
+          </Link>
         </div>
       </div>
     </div>

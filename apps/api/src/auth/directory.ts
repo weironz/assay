@@ -27,7 +27,8 @@ export function directoryPlugin(db: PrismaClient): BetterAuthPlugin {
       if (attempts > 5) throw new APIError('TOO_MANY_REQUESTS', { message: '公司账号验证次数过多，请稍后重试' });
       try {
         await assertSessionEpochMigration(db);
-        const profile = await client.authenticate(ctx.body.username, ctx.body.password);
+        const target = (ctx.context as typeof ctx.context & { assayDirectoryTarget?: string }).assayDirectoryTarget;
+        const profile = target ? await client.verify(await client.profile(target), ctx.body.password) : await client.authenticate(ctx.body.username, ctx.body.password);
         const user = await resolveDirectoryIdentity(db, profile);
         if (user.twoFactorEnabled) {
           if (!ctx.body.code) {

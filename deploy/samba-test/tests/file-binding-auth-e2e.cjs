@@ -56,7 +56,7 @@ async function command(admin, action, args) {
   pass('Knowing the linked AD password cannot claim the administrator or disable its local login');
 
   const page = await company.newPage(); await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
-  await page.goto(origin + '/login'); await page.getByRole('button', { name: '公司账号', exact: true }).click();
+  await page.goto(origin + '/login');
   await page.locator('form input').first().fill(fixture.adName); await page.locator('input[type=password]').fill(fixture.adPassword); await page.locator('form button[type=submit]').click();
   await page.getByText('此公司账号已有文件访问关联。请联系管理员在“身份与访问”中明确配置登录身份关联；文件关联不会自动切换本地账号的登录方式。', { exact: true }).waitFor();
   assert.equal((await api(localContext, '/me')).id, local.id);

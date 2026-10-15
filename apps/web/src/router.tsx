@@ -26,7 +26,8 @@ import SlaPage from './pages/SlaPage';
 import PublicTicketSharePage from './pages/PublicTicketSharePage';
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <LoginPage /> },
+  { path: '/login', element: <LoginPage key="login" /> },
+  { path: '/login/admin', element: <LoginPage key="admin-login" /> },
   { path: '/forgot-password', element: <ForgotPasswordPage /> },
   { path: '/reset-password', element: <ResetPasswordPage /> },
   { path: '/share/:token', element: <PublicTicketSharePage /> },

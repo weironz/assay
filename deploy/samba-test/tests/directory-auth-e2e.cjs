@@ -36,7 +36,7 @@ async function command(page, action, args) {
 }
 async function localLogin(page, email, credential) {
   await page.goto(origin + '/login');
-  await page.getByRole('button', { name: '本地账号', exact: true }).click();
+
   await page.locator('form input').first().fill(email);
   await page.locator('input[type=password]').fill(credential);
   await page.locator('button[type=submit]').click(); await page.waitForURL('**/dashboard');
@@ -95,7 +95,7 @@ function totp(uri) {
   const employeeContext = await context(), page = await employeeContext.newPage();
   let fileChallenges = 0;
   page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/files/session') fileChallenges++; });
-  await page.goto(origin + '/login'); await page.getByRole('button', { name: '公司账号', exact: true }).waitFor();
+  await page.goto(origin + '/login'); await page.getByLabel('账号', { exact: true }).waitFor();
   await page.locator('form input').first().fill(name); await page.locator('input[type=password]').fill(password);
   signIns.push(Date.now()); await page.locator('button[type=submit]').click(); await page.waitForURL('**/files');
   const employeeMe = await api(page, 'GET', '/me');

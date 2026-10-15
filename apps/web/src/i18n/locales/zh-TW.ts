@@ -114,6 +114,15 @@ const zhTW: Resource = {
   },
 
   auth: {
+    account: "帳號",
+    accountPlaceholder: "使用者名稱或電子郵件",
+    emergencyTitle: "管理員緊急登入",
+    emergencyHint: "僅供獨立本機管理員於身分服務不可用時使用。",
+    emergencyLink: "管理員緊急登入",
+    backToLogin: "返回登入",
+    registerAccount: "註冊帳號",
+    resetDirectoryHint: "公司帳號密碼請聯絡管理員重設；本機帳號可透過電子郵件找回。",
+
     directoryLocalHint: '已關聯公司身分的員工請使用「公司帳號」登入；本機入口用於獨立的本機帳號。',
     directoryLogin: '公司帳號',
     localLogin: '本機帳號',
@@ -123,7 +132,7 @@ const zhTW: Resource = {
     directoryLinkRequired: '此公司帳號已有檔案存取關聯。請聯絡管理員在「身分與存取」中明確設定登入身分關聯；檔案關聯不會自動切換本機帳號的登入方式。',
 
     oidcSignIn: "使用 {{provider}} 登入",
-    oidcLocalAlternative: "或使用本機帳號登入",
+    oidcLocalAlternative: "或使用帳號密碼登入",
     oidcFailed: "企業登入未完成，請重試。同信箱本機帳號請先在個人設定中關聯企業帳號。",
     oidcAccountTitle: "企業帳號",
     oidcLinked: "已關聯 {{provider}}，可使用企業帳號登入。",
@@ -148,7 +157,7 @@ const zhTW: Resource = {
     verificationResent: '驗證郵件已重新寄送至 {{email}}，請收信。',
     errTooManyLogin: '登入嘗試過於頻繁，請稍後再試',
     errEmailNotVerified: '電子郵件尚未驗證，請先完成驗證',
-    errInvalidCredentials: '電子郵件或密碼錯誤',
+    errInvalidCredentials: '帳號或密碼錯誤',
     errSessionFailed: '無法取得登入工作階段',
     errLoginFailed: '登入失敗',
     errTooManyRegister: '註冊過於頻繁，請稍後再試',

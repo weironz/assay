@@ -1,15 +1,28 @@
-import { FormEvent, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { authClient } from '../lib/auth-client';
-import BrandMark from '../components/BrandMark';
-import LanguageSwitcher from '../components/LanguageSwitcher';
-import { type Msg, useMsg } from '../lib/messages';
+import { FormEvent, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { authClient } from "../lib/auth-client";
+import { loginOptions } from "../lib/unified-login";
+import BrandMark from "../components/BrandMark";
+import LanguageSwitcher from "../components/LanguageSwitcher";
+import { type Msg, useMsg } from "../lib/messages";
 
 export default function ForgotPasswordPage() {
   const { t } = useTranslation();
   const msg = useMsg();
-  const [email, setEmail] = useState('');
+  const [directoryEnabled, setDirectoryEnabled] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void loginOptions()
+      .then((value) => {
+        if (active) setDirectoryEnabled(value.directoryEnabled);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+  const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [error, setError] = useState<Msg>(null);
   const [loading, setLoading] = useState(false);
@@ -26,17 +39,17 @@ export default function ForgotPasswordPage() {
       if (res.error) {
         setError(
           res.error.status === 429
-            ? { key: 'forgot.errTooMany' }
+            ? { key: "forgot.errTooMany" }
             : res.error.message
               ? { raw: res.error.message }
-              : { key: 'forgot.errFailed' },
+              : { key: "forgot.errFailed" },
         );
         return;
       }
       setSent(true);
     } catch (err: any) {
       setError(
-        err?.message ? { raw: err.message } : { key: 'forgot.errFailed' },
+        err?.message ? { raw: err.message } : { key: "forgot.errFailed" },
       );
     } finally {
       setLoading(false);
@@ -54,7 +67,7 @@ export default function ForgotPasswordPage() {
           <BrandMark variant="stack" />
         </div>
         <h2 className="mb-4 text-center text-base font-medium text-gray-800 dark:text-gray-200">
-          {t('forgot.title')}
+          {t("forgot.title")}
         </h2>
         <form
           onSubmit={submit}
@@ -63,19 +76,24 @@ export default function ForgotPasswordPage() {
           {sent ? (
             <>
               <p className="text-sm text-green-600">
-                {t('forgot.sent', { email })}
+                {t("forgot.sent", { email })}
               </p>
-              <p className="text-xs text-gray-400">{t('forgot.hint')}</p>
+              <p className="text-xs text-gray-400">{t("forgot.hint")}</p>
             </>
           ) : (
             <>
-              <p className="text-sm text-gray-500">{t('forgot.intro')}</p>
+              <p className="text-sm text-gray-500">{t("forgot.intro")}</p>
+              {directoryEnabled && (
+                <p className="text-xs text-gray-500">
+                  {t("auth.resetDirectoryHint")}
+                </p>
+              )}
               <input
                 type="email"
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder={t('forgot.emailPlaceholder')}
+                placeholder={t("forgot.emailPlaceholder")}
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm"
               />
               {error && <p className="text-sm text-red-500">{msg(error)}</p>}
@@ -84,13 +102,16 @@ export default function ForgotPasswordPage() {
                 disabled={loading}
                 className="w-full rounded-md bg-brand-700 text-white py-2 text-sm font-medium hover:bg-brand-800 disabled:opacity-60"
               >
-                {loading ? t('forgot.sending') : t('forgot.send')}
+                {loading ? t("forgot.sending") : t("forgot.send")}
               </button>
             </>
           )}
           <div className="text-center">
-            <Link to="/login" className="text-sm text-brand-700 hover:underline">
-              {t('forgot.backToLogin')}
+            <Link
+              to="/login"
+              className="text-sm text-brand-700 hover:underline"
+            >
+              {t("forgot.backToLogin")}
             </Link>
           </div>
         </form>
