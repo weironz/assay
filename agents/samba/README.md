@@ -36,6 +36,8 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 
 健康检查 `GET /health` 不含凭据或资源数据。其余接口需要 `Authorization: Bearer <machine-token>`。
 
+失败结果包含安全说明 `error`，以及可选的稳定分类 `error_code`。密码策略拒绝分为 `AD_PASSWORD_COMPLEXITY`、`AD_PASSWORD_HISTORY`、`AD_PASSWORD_TOO_SHORT`、`AD_PASSWORD_TOO_RECENT`；域控仅说明一般密码限制时为 `AD_PASSWORD_POLICY`，无法确认原因的密码更改拒绝为 `AD_PASSWORD_REJECTED`。LDAP 53 本身不被当作复杂度证明。权限、服务身份验证和连接故障分别分类；原始 LDAP 诊断不写入操作结果或返回 Web。Assay 轮询后按分类显示固定中文说明，失败不自动重放。
+
 | 接口 | 功能 |
 |---|---|
 | `GET /v1/snapshot` | 员工、组、受管共享及只读状态 |

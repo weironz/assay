@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import StepUpDialog from '../../components/StepUpDialog';
 import { stepUpHeaders } from '../../lib/security-step-up';
+import { OperationError } from '../../lib/operation-error';
 export default function SambaPassword() {
   const passwordSource = useAuth(s => s.user?.passwordSource);
   const [identity, setIdentity] = useState<{ accountName: string; domain: string } | null>(null);
@@ -16,7 +17,7 @@ export default function SambaPassword() {
     {message && <p role="status" className="text-sm">{message}</p>}
     {challenge && <StepUpDialog purpose="account" title="修改公司 AD 密码" onCancel={() => setChallenge(false)} onAuthorized={async token => {
       try { const response = await api.post('/samba/me/password', { requestId: crypto.randomUUID(), old_password: old, password: next }, { headers: stepUpHeaders(token) }); await awaitOperation(response.data, true); setOld(''); setNext(''); setConfirmation(''); setMessage('公司 AD 密码已修改'); }
-      catch (e: any) { setMessage(e.response?.data?.message || e.message || '修改失败，请核对旧密码与公司密码策略'); throw e; }
+      catch (e: any) { const failure = e.response?.data?.code ? new OperationError(e.response.data.code) : e; setMessage(failure instanceof OperationError ? failure.message : e.response?.data?.message || e.message || '修改失败，请核对旧密码与公司密码策略'); throw failure; }
     }} />}
   </section>;
 }

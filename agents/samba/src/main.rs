@@ -361,7 +361,7 @@ async fn command(State(a): State<App>, Json(cmd): Json<Command>) -> Response {
                             json!({"request_id":cmd.request_id,"state":"succeeded","result":v})
                         }
                         Ok(Err(e)) => {
-                            json!({"request_id":cmd.request_id,"state":if e.is::<inheritance::PartialAclUpdate>() {"uncertain"} else {"failed"},"error":safe_error(&e)})
+                            json!({"request_id":cmd.request_id,"state":if e.is::<inheritance::PartialAclUpdate>() {"uncertain"} else {"failed"},"error":safe_error(&e),"error_code":error_code(&e)})
                         }
                         Err(_) => {
                             json!({"request_id":cmd.request_id,"state":"uncertain","error":"operation timed out; inspect resource before retrying"})
@@ -398,6 +398,9 @@ async fn operation(State(a): State<App>, Path(id): Path<String>) -> Response {
     reply(result)
 }
 fn safe_error(e: &anyhow::Error) -> String {
+    if let Some(error) = e.downcast_ref::<ad::AdError>() {
+        return error.to_string();
+    }
     if let Some(error) = e.downcast_ref::<smb::Error>() {
         return match error {
             smb::Error::ReceivedErrorMessage(code, _)
@@ -441,12 +444,27 @@ fn safe_error(e: &anyhow::Error) -> String {
         "operation failed; verify directory policy, resource state and connection".to_owned()
     }
 }
+fn error_code(e: &anyhow::Error) -> Option<&'static str> {
+    if let Some(error) = e.downcast_ref::<ad::AdError>() {
+        return Some(error.code);
+    }
+    match e.downcast_ref::<ldap3::LdapError>() {
+        Some(
+            ldap3::LdapError::Io { .. }
+            | ldap3::LdapError::Timeout { .. }
+            | ldap3::LdapError::OpSend { .. }
+            | ldap3::LdapError::ResultRecv { .. }
+            | ldap3::LdapError::EndOfStream,
+        ) => Some("AD_CONNECTION_FAILED"),
+        _ => None,
+    }
+}
 fn reply(r: Result<Value>) -> Response {
     match r {
         Ok(v) => Json(v).into_response(),
         Err(e) => (
             StatusCode::BAD_REQUEST,
-            Json(json!({"error":safe_error(&e)})),
+            Json(json!({"error":safe_error(&e),"error_code":error_code(&e)})),
         )
             .into_response(),
     }

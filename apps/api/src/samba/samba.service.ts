@@ -83,7 +83,7 @@ export class SambaService {
       throw e;
     }
     const op = await this.prisma.sambaOperation.update({ where: { id: requestId }, data: { state: result.state, result } });
-    if (!['succeeded', 'queued', 'running'].includes(result.state)) throw new BadRequestException({ message: result.error || '操作未完成', operationId: requestId, state: result.state });
+    if (!['succeeded', 'queued', 'running'].includes(result.state)) throw new BadRequestException({ message: result.error || '操作未完成', code: result.error_code, operationId: requestId, state: result.state });
     return op;
   }
   async command(user: AuthUser, input: unknown) {

@@ -326,7 +326,7 @@ impl Directory {
                 .await?,
         )?;
         // Incomplete provisioning remains disabled and can be repaired explicitly.
-        check(
+        check_password(
             self.ldap
                 .modify(
                     &dn,
@@ -377,7 +377,7 @@ impl Directory {
     pub async fn reset_password(&mut self, id: &str, pwd: &str) -> Result<Value> {
         let e = self.object(id, false).await?;
         let pwd = password(pwd)?;
-        check(
+        check_password(
             self.ldap
                 .modify(
                     &e.dn,
@@ -394,9 +394,17 @@ impl Directory {
         let e = self.object(id, false).await?;
         let old_encoded = password(old)?;
         let new = password(new)?;
-        check(self.ldap.simple_bind(&e.dn, old).await?)?;
+        let bound = self.ldap.simple_bind(&e.dn, old).await?;
+        if bound.rc == 49 {
+            return Err(AdError {
+                code: "AD_CURRENT_PASSWORD_INVALID",
+                ldap_code: 49,
+            }
+            .into());
+        }
+        check(bound)?;
         let old = old_encoded;
-        check(
+        check_password(
             self.ldap
                 .modify(
                     &e.dn,
@@ -541,16 +549,119 @@ impl Directory {
         Ok(s)
     }
 }
+#[derive(Debug)]
+pub struct AdError {
+    pub code: &'static str,
+    ldap_code: u32,
+}
+impl std::fmt::Display for AdError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "AD request rejected ({}, LDAP code {})",
+            self.code, self.ldap_code
+        )
+    }
+}
+impl std::error::Error for AdError {}
+
+fn check_password(r: ldap3::LdapResult) -> Result<()> {
+    if r.rc == 0 {
+        return Ok(());
+    }
+    if matches!(r.rc, 19 | 53) {
+        // Read diagnostics only to classify a known condition. Never retain or
+        // return diagnostic text, which may contain account or protocol data.
+        let diagnostic = r.text.to_ascii_lowercase();
+        let restriction = Regex::new(r"\b(?:0000052d|c000006c)\b")
+            .unwrap()
+            .is_match(&diagnostic);
+        let code = if diagnostic.contains("complexity") {
+            "AD_PASSWORD_COMPLEXITY"
+        } else if diagnostic.contains("password history") || diagnostic.contains("recently used") {
+            "AD_PASSWORD_HISTORY"
+        } else if diagnostic.contains("too short") {
+            "AD_PASSWORD_TOO_SHORT"
+        } else if diagnostic.contains("too young") || diagnostic.contains("minimum password age") {
+            "AD_PASSWORD_TOO_RECENT"
+        } else if restriction {
+            "AD_PASSWORD_POLICY"
+        } else {
+            // Code 53 alone can also mean a permissions/channel restriction.
+            "AD_PASSWORD_REJECTED"
+        };
+        return Err(AdError {
+            code,
+            ldap_code: r.rc,
+        }
+        .into());
+    }
+    check(r)
+}
+
 fn check(r: ldap3::LdapResult) -> Result<()> {
     if r.rc == 0 {
         Ok(())
     } else {
-        Err(anyhow!("AD rejected operation (LDAP code {})", r.rc))
+        let code = match r.rc {
+            8 | 13 => "AD_SECURE_CHANNEL_REQUIRED",
+            49 => "AD_AUTHENTICATION_FAILED",
+            50 => "AD_PERMISSION_DENIED",
+            51 | 52 => "AD_UNAVAILABLE",
+            _ => "AD_OPERATION_REJECTED",
+        };
+        Err(AdError {
+            code,
+            ldap_code: r.rc,
+        }
+        .into())
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn ldap_result(rc: u32, text: &str) -> ldap3::LdapResult {
+        ldap3::LdapResult {
+            rc,
+            matched: String::new(),
+            text: text.into(),
+            refs: vec![],
+            ctrls: vec![],
+        }
+    }
+    #[test]
+    fn password_rejections_keep_a_safe_reason_without_diagnostics() {
+        for (rc, diagnostic, expected) in [
+            (
+                53,
+                "0000052D: password does not meet complexity criteria! secret=DoNotEcho9!",
+                "AD_PASSWORD_COMPLEXITY",
+            ),
+            (
+                19,
+                "0000052D: password history restriction",
+                "AD_PASSWORD_HISTORY",
+            ),
+            (53, "0000052d: password too short", "AD_PASSWORD_TOO_SHORT"),
+            (
+                19,
+                "0000052D: minimum password age",
+                "AD_PASSWORD_TOO_RECENT",
+            ),
+            (53, "0000052D: password restriction", "AD_PASSWORD_POLICY"),
+            (19, "C000006C", "AD_PASSWORD_POLICY"),
+            (53, "another directory restriction", "AD_PASSWORD_REJECTED"),
+            (50, "private directory diagnostics", "AD_PERMISSION_DENIED"),
+            (13, "private TLS diagnostics", "AD_SECURE_CHANNEL_REQUIRED"),
+            (52, "private server diagnostics", "AD_UNAVAILABLE"),
+        ] {
+            let error = check_password(ldap_result(rc, diagnostic)).unwrap_err();
+            assert_eq!(error.downcast_ref::<AdError>().unwrap().code, expected);
+            assert!(!error.to_string().contains(diagnostic));
+            assert!(!format!("{error:?}").contains("DoNotEcho9!"));
+        }
+        assert!(check_password(ldap_result(0, "")).is_ok());
+    }
     #[test]
     fn rejects_injection() {
         assert!(name("alice)(uid=*)").is_err());

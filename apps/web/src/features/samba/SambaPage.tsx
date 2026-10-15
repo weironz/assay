@@ -5,6 +5,7 @@ import { useAuth } from '../../stores/auth';
 import StepUpDialog from '../../components/StepUpDialog';
 import { stepUpHeaders } from '../../lib/security-step-up';
 import { awaitOperation } from './operations';
+import { OperationError } from '../../lib/operation-error';
 import {
   Badge,
   DataTable,
@@ -80,6 +81,7 @@ const actions: Record<string, string> = {
   'identity.unbind': '解除账号关联',
 };
 function errorMessage(e: unknown) {
+  if (e instanceof OperationError) return e.message;
   const value = e as {
     response?: { data?: { message?: string } };
     message?: string;
@@ -199,8 +201,10 @@ export default function SambaPage() {
       setError('');
       await load();
     } catch (e) {
-      setError(errorMessage(e));
-      throw e;
+      const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
+      const failure = code ? new OperationError(code) : e;
+      setError(errorMessage(failure));
+      throw failure;
     }
   };
   if (

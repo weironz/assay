@@ -1,5 +1,6 @@
 import { api } from '../../lib/api';
-type Operation = { id: string; state: string; result?: { error?: string } };
+import { OperationError } from '../../lib/operation-error';
+type Operation = { id: string; state: string; result?: { error?: string; error_code?: string | null } };
 export async function awaitOperation(operation: Operation, own = false) {
   let current = operation;
   const started = Date.now();
@@ -8,6 +9,6 @@ export async function awaitOperation(operation: Operation, own = false) {
     await new Promise(resolve => setTimeout(resolve, 500));
     current = (await api.get(`/samba/${own ? 'me/' : ''}operations/${current.id}`)).data;
   }
-  if (current.state !== 'succeeded') throw new Error(current.result?.error || '执行结果需要核对，请查看操作记录');
+  if (current.state !== 'succeeded') throw new OperationError(current.result?.error_code);
   return current;
 }
