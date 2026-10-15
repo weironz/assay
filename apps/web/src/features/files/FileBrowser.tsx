@@ -2,14 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { button, input } from "../samba/components";
 import { FileIcon, Icon } from "./icons";
 
-export interface FileEntry {
-  name: string;
-  directory: boolean;
-  size: number;
-  modified: number;
-  blocked: boolean;
-  shared?: boolean;
-}
+import type { FileEntry } from "./storage";
+export type { FileEntry } from "./storage";
+
 export const fileSize = (bytes: number) =>
   bytes < 1024
     ? `${bytes} B`
@@ -37,6 +32,9 @@ export default function FileBrowser({
   open,
   command,
   download,
+  batchCommand,
+  upload,
+  dropError,
 }: {
   items: FileEntry[];
   root: boolean;
@@ -46,6 +44,9 @@ export default function FileBrowser({
   open: (entry: FileEntry) => void;
   command: (action: string, entry: FileEntry) => void;
   download: (entry: FileEntry) => string;
+  batchCommand: (action: "move" | "delete", entries: FileEntry[]) => void;
+  upload: (files: File[]) => void;
+  dropError: (message: string) => void;
 }) {
   const [view, setView] = useState<"grid" | "list">(() => {
     try {
@@ -58,6 +59,9 @@ export default function FileBrowser({
   const [sort, setSort] = useState<Sort>("name");
   const [descending, setDescending] = useState(false);
   const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
   const [menu, setMenu] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState({ left: 0, top: 0 });
   const menuRef = useRef<HTMLDivElement>(null);
@@ -121,7 +125,42 @@ export default function FileBrowser({
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const current = Math.min(page, pages);
   const visible = filtered.slice((current - 1) * pageSize, current * pageSize);
+  const eligible = visible.filter((entry) => !entry.blocked && !entry.shared);
+  const chosen = items.filter(
+    (entry) => selected.has(entry.name) && !entry.blocked && !entry.shared,
+  );
+  const allSelected =
+    eligible.length > 0 && eligible.every((entry) => selected.has(entry.name));
+  const select = (entry: FileEntry) => (
+    <input
+      type="checkbox"
+      aria-label={`选择：${entry.name}`}
+      className="h-4 w-4 shrink-0 accent-brand-700"
+      checked={selected.has(entry.name)}
+      disabled={busy || loading || entry.blocked}
+      onChange={() =>
+        setSelected((previous) => {
+          const next = new Set(previous);
+          if (next.has(entry.name)) next.delete(entry.name);
+          else next.add(entry.name);
+          return next;
+        })
+      }
+    />
+  );
+  useEffect(() => {
+    // Refreshes may remove or rename entries. Never carry a stale selection into a write.
+    setSelected(
+      (previous) =>
+        new Set(
+          [...previous].filter((name) =>
+            items.some((entry) => entry.name === name && !entry.blocked),
+          ),
+        ),
+    );
+  }, [items]);
   const changeSort = (value: Sort) => {
+    setSelected(new Set());
     setDescending(sort === value ? !descending : value === "modified");
     setSort(value);
     setMenu(null);
@@ -227,8 +266,52 @@ export default function FileBrowser({
   return (
     <section
       aria-label={root ? "共享目录浏览器" : "文件浏览器"}
-      className="min-w-0 rounded-2xl border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
+      className={`relative min-w-0 rounded-2xl border bg-white dark:bg-gray-900 ${dragging ? "border-brand-500 ring-2 ring-brand-500" : "border-gray-200 dark:border-gray-800"}`}
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && !menu) setSelected(new Set());
+      }}
+      onDragEnter={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        dragDepth.current++;
+        setDragging(!root && !busy && !loading);
+      }}
+      onDragOver={(event) => {
+        if (!event.dataTransfer.types.includes("Files")) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect =
+          !root && !busy && !loading ? "copy" : "none";
+      }}
+      onDragLeave={(event) => {
+        event.preventDefault();
+        if (--dragDepth.current <= 0) {
+          dragDepth.current = 0;
+          setDragging(false);
+        }
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        if (root || busy || loading) {
+          dropError("请先打开一个共享目录，等待当前操作完成后再上传。");
+          return;
+        }
+        const entries = Array.from(event.dataTransfer.items).filter(
+          (item) => item.kind === "file",
+        );
+        if (entries.some((item) => item.webkitGetAsEntry?.()?.isDirectory)) {
+          dropError("暂不支持拖入整个文件夹，请选择文件上传。");
+          return;
+        }
+        upload(Array.from(event.dataTransfer.files));
+      }}
     >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-2xl bg-brand-50/95 p-6 text-center font-medium text-brand-800 dark:bg-gray-900/95 dark:text-brand-300">
+          松开以上传到当前文件夹
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 p-4 sm:px-6 dark:border-gray-800">
         <label className="relative w-full min-w-0 sm:w-auto sm:flex-1 sm:max-w-80">
           <span className="sr-only">
@@ -245,6 +328,7 @@ export default function FileBrowser({
             value={query}
             onChange={(e) => {
               setQuery(e.target.value);
+              setSelected(new Set());
               setPage(1);
               setMenu(null);
             }}
@@ -255,6 +339,7 @@ export default function FileBrowser({
               className="absolute right-1 top-1 flex h-9 w-9 items-center justify-center rounded-lg text-gray-500"
               onClick={() => {
                 setQuery("");
+                setSelected(new Set());
                 setPage(1);
               }}
             >
@@ -286,6 +371,60 @@ export default function FileBrowser({
           </div>
         </div>
       </div>
+      {!root && (
+        <div className="flex flex-wrap items-center gap-3 border-b border-gray-100 px-4 py-3 text-sm sm:px-6 dark:border-gray-800">
+          <label className="inline-flex min-h-10 cursor-pointer items-center gap-2">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-brand-700"
+              aria-label="选择本页项目"
+              checked={allSelected}
+              disabled={busy || loading || !eligible.length}
+              ref={(node) => {
+                if (node)
+                  node.indeterminate = !allSelected && chosen.length > 0;
+              }}
+              onChange={() =>
+                setSelected(
+                  allSelected
+                    ? new Set()
+                    : new Set(eligible.map((entry) => entry.name)),
+                )
+              }
+            />
+            {chosen.length ? `已选择 ${chosen.length} 项` : "选择本页"}
+          </label>
+          {chosen.length > 0 ? (
+            <>
+              <button
+                className={button}
+                disabled={busy || loading}
+                onClick={() => batchCommand("move", chosen)}
+              >
+                <Icon name="move" />
+                移动所选
+              </button>
+              <button
+                className={button + " text-red-600 dark:text-red-400"}
+                disabled={busy || loading}
+                onClick={() => batchCommand("delete", chosen)}
+              >
+                <Icon name="trash" />
+                删除所选
+              </button>
+              <button
+                className="min-h-10 px-2 text-gray-500"
+                disabled={busy}
+                onClick={() => setSelected(new Set())}
+              >
+                取消选择
+              </button>
+            </>
+          ) : (
+            <span className="text-xs text-gray-500">可拖入多个文件上传</span>
+          )}
+        </div>
+      )}
       <div aria-busy={loading} className="min-h-80 p-4 sm:p-6">
         {loading ? (
           <div
@@ -328,8 +467,13 @@ export default function FileBrowser({
               {visible.map((entry) => (
                 <li
                   key={entry.name}
-                  className="group min-w-0 rounded-xl border border-transparent transition hover:border-gray-200 dark:hover:border-gray-700"
+                  className={`group relative min-w-0 rounded-xl border transition hover:border-gray-200 dark:hover:border-gray-700 ${selected.has(entry.name) ? "border-brand-500 bg-brand-50/40 dark:bg-brand-950/20" : "border-transparent"}`}
                 >
+                  {!root && (
+                    <label className="absolute left-2 top-2 z-10 flex h-8 w-8 items-center justify-center rounded-md bg-white/90 dark:bg-gray-900/90">
+                      {select(entry)}
+                    </label>
+                  )}
                   <button
                     className="flex aspect-[1.6] w-full items-center justify-center rounded-xl bg-gray-50 transition hover:bg-blue-50 disabled:cursor-default dark:bg-gray-800/60 dark:hover:bg-gray-800"
                     aria-label={
@@ -431,37 +575,40 @@ export default function FileBrowser({
                 {visible.map((entry) => (
                   <tr
                     key={entry.name}
-                    className="border-b border-gray-100 last:border-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/40"
+                    className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/40 ${selected.has(entry.name) ? "bg-brand-50/60 dark:bg-brand-950/30" : ""}`}
                   >
                     <td className="py-3 pr-2">
-                      <button
-                        className="flex w-full min-w-0 items-center gap-3 text-left disabled:cursor-default disabled:opacity-50"
-                        aria-label={
-                          entry.directory
-                            ? `打开文件夹：${entry.name}`
-                            : `下载文件：${entry.name}`
-                        }
-                        disabled={busy || entry.blocked}
-                        onClick={() => open(entry)}
-                      >
-                        <FileIcon
-                          name={entry.name}
-                          directory={entry.directory}
-                          shared={entry.shared}
-                          className="h-10 w-11 shrink-0"
-                        />
-                        <span className="min-w-0">
-                          <span
-                            className="block truncate font-medium"
-                            title={entry.name}
-                          >
-                            {entry.name}
+                      <div className="flex min-w-0 items-center gap-3">
+                        {!root && select(entry)}
+                        <button
+                          className="flex w-full min-w-0 items-center gap-3 text-left disabled:cursor-default disabled:opacity-50"
+                          aria-label={
+                            entry.directory
+                              ? `打开文件夹：${entry.name}`
+                              : `下载文件：${entry.name}`
+                          }
+                          disabled={busy || entry.blocked}
+                          onClick={() => open(entry)}
+                        >
+                          <FileIcon
+                            name={entry.name}
+                            directory={entry.directory}
+                            shared={entry.shared}
+                            className="h-10 w-11 shrink-0"
+                          />
+                          <span className="min-w-0">
+                            <span
+                              className="block truncate font-medium"
+                              title={entry.name}
+                            >
+                              {entry.name}
+                            </span>
+                            <span className="mt-1 block truncate text-xs text-gray-500">
+                              {description(entry)}
+                            </span>
                           </span>
-                          <span className="mt-1 block truncate text-xs text-gray-500">
-                            {description(entry)}
-                          </span>
-                        </span>
-                      </button>
+                        </button>
+                      </div>
                     </td>
                     <td className="hidden py-3 text-xs text-gray-500 lg:table-cell">
                       {entry.modified > 0 ? date(entry.modified) : ""}
@@ -490,6 +637,7 @@ export default function FileBrowser({
               disabled={current === 1}
               onClick={() => {
                 setPage(current - 1);
+                setSelected(new Set());
                 setMenu(null);
               }}
             >
@@ -503,6 +651,7 @@ export default function FileBrowser({
               disabled={current === pages}
               onClick={() => {
                 setPage(current + 1);
+                setSelected(new Set());
                 setMenu(null);
               }}
             >

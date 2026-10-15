@@ -3,9 +3,23 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { api, apiOrigin } from "../../lib/api";
+import {
+  storage,
+  fileError,
+  sessionLost,
+  joinPath as join,
+  type FileStatus as Status,
+} from "./storage";
+import {
+  UploadQueue,
+  runBatch,
+  type BatchResult,
+  type Transfer,
+} from "./transfers";
+import UploadPanel from "./UploadPanel";
 import {
   Badge,
   EditorDialog,
@@ -21,17 +35,6 @@ import { signOut } from "../../lib/auth-client";
 import { useAuth } from "../../stores/auth";
 import { useNavigate } from "react-router-dom";
 
-interface Status {
-  connected: boolean;
-  identity: { accountName: string; domain: string } | null;
-  shares?: string[];
-  expiresAt?: number;
-  followsWebSession?: boolean;
-  reconnectWithCompanyLogin?: boolean;
-  maxFileBytes?: number;
-}
-
-const join = (path: string, name: string) => (path ? `${path}/${name}` : name);
 export default function FilesPage() {
   const navigateTo = useNavigate();
   const clearLogin = useAuth((s) => s.clear);
@@ -48,17 +51,21 @@ export default function FilesPage() {
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [progress, setProgress] = useState<number | null>(null);
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [batch, setBatch] = useState<{
+    share: string;
+    path: string;
+    entries: FileEntry[];
+  } | null>(null);
   const [editor, setEditor] = useState<Editor | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
-  const uploadAbort = useRef<AbortController | null>(null);
+  const batchAbort = useRef<AbortController | null>(null);
   const browseAbort = useRef<AbortController | null>(null);
   const companyMode =
     companyAccount || status?.reconnectWithCompanyLogin === true;
   const fail = useCallback(
     (e: any) => {
-      const message =
-        e.response?.data?.message || "请求未完成，请刷新核对文件状态后再试。";
+      const message = fileError(e);
       setError(
         e.response?.status === 410 && companyMode
           ? ""
@@ -77,7 +84,7 @@ export default function FilesPage() {
   const refreshStatus = useCallback(async () => {
     setCheckingStatus(true);
     try {
-      const { data } = await api.get<Status>("/files/status");
+      const data = await storage.status();
       setStatus(data);
       setError("");
       setShare((s) => (data.shares?.includes(s) ? s : ""));
@@ -99,11 +106,8 @@ export default function FilesPage() {
     setLoading(true);
     setEntries([]);
     try {
-      const { data } = await api.get("/files/list", {
-        params: { share, path },
-        signal: controller.signal,
-      });
-      if (!controller.signal.aborted) setEntries(data.entries);
+      const data = await storage.list({ share, path }, controller.signal);
+      if (!controller.signal.aborted) setEntries(data);
     } catch (e) {
       if (!controller.signal.aborted) {
         setEntries([]);
@@ -115,7 +119,6 @@ export default function FilesPage() {
   }, [status?.connected, share, path, fail]);
   useEffect(() => {
     void refreshStatus();
-    return () => uploadAbort.current?.abort();
   }, [refreshStatus]);
   useEffect(() => {
     void refresh();
@@ -185,7 +188,7 @@ export default function FilesPage() {
     setError("");
     setNotice("");
     try {
-      const { data } = await api.post<Status>("/files/session", { password });
+      const data = await storage.connect(password);
       setStatus(data);
       setShare("");
       setPath("");
@@ -199,9 +202,9 @@ export default function FilesPage() {
   const disconnect = async () => {
     setBusy(true);
     setError("");
-    uploadAbort.current?.abort();
+    queue.cancelAll();
     try {
-      await api.delete("/files/session");
+      await storage.disconnect();
       setStatus((s) => (s ? { ...s, connected: false } : s));
       setEntries([]);
     } catch (e) {
@@ -210,42 +213,83 @@ export default function FilesPage() {
       setBusy(false);
     }
   };
-  const upload = async (file?: File) => {
-    if (!file) return;
-    if (file.size > (status?.maxFileBytes || 0)) {
-      setError("文件超过上传大小限制。");
-      return;
-    }
-    setBusy(true);
-    setError("");
+  // Queue callbacks always use the current directory/session, while each task retains its original destination.
+  const settled = useRef<(task: Transfer, error?: unknown) => void>(() => {});
+  settled.current = (task, error) => {
+    if (sessionLost(error)) fail(error);
+    if (task.state === "done") setNotice(`已上传 ${task.name}`);
+    if (
+      task.target.share === share &&
+      task.target.path.split("/").slice(0, -1).join("/") === path
+    )
+      void refresh();
+  };
+  const [queue] = useState(
+    () =>
+      new UploadQueue({
+        upload: storage.upload,
+        error: fileError,
+        fatal: sessionLost,
+        settled: (task, error) => settled.current(task, error),
+      }),
+  );
+  const transfers = useSyncExternalStore(queue.subscribe, queue.snapshot);
+  const uploading = transfers.some(
+    (task) => task.state === "queued" || task.state === "uploading",
+  );
+  useEffect(() => {
+    queue.resume();
+    return () => {
+      queue.dispose();
+      batchAbort.current?.abort();
+    };
+  }, [queue]);
+  useEffect(() => {
+    if (status && !status.connected) queue.cancelAll();
+  }, [status?.connected, queue]);
+  useEffect(() => {
+    if (!uploading) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [uploading]);
+  const upload = (files: File[]) => {
+    if (!status?.connected || !share || busy) return;
     setNotice("");
-    setProgress(0);
-    const controller = new AbortController();
-    uploadAbort.current = controller;
-    try {
-      await api.put("/files/content", file, {
-        params: { share, path: join(path, file.name) },
-        headers: { "Content-Type": "application/octet-stream" },
-        signal: controller.signal,
-        onUploadProgress: (event) =>
-          setProgress(
-            event.total ? Math.round((event.loaded * 100) / event.total) : 0,
-          ),
-      });
-      setNotice(`已上传 ${file.name}`);
-    } catch (e) {
-      if (controller.signal.aborted)
-        setError("上传已取消，临时文件将清理。请刷新确认后再试。");
-      else fail(e);
-    } finally {
-      setProgress(null);
-      setBusy(false);
-      uploadAbort.current = null;
-      if (uploadRef.current) uploadRef.current.value = "";
-      await refresh();
-    }
+    setError(
+      queue.enqueue(files, { share, path }, status.maxFileBytes || 0) || "",
+    );
+    if (uploadRef.current) uploadRef.current.value = "";
+  };
+  const openBatch = (action: "move" | "delete", selected: FileEntry[]) => {
+    if (!selected.length || busy) return;
+    setBatch({ share, path, entries: selected });
+    setEditor({
+      action: `batch-${action}`,
+      title: action === "delete" ? "批量删除" : "批量移动",
+      description:
+        action === "delete"
+          ? `确认删除选中的 ${selected.length} 项？非空文件夹不会递归删除。各项独立执行，部分失败时不会回滚或自动重试。`
+          : `将选中的 ${selected.length} 项移动到当前共享目录内的目标文件夹。文件夹必须已存在，留空表示共享根目录；同名文件不会覆盖。`,
+      values: { destination: path },
+      fields:
+        action === "delete"
+          ? []
+          : [
+              {
+                name: "destination",
+                label: "目标文件夹路径",
+                maxLength: 4096,
+                optional: true,
+              },
+            ],
+    });
   };
   const openCommand = (action: string, entry?: FileEntry) => {
+    setBatch(null);
     setEditor({
       action,
       title:
@@ -280,19 +324,70 @@ export default function FilesPage() {
     e.preventDefault();
     if (!editor || busy) return;
     const c = editor;
+    setEditor({ ...c, error: undefined });
     setBusy(true);
     setError("");
     setNotice("");
     try {
       const destination = String(c.values.destination || "");
       if (c.action === "mkdir" && destination.includes("/")) {
-        setError("文件夹名称不能包含路径分隔符。");
+        setEditor({ ...c, error: "文件夹名称不能包含路径分隔符。" });
         return;
       }
-      await api.post("/files/commands", {
-        action: c.action,
+      if (c.action.startsWith("batch-") && batch) {
+        const action = c.action === "batch-move" ? "move" : "delete";
+        if (
+          action === "move" &&
+          (destination.startsWith("/") ||
+            destination.endsWith("/") ||
+            destination
+              .split("/")
+              .some((part) => part === "." || part === ".."))
+        ) {
+          setEditor({
+            ...c,
+            error: "请填写共享目录内的相对文件夹路径，不要以斜杠开头或结尾。",
+          });
+          return;
+        }
+        setBatchResults([]);
+        const controller = new AbortController();
+        batchAbort.current = controller;
+        await runBatch(
+          batch.entries,
+          (entry) =>
+            storage.command({
+              action,
+              share: batch.share,
+              path: join(batch.path, entry.name),
+              ...(action === "move"
+                ? { destination: join(destination, entry.name) }
+                : {}),
+            }),
+          fileError,
+          (e) => {
+            if (sessionLost(e)) {
+              fail(e);
+              return true;
+            }
+            return false;
+          },
+          setBatchResults,
+          controller.signal,
+        );
+        batchAbort.current = null;
+        setEditor(null);
+        setBatch(null);
+        await refresh();
+        return;
+      }
+      await storage.command({
+        action: c.action as "mkdir" | "move" | "delete",
         share,
-        path: c.action === "mkdir" ? join(path, destination) : c.values.path,
+        path:
+          c.action === "mkdir"
+            ? join(path, destination)
+            : String(c.values.path),
         ...(c.action === "move" ? { destination } : {}),
       });
       setEditor(null);
@@ -300,6 +395,7 @@ export default function FilesPage() {
       await refresh();
     } catch (e) {
       fail(e);
+      setEditor({ ...c, error: fileError(e) });
     } finally {
       setBusy(false);
     }
@@ -319,7 +415,7 @@ export default function FilesPage() {
     setNotice("");
   };
   const download = (entry: FileEntry) =>
-    `${apiOrigin}/api/files/content?${new URLSearchParams({ share, path: join(path, entry.name) })}`;
+    storage.download({ share, path: join(path, entry.name) });
   const open = (entry: FileEntry) => {
     if (entry.blocked || busy) return;
     if (entry.shared) navigate(entry.name);
@@ -510,31 +606,43 @@ export default function FilesPage() {
                 ))}
             </nav>
           </div>
-          {progress !== null && (
-            <div
-              role="status"
-              className={
-                card + " flex flex-wrap items-center gap-3 p-4 text-sm"
-              }
+          <UploadPanel tasks={transfers} queue={queue} />
+          {batchResults.length > 0 && (
+            <section
+              aria-label="批量操作结果"
+              className={card + " p-4 text-sm"}
             >
-              <Icon name="upload" />
-              <span>
-                正在上传 {progress}%
-                {progress === 100 ? "，等待服务器完成…" : ""}
-              </span>
-              <progress
-                className="h-2 min-w-24 flex-1"
-                value={progress}
-                max={100}
-                aria-label="上传进度"
-              />
-              <button
-                className={button}
-                onClick={() => uploadAbort.current?.abort()}
-              >
-                取消上传
-              </button>
-            </div>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-semibold">
+                  批量操作结果：
+                  {batchResults.filter((r) => r.state === "done").length}{" "}
+                  项成功，
+                  {batchResults.filter((r) => r.state !== "done").length}{" "}
+                  项失败或未执行
+                </h2>
+                <button
+                  className={button}
+                  disabled={busy}
+                  onClick={() => setBatchResults([])}
+                >
+                  清除结果
+                </button>
+              </div>
+              <ul className="mt-2 max-h-48 space-y-2 overflow-y-auto break-words">
+                {batchResults.map((r) => (
+                  <li
+                    key={r.name}
+                    className={
+                      r.state === "done"
+                        ? "text-gray-500"
+                        : "text-red-600 dark:text-red-400"
+                    }
+                  >
+                    {r.name} · {r.state === "done" ? "已完成" : r.message}
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
           <FileBrowser
             key={`${share}:${path}`}
@@ -544,6 +652,9 @@ export default function FilesPage() {
             busy={busy}
             open={open}
             command={openCommand}
+            batchCommand={openBatch}
+            upload={upload}
+            dropError={setError}
             download={download}
             actions={
               <>
@@ -586,14 +697,15 @@ export default function FilesPage() {
             ref={uploadRef}
             className="hidden"
             type="file"
+            multiple
             aria-label="选择上传文件"
             disabled={!share || busy}
-            onChange={(e) => void upload(e.target.files?.[0])}
+            onChange={(e) => upload(Array.from(e.target.files || []))}
           />
           {share && (
             <p className="text-xs text-gray-500">
               单文件上传上限 {fileSize(status.maxFileBytes || 0)}
-              。电脑端保存到共享目录后，点击“刷新”查看最新变化。
+              ，支持多选或拖入文件上传。电脑端保存到共享目录后，点击“刷新”查看最新变化。
             </p>
           )}
         </>
