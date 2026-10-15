@@ -35,6 +35,7 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 - 已有共享可通过部署维护的 `external_shares_file` JSON 显式登记，并配置只读挂载的 `external_samba_config_file`。JSON 格式为 `{ "config_sha256": "源配置文件的 SHA256", "shares": [{ "name": "scan", "comment": "扫描", "groups": ["dept_scan", "Domain Admins"], "read_only": false, "ready": true, "active": true, "path": "common/scans", "browseable": false }] }`。`path` 是 `shares_root` 内的真实相对路径，逐段拒绝符号链接；源配置变化后先更新清单，防止继续使用过期准入信息。
 - 登记不会修改原配置、移动文件、初始化 ACL 或重新分配 SID；已有共享的定义继续由服务器配置维护，Web 禁止覆盖/移除其定义，但可按既有权限管理组成员、子目录和 Windows ACL。隐藏共享不会进入员工根目录列表。新共享仍由 Agent 独立生成，不接管已有目录。
 - `smb_pid_file` 指向只读挂载的 smbd PID 文件，统一 Agent 与目标容器共享 PID namespace。
+- 接入未挂载 PID 目录的既有 AD 容器时，可设置 `reload_via_proc: true`。程序在共享的容器 PID namespace 中识别父进程不是 smbd 的唯一 smbd 主进程，多目标或目标消失则拒绝重载；不扫描 host PID，不需要固化容器 PID。
 - `read_only: true` 限制管理写操作；员工文件写权限仍由本人 SMB 会话和 Samba ACL 决定。
 
 ## API
@@ -68,6 +69,8 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 - 用户可能仍从其他组、显式条目或受保护分支获得权限；旧 SMB 登录令牌需重新连接才能反映成员变化。
 
 生产接入须先备份 AD、Assay 数据库、附件及共享（含 ACL/xattr），并在隔离环境验证恢复。共享登记与目录身份切换是部署步骤，不自动按同名账号合并身份。
+
+既有公司 AD 的参数化 Compose、备份/恢复验证与服务身份委派见 [生产部署](../../deploy/samba-production/README.md)。
 
 ## 从分离部署升级
 

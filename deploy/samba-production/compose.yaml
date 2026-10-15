@@ -1,0 +1,108 @@
+# Existing Samba is not a Compose service here: never provision or replace the company AD.
+name: ${ASSAY_PROJECT:?set ASSAY_PROJECT}
+services:
+  agent:
+    image: ${ASSAY_AGENT_IMAGE:?set an immutable Agent image}
+    user: "0:0"
+    command: [/config/agent.json]
+    network_mode: host
+    pid: container:${SAMBA_CONTAINER:?set the existing Samba container}
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    cap_add: [KILL, DAC_OVERRIDE]
+    security_opt: [no-new-privileges:true]
+    extra_hosts:
+      - "${DIRECTORY_HOST:?set the certificate DNS name}:${AGENT_DIRECTORY_IP:-127.0.0.1}"
+    volumes:
+      - ${AGENT_CONFIG_FILE:-./agent.json}:/config/agent.json:ro
+      - ${AGENT_TOKEN_FILE:-./secrets/agent-token}:/secrets/agent-token:ro
+      - ${FILES_TOKEN_FILE:-./secrets/files-token}:/secrets/files-token:ro
+      - ${MANAGEMENT_PASSWORD_FILE:-./secrets/management-password}:/secrets/management-password:ro
+      - ${DIRECTORY_CA_FILE:-./tls/directory-ca.crt}:/tls/directory-ca.crt:ro
+      - ${EXTERNAL_SHARES_FILE:-./external-shares.json}:/config/external-shares.json:ro
+      - ${SAMBA_ETC_DIR:?set SAMBA_ETC_DIR}:/existing:ro
+      - ${SAMBA_SHARES_DIR:?set SAMBA_SHARES_DIR}:/shares
+      - ${MANAGED_CONFIG_DIR:?set MANAGED_CONFIG_DIR}:/managed
+      - ${AGENT_STATE_DIR:-./agent-state}:/state
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: unless-stopped
+    env_file: ${DATABASE_ENV_FILE:-./database.env}
+    volumes: [pg-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [management]
+  redis:
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    restart: unless-stopped
+    volumes: [redis-data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks: [management]
+  api:
+    image: ${ASSAY_API_IMAGE:?set an immutable API image}
+    restart: unless-stopped
+    env_file: ${API_ENV_FILE:-./api.env}
+    environment:
+      NODE_ENV: production
+      REDIS_HOST: redis
+      STORAGE_DRIVER: local
+      STORAGE_LOCAL_DIR: /data/attachments
+      SAMBA_ENABLED: "true"
+      SAMBA_AGENT_URL: http://agent:${AGENT_PORT:-18080}
+      SAMBA_AGENT_TOKEN_FILE: /secrets/agent-token
+      FILES_ENABLED: "true"
+      FILES_GATEWAY_URL: http://agent:${AGENT_PORT:-18080}/files
+      FILES_GATEWAY_TOKEN_FILE: /secrets/files-token
+      DIRECTORY_BIND_PASSWORD_FILE: /secrets/directory-password
+      DIRECTORY_CA_FILE: /tls/directory-ca.crt
+    extra_hosts:
+      - "agent:${AGENT_BIND_IP:?set the management bridge gateway}"
+      - "${DIRECTORY_HOST}:${API_DIRECTORY_IP:?set the routable directory IP}"
+    volumes:
+      - ${AGENT_TOKEN_FILE:-./secrets/agent-token}:/secrets/agent-token:ro
+      - ${FILES_TOKEN_FILE:-./secrets/files-token}:/secrets/files-token:ro
+      - ${DIRECTORY_PASSWORD_FILE:-./secrets/directory-password}:/secrets/directory-password:ro
+      - ${DIRECTORY_CA_FILE:-./tls/directory-ca.crt}:/tls/directory-ca.crt:ro
+      - attachments:/data/attachments
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      agent: {condition: service_started}
+    networks: [management, edge]
+  web:
+    image: ${ASSAY_WEB_IMAGE:?set an immutable Web image}
+    restart: unless-stopped
+    ports:
+      - "${WEB_LAN_IP:?set WEB_LAN_IP}:${WEB_HTTPS_PORT:-8446}:443"
+      - "${WEB_VPN_IP:?set WEB_VPN_IP}:${WEB_HTTPS_PORT:-8446}:443"
+    volumes:
+      - ${NGINX_CONFIG_FILE:-./nginx.conf}:/etc/nginx/conf.d/default.conf:ro
+      - ${WEB_CERT_FILE:-./tls/web.crt}:/tls/web.crt:ro
+      - ${WEB_KEY_FILE:-./tls/web.key}:/tls/web.key:ro
+    depends_on: [api]
+    healthcheck:
+      test: [CMD-SHELL, 'wget -qO- http://127.0.0.1/healthz >/dev/null']
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [edge]
+volumes:
+  pg-data: {}
+  redis-data: {}
+  attachments: {}
+networks:
+  management:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${MANAGEMENT_SUBNET:?set a non-conflicting management subnet}
+          gateway: ${AGENT_BIND_IP}
+  edge: {}
