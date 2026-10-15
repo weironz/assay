@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { APIError } from 'better-auth';
 import type { PrismaClient } from '@prisma/client';
 import { authRedis } from './auth-redis';
+import { renewExistingFileSession } from './web-session-scope';
 
 type EpochDb = Pick<PrismaClient, 'user' | '$queryRawUnsafe'> & Partial<Pick<PrismaClient, '$transaction'>>;
 type EpochSnapshot = { userId: string; epoch: number };
@@ -175,9 +176,15 @@ export async function readValidatedSession(db: EpochDb, key: string): Promise<st
 
 export async function refreshSessionMarker(key: string, value: string, ttl?: number): Promise<void> {
   if (!ttl) return;
-  let parsed: { session?: { token?: string } };
+  let parsed: { session?: { token?: string; userId?: string; expiresAt?: Date | string } };
   try { parsed = JSON.parse(value); } catch { return; }
-  if (parsed?.session?.token === key) await authRedis.expire(markerKey(key), ttl);
+  if (parsed?.session?.token === key) {
+    await authRedis.expire(markerKey(key), ttl);
+    // Sliding Web expiry also applies to an existing directory authentication
+    // stamp. EXPIRE never recreates a revoked/missing stamp or changes its state.
+    await authRedis.expire(`assay:directory:session:${createHash('sha256').update(key).digest('hex')}`, ttl);
+    renewExistingFileSession({ ...parsed.session, token: key }, ttl);
+  }
 }
 
 export async function assertSessionEpoch(db: EpochDb, token: string, userId: string): Promise<void> {

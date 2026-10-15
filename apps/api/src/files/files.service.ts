@@ -9,9 +9,10 @@ import { webSessionScopes } from '../auth/web-session-scope';
 import type { AuthUser } from '../auth/auth.types';
 import { SambaService } from '../samba/samba.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { enabledModules, fileCommandSchema, locationSchema, loginSchema } from './contracts';
+import { enabledModules, fileCommandSchema, locationSchema, loginSchema, MAX_FILE_SESSION_SECONDS } from './contracts';
 
 interface Capability { token: string; id: string; domain: string; policies: Record<string, string> }
+interface GatewayInit extends RequestInit { webSessionTtl?: number }
 @Injectable()
 export class FilesService {
   constructor(private readonly samba: SambaService, private readonly prisma: PrismaService) {}
@@ -26,6 +27,22 @@ export class FilesService {
     if (!req.headers.origin || !origins.includes(req.headers.origin)) throw new ForbiddenException('文件操作来源校验失败');
   }
   private key(owner: string) { return `assay:files:session:${owner}`; }
+  private ttl(expiresAt: number) {
+    const ttl = Math.min(MAX_FILE_SESSION_SECONDS, Math.floor((expiresAt - Date.now()) / 1000));
+    if (ttl <= 0) throw new ForbiddenException('Assay 会话已到期，请重新登录');
+    return ttl;
+  }
+  private async retain(owner: string, cap: Capability, expiresAt: number) {
+    // Only extend this exact live capability. A concurrent sign-out, disconnect
+    // or password verification must not recreate a deleted/replaced connection.
+    const kept = await authRedis.eval("if redis.call('EXISTS',KEYS[2])==1 then return 0 end; local v=redis.call('GET',KEYS[1]); if not v or cjson.decode(v).token~=ARGV[1] then return 0 end; return redis.call('EXPIRE',KEYS[1],ARGV[2])", {
+      keys: [this.key(owner), `assay:files:closed:${owner}`], arguments: [cap.token, String(this.ttl(expiresAt))],
+    });
+    if (!kept) {
+      await this.revoke(owner, false, cap.token);
+      throw new HttpException('文件连接已断开，请重新登录或连接', 410);
+    }
+  }
   private async stored(owner: string): Promise<Capability | null> {
     const raw = await authRedis.get(this.key(owner));
     return raw ? JSON.parse(raw) : null;
@@ -39,29 +56,31 @@ export class FilesService {
       return { address: url.toString().replace(/\/$/, ''), token };
     } catch { throw new ServiceUnavailableException('文件服务未配置'); }
   }
-  private async gateway(path: string, owner: string, cap: Capability | null, init: RequestInit = {}) {
+  private async gateway(path: string, owner: string, cap: Capability | null, init: GatewayInit = {}) {
     const c = this.gatewayConfig();
+    const { webSessionTtl, ...http } = init;
     try {
-      return await fetch(c.address + path, { ...init, redirect: 'error', headers: {
+      return await fetch(c.address + path, { ...http, redirect: 'error', headers: {
         Authorization: `Bearer ${c.token}`, 'X-File-Owner': owner,
-        ...(cap ? { 'X-File-Session': cap.token } : {}), ...init.headers,
-      }, signal: init.signal || AbortSignal.timeout(45000) });
+        ...(cap ? { 'X-File-Session': cap.token } : {}),
+        ...(webSessionTtl ? { 'X-File-TTL': String(webSessionTtl) } : {}), ...http.headers,
+      }, signal: http.signal || AbortSignal.timeout(45000) });
     } catch { throw new ServiceUnavailableException('文件服务连接失败；写操作请先刷新核对结果'); }
   }
-  private async json(response: globalThis.Response, owner: string) {
+  private async json(response: globalThis.Response, owner: string, cap?: Capability) {
     if (!response.ok) {
-      if (response.status === 410) await this.revoke(owner);
+      if (response.status === 410) await this.revoke(owner, false, cap?.token);
       const allowed = [400, 403, 404, 409, 410, 413, 422, 429];
       const status = allowed.includes(response.status) ? response.status : 502;
       // Only gateway's fixed error strings, never authentication payloads or raw protocol errors.
       const body = await response.json().catch(() => ({})) as any;
-      throw new HttpException(body.error || '文件请求失败，请重新验证或刷新后重试', status);
+      throw new HttpException((status === 410 ? '文件连接已断开，请重新登录或连接' : body.error) || '文件请求失败，请刷新核对后重试', status);
     }
     return response.json() as Promise<any>;
   }
-  async revoke(owner: string, closed = false) {
+  async revoke(owner: string, closed = false, expectedToken?: string) {
     if (closed) await authRedis.set(`assay:files:closed:${owner}`, '1', { EX: 3700 });
-    const raw = await authRedis.getDel(this.key(owner));
+    const raw = expectedToken ? await authRedis.eval("local v=redis.call('GET',KEYS[1]); if not v or cjson.decode(v).token~=ARGV[1] then return nil end; redis.call('DEL',KEYS[1]); return v", { keys: [this.key(owner)], arguments: [expectedToken] }) as string | null : await authRedis.getDel(this.key(owner));
     if (!raw) return;
     const cap: Capability = JSON.parse(raw);
     try { await this.gateway('/v1/session', owner, cap, { method: 'DELETE', signal: AbortSignal.timeout(10000) }); }
@@ -70,33 +89,38 @@ export class FilesService {
   private async context(req: Request, user: AuthUser, share?: string) {
     const scope = this.scope(req, user);
     const cap = await this.stored(scope.fingerprint);
-    if (!cap) throw new HttpException('请先验证自己的 AD 密码', 410);
+    if (!cap) throw new HttpException('文件连接已断开，请重新登录或连接', 410);
     let identity: Awaited<ReturnType<SambaService['fileIdentity']>>;
     try { identity = await this.samba.fileIdentity(user); }
     catch (e) { await this.revoke(scope.fingerprint); throw e; }
     if (!identity || identity.identity.id !== cap.id || identity.domain !== cap.domain || this.policiesChanged(cap, identity.sharePolicies)) {
       await this.revoke(scope.fingerprint);
-      throw new HttpException('身份关联或共享配置已变化，请重新验证', 410);
+      throw new HttpException('身份关联或共享配置已变化，请重新登录或连接', 410);
     }
     // An arbitrary GET share parameter must not revoke a valid employee session.
     if (share && (!identity.shares.includes(share) || !Object.hasOwn(cap.policies, share))) throw new ForbiddenException('无权访问该共享目录');
-    return { owner: scope.fingerprint, cap };
+    return { owner: scope.fingerprint, cap, expiresAt: scope.expiresAt, webSessionTtl: this.ttl(scope.expiresAt) };
   }
   private policiesChanged(cap: Capability, current: Record<string, string>) {
     return !cap.policies || Object.entries(cap.policies).some(([share, revision]) => current[share] !== revision);
+  }
+  async maintain(req: Request, user: AuthUser) {
+    if (enabledModules().files && await this.stored(this.scope(req, user).fingerprint)) await this.status(req, user);
   }
   async status(req: Request, user: AuthUser) {
     const scope = this.scope(req, user);
     const linked = await this.samba.fileIdentity(user);
     const identity = linked ? { accountName: linked.identity.name, domain: linked.domain } : null;
-    if (!linked) { await this.revoke(scope.fingerprint); return { enabled: true, connected: false, identity }; }
+    const disconnected = { enabled: true, connected: false, identity, reconnectWithCompanyLogin: user.passwordSource === 'directory' };
+    if (!linked) { await this.revoke(scope.fingerprint); return disconnected; }
     const cap = await this.stored(scope.fingerprint);
-    if (!cap) return { enabled: true, connected: false, identity };
-    if (cap.id !== linked.identity.id || cap.domain !== linked.domain || this.policiesChanged(cap, linked.sharePolicies)) { await this.revoke(scope.fingerprint); return { enabled: true, connected: false, identity }; }
+    if (!cap) return disconnected;
+    if (cap.id !== linked.identity.id || cap.domain !== linked.domain || this.policiesChanged(cap, linked.sharePolicies)) { await this.revoke(scope.fingerprint); return disconnected; }
     try {
-      const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, cap), scope.fingerprint);
-      return { enabled: true, connected: true, identity, ...data, shares: data.shares.filter((s: string) => linked.shares.includes(s)) };
-    } catch (e) { if (e instanceof HttpException && e.getStatus() === 410) return { enabled: true, connected: false, identity }; throw e; }
+      const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, cap, { webSessionTtl: this.ttl(scope.expiresAt) }), scope.fingerprint, cap);
+      await this.retain(scope.fingerprint, cap, scope.expiresAt);
+      return { enabled: true, connected: true, identity, reconnectWithCompanyLogin: user.passwordSource === 'directory', ...data, shares: data.shares.filter((s: string) => linked.shares.includes(s)) };
+    } catch (e) { if (e instanceof HttpException && e.getStatus() === 410) return disconnected; throw e; }
   }
   async login(req: Request, user: AuthUser, body: unknown) {
     const scope = this.scope(req, user); this.csrf(req);
@@ -113,16 +137,15 @@ export class FilesService {
       const linked = await this.samba.fileIdentity(user);
       if (!linked) throw new ForbiddenException('请先由管理员关联你的 AD 员工账号');
       await this.revoke(scope.fingerprint);
-      const ttl = Math.min(3600, Math.floor((scope.expiresAt - Date.now()) / 1000));
-      if (ttl <= 0) throw new ForbiddenException('Assay 会话已到期');
-      const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, null, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner: scope.fingerprint, identity: linked.identity, shares: linked.shares, password: parsed.data.password, ttl }) }), scope.fingerprint);
+      const ttl = this.ttl(scope.expiresAt);
+      const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, null, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner: scope.fingerprint, identity: linked.identity, shares: linked.shares, password: parsed.data.password, ttl, follow_web_session: true }) }), scope.fingerprint);
       newCap = { token: data.token, id: linked.identity.id, domain: linked.domain, policies: Object.fromEntries(data.shares.map((share: string) => [share, linked.sharePolicies[share]])) };
       const stored = await authRedis.eval("if redis.call('EXISTS',KEYS[2])==1 then return 0 end; redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]); return 1", {
         keys: [this.key(scope.fingerprint), `assay:files:closed:${scope.fingerprint}`], arguments: [JSON.stringify(newCap), String(ttl)],
       });
       if (!stored) throw new HttpException('Assay 会话已退出，请重新登录', 410);
       await authRedis.eval("local n=tonumber(redis.call('GET',KEYS[1]) or '0'); if n>0 then return redis.call('DECR',KEYS[1]) end; return 0", { keys: [attemptKey], arguments: [] });
-      return { enabled: true, connected: true, identity: { accountName: linked.identity.name, domain: linked.domain }, shares: data.shares, expiresAt: data.expiresAt, maxFileBytes: data.maxFileBytes };
+      return { enabled: true, connected: true, identity: { accountName: linked.identity.name, domain: linked.domain }, shares: data.shares, expiresAt: data.expiresAt, maxFileBytes: data.maxFileBytes, followsWebSession: data.followsWebSession === true, reconnectWithCompanyLogin: user.passwordSource === 'directory' };
     } catch (e) {
       if (newCap) { try { await this.gateway('/v1/session', scope.fingerprint, newCap, { method: 'DELETE' }); } catch {} }
       throw e;
@@ -135,8 +158,10 @@ export class FilesService {
   async logout(req: Request, user: AuthUser) { const scope = this.scope(req, user); this.csrf(req); await this.revoke(scope.fingerprint); return { ok: true }; }
   private location(input: unknown) { const p = locationSchema.safeParse(input); if (!p.success) throw new BadRequestException('文件路径无效'); return p.data; }
   async list(req: Request, user: AuthUser, input: unknown) {
-    const loc = this.location(input); const { owner, cap } = await this.context(req, user, loc.share);
-    return this.json(await this.gateway('/v1/list?' + new URLSearchParams(loc), owner, cap), owner);
+    const loc = this.location(input); const { owner, cap, expiresAt, webSessionTtl } = await this.context(req, user, loc.share);
+    const data = await this.json(await this.gateway('/v1/list?' + new URLSearchParams(loc), owner, cap, { webSessionTtl }), owner, cap);
+    await this.retain(owner, cap, expiresAt);
+    return data;
   }
   private async audit(user: AuthUser, action: string, metadata: Record<string, string>) {
     return this.prisma.sambaOperation.create({ data: { id: randomUUID(), actorId: user.id, actorName: user.name, action: `file.${action}`, requestHash: createHash('sha256').update(JSON.stringify(metadata)).digest('hex'), metadata } });
@@ -144,17 +169,18 @@ export class FilesService {
   private async finish(id: string, succeeded: boolean) { await this.prisma.sambaOperation.update({ where: { id }, data: { state: succeeded ? 'succeeded' : 'uncertain', result: { message: succeeded ? '已完成' : '未确认完成，请刷新核对；不要自动重试写操作' } } }); }
   async command(req: Request, user: AuthUser, input: unknown) {
     this.csrf(req); const p = fileCommandSchema.safeParse(input); if (!p.success) throw new BadRequestException('文件操作参数无效');
-    const c = p.data; const { owner, cap } = await this.context(req, user, c.share);
+    const c = p.data; const { owner, cap, expiresAt, webSessionTtl } = await this.context(req, user, c.share);
     const op = await this.audit(user, c.action, { share: c.share, path: c.path, destination: c.destination || '' });
     try {
-      const data = await this.json(await this.gateway('/v1/commands', owner, cap, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) }), owner);
+      const data = await this.json(await this.gateway('/v1/commands', owner, cap, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c), webSessionTtl }), owner, cap);
+      await this.retain(owner, cap, expiresAt);
       await this.finish(op.id, true); return data;
     } catch (e) { await this.finish(op.id, false); throw e; }
   }
   async transfer(req: Request, res: ExpressResponse, user: AuthUser, input: unknown, upload: boolean) {
     if (upload) this.csrf(req);
     const loc = this.location(input); if (!loc.path) throw new BadRequestException('请选择文件');
-    const { owner, cap } = await this.context(req, user, loc.share);
+    const { owner, cap, expiresAt, webSessionTtl } = await this.context(req, user, loc.share);
     const length = req.headers['content-length'];
     if (upload && (req.headers['content-type'] !== 'application/octet-stream' || !length || !/^\d+$/.test(length) || Number(length) > 512 * 1024 * 1024)) throw new BadRequestException('上传格式或文件大小无效');
     const op = await this.audit(user, upload ? 'upload' : 'download', loc);
@@ -162,10 +188,11 @@ export class FilesService {
     const cancel = () => { if (!res.writableFinished) abort.abort(); };
     req.once('aborted', cancel); res.once('close', cancel);
     try {
-      const init: RequestInit & { duplex?: 'half' } = { method: upload ? 'PUT' : 'GET', signal: abort.signal };
+      const init: GatewayInit & { duplex?: 'half' } = { method: upload ? 'PUT' : 'GET', signal: abort.signal, webSessionTtl };
       if (upload) { init.headers = { 'Content-Type': 'application/octet-stream', 'Content-Length': length! }; init.body = Readable.toWeb(req) as ReadableStream; init.duplex = 'half'; }
       const upstream = await this.gateway('/v1/content?' + new URLSearchParams(loc), owner, cap, init);
-      if (!upstream.ok) await this.json(upstream, owner);
+      if (!upstream.ok) await this.json(upstream, owner, cap);
+      await this.retain(owner, cap, expiresAt);
       for (const h of ['content-type', 'content-length', 'content-disposition']) { const v = upstream.headers.get(h); if (v) res.setHeader(h, v); }
       res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Content-Type-Options', 'nosniff');
       if (!upstream.body) throw new ServiceUnavailableException('文件响应为空');

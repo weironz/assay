@@ -17,17 +17,24 @@ import {
 import { displayDomain, type Editor } from "../samba/types";
 import FileBrowser, { fileSize, type FileEntry } from "./FileBrowser";
 import { Icon } from "./icons";
+import { signOut } from "../../lib/auth-client";
+import { useAuth } from "../../stores/auth";
+import { useNavigate } from "react-router-dom";
 
 interface Status {
   connected: boolean;
   identity: { accountName: string; domain: string } | null;
   shares?: string[];
   expiresAt?: number;
+  followsWebSession?: boolean;
+  reconnectWithCompanyLogin?: boolean;
   maxFileBytes?: number;
 }
 
 const join = (path: string, name: string) => (path ? `${path}/${name}` : name);
 export default function FilesPage() {
+  const navigateTo = useNavigate();
+  const clearLogin = useAuth((s) => s.clear);
   const [status, setStatus] = useState<Status | null>(null);
   const [password, setPassword] = useState("");
   const [share, setShare] = useState("");
@@ -97,16 +104,41 @@ export default function FilesPage() {
   }, [refresh]);
   useEffect(() => {
     if (!status?.connected || !status.expiresAt) return;
+    // The server may have renewed the transport after the Assay session slid.
+    // Recheck authoritative status instead of expiring a healthy connection here.
     const timer = setTimeout(
       () => {
-        setStatus((s) => (s ? { ...s, connected: false } : s));
-        setEntries([]);
-        setError("文件会话已到期，请重新验证 AD 密码。");
+        void refreshStatus();
       },
-      Math.max(0, status.expiresAt * 1000 - Date.now()),
+      Math.max(1000, status.expiresAt * 1000 - Date.now()),
     );
     return () => clearTimeout(timer);
-  }, [status?.connected, status?.expiresAt]);
+  }, [status?.connected, status?.expiresAt, refreshStatus]);
+  useEffect(() => {
+    const check = () => {
+      if (document.visibilityState === "visible" && !busy) void refreshStatus();
+    };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, [busy, refreshStatus]);
+  const companyLogin = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await signOut();
+      if (result.error) throw new Error("SIGN_OUT_FAILED");
+      clearLogin();
+      navigateTo("/login", { replace: true });
+    } catch {
+      setError("暂时无法退出当前登录，请稍后重试。");
+    } finally {
+      setBusy(false);
+    }
+  };
   const verify = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -268,6 +300,30 @@ export default function FilesPage() {
     modified: 0,
     blocked: false,
   }));
+  const verificationForm = (
+    <form onSubmit={verify} className={card + " max-w-lg space-y-4 p-6"}>
+      <h2 className="font-semibold">验证自己的 AD 密码</h2>
+      <p className="text-sm text-gray-500">
+        连接后随当前 Assay 登录保留。AD 密码不写入数据库或日志。
+      </p>
+      <label className="block space-y-2 text-sm">
+        <span>AD 密码</span>
+        <input
+          className={input}
+          type="password"
+          autoComplete="current-password"
+          value={password}
+          maxLength={512}
+          onChange={(e) => setPassword(e.target.value)}
+          required
+          disabled={busy}
+        />
+      </label>
+      <button className={primary} disabled={busy}>
+        {busy ? "正在验证…" : "验证并打开文件"}
+      </button>
+    </form>
+  );
   return (
     <div className="mx-auto max-w-[1500px] space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -316,29 +372,34 @@ export default function FilesPage() {
           </p>
         </section>
       ) : !status.connected ? (
-        <form onSubmit={verify} className={card + " max-w-lg space-y-4 p-6"}>
-          <h2 className="font-semibold">验证自己的 AD 密码</h2>
-          <p className="text-sm text-gray-500">
-            首次访问、会话到期或连接失效后需要重新验证。AD 密码不写入 Assay
-            数据库或日志。
-          </p>
-          <label className="block space-y-2 text-sm">
-            <span>AD 密码</span>
-            <input
-              className={input}
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              maxLength={512}
-              onChange={(e) => setPassword(e.target.value)}
-              required
+        status.reconnectWithCompanyLogin ? (
+          <section className={card + " max-w-lg space-y-4 p-6"}>
+            <h2 className="font-semibold">公司文件连接已断开</h2>
+            <p className="text-sm text-gray-500">
+              重新登录公司账号即可恢复文件访问。正常文件连接随 Assay
+              登录保留，无需因短时间闲置重复验证。
+            </p>
+            <button
+              className={primary}
               disabled={busy}
-            />
-          </label>
-          <button className={primary} disabled={busy}>
-            {busy ? "正在验证…" : "验证并打开文件"}
-          </button>
-        </form>
+              onClick={() => void companyLogin()}
+            >
+              {busy ? "正在处理…" : "重新登录公司账号"}
+            </button>
+            <details className="border-t border-gray-100 pt-4 text-sm dark:border-gray-800">
+              <summary className="cursor-pointer text-gray-500">
+                其他连接方式
+              </summary>
+              <p className="mt-3 text-sm text-gray-500">
+                通过本地或单点登录访问文件的账号，也可使用本人的 AD
+                密码建立连接。
+              </p>
+              <div className="mt-4">{verificationForm}</div>
+            </details>
+          </section>
+        ) : (
+          verificationForm
+        )
       ) : (
         <>
           <div className="flex min-w-0 flex-wrap items-center gap-3">

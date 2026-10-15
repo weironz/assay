@@ -1,4 +1,5 @@
 //! Employee file transport. No administrative credentials or local share mount.
+mod lease;
 mod paths;
 mod transfer;
 
@@ -12,6 +13,7 @@ use axum::{
     routing::{get, post},
 };
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Scope, SearchEntry};
+use lease::{Lease, MAX_WEB_SECONDS};
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -22,7 +24,7 @@ use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
     sync::{
-        Arc,
+        Arc, RwLock,
         atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
@@ -47,6 +49,8 @@ pub struct Config {
     idle_seconds: u64,
     #[serde(default = "lifetime")]
     lifetime_seconds: u64,
+    #[serde(default = "web_lifetime")]
+    web_session_max_seconds: u64,
 }
 fn max_bytes() -> u64 {
     200 * 1024 * 1024
@@ -56,6 +60,15 @@ fn idle() -> u64 {
 }
 fn lifetime() -> u64 {
     3600
+}
+fn web_lifetime() -> u64 {
+    MAX_WEB_SECONDS
+}
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
 }
 pub struct App {
     config: Config,
@@ -70,8 +83,7 @@ pub struct Session {
     fingerprint: Vec<u8>,
     ldap: Mutex<Ldap>,
     shares: HashSet<String>,
-    expires: Instant,
-    expires_unix: u64,
+    lease: RwLock<Lease>,
     touched: Mutex<Instant>,
     gate: Arc<Mutex<()>>,
     revoked: AtomicBool,
@@ -90,11 +102,42 @@ impl ResourceExt for Resource {
 }
 impl Session {
     pub fn live(&self) -> Result<(), Error> {
-        if self.revoked.load(Ordering::Acquire) || Instant::now() >= self.expires {
+        if self.revoked.load(Ordering::Acquire)
+            || self
+                .lease
+                .read()
+                .map_err(|_| Error::expired())?
+                .expired(Instant::now())
+        {
             Err(Error::expired())
         } else {
             Ok(())
         }
+    }
+    async fn expired(&self, idle_seconds: u64) -> bool {
+        let elapsed = self.touched.lock().await.elapsed();
+        self.live().is_err()
+            || self
+                .lease
+                .read()
+                .map(|l| l.idle_expired(elapsed, idle_seconds))
+                .unwrap_or(true)
+    }
+    async fn probe(&self, app: &App) -> Result<(), Error> {
+        self.live()?;
+        let current = fingerprint(&mut *self.ldap.lock().await, &self.identity).await;
+        if current.ok().as_deref() != Some(self.fingerprint.as_slice()) {
+            return Err(Error::expired());
+        }
+        if let Some(share) = self.shares.iter().next() {
+            let target = self.target(app, share, "")?;
+            let root = self
+                .open(&target, FileAccessMask::new().with_generic_read(true))
+                .await?;
+            root.handle().close().await.map_err(Error::smb)?;
+        }
+        *self.touched.lock().await = Instant::now();
+        Ok(())
     }
     async fn close(&self) {
         self.revoked.store(true, Ordering::Release);
@@ -165,6 +208,8 @@ struct Login {
     password: String,
     shares: Vec<String>,
     ttl: u64,
+    #[serde(default)]
+    follow_web_session: bool,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -256,9 +301,7 @@ async fn session(app: &App, h: &HeaderMap) -> Result<(Arc<Session>, OwnedMutexGu
         return Err(Error::expired());
     }
     let guard = s.gate.clone().lock_owned().await;
-    if s.live().is_err()
-        || s.touched.lock().await.elapsed() > Duration::from_secs(app.config.idle_seconds)
-    {
+    if s.expired(app.config.idle_seconds).await {
         app.sessions.lock().await.remove(key);
         s.close().await;
         return Err(Error::expired());
@@ -268,6 +311,19 @@ async fn session(app: &App, h: &HeaderMap) -> Result<(Arc<Session>, OwnedMutexGu
         app.sessions.lock().await.remove(key);
         s.close().await;
         return Err(Error::expired());
+    }
+    if let Some(value) = h.get("x-file-ttl") {
+        let ttl = value
+            .to_str()
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|ttl| *ttl > 0 && *ttl <= MAX_WEB_SECONDS)
+            .ok_or_else(Error::invalid)?
+            .min(app.config.web_session_max_seconds);
+        s.lease
+            .write()
+            .map_err(|_| Error::expired())?
+            .renew(ttl, Instant::now(), unix_now())?;
     }
     *s.touched.lock().await = Instant::now();
     Ok((s, guard))
@@ -444,12 +500,13 @@ async fn login(
     }
     // Clear our owned input buffer after the final authentication exchange.
     drop(password);
-    let ttl = input.ttl.min(app.config.lifetime_seconds);
-    let expires_unix = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        + ttl;
+    let ttl = input.ttl.min(if input.follow_web_session {
+        app.config.web_session_max_seconds
+    } else {
+        app.config.lifetime_seconds
+    });
+    let lease = Lease::new(input.follow_web_session, ttl, Instant::now(), unix_now());
+    let expires_unix = lease.expires_unix;
     let key = format!(
         "{}{}",
         uuid::Uuid::new_v4().simple(),
@@ -462,20 +519,20 @@ async fn login(
         fingerprint,
         ldap: Mutex::new(ldap),
         shares,
-        expires: Instant::now() + Duration::from_secs(ttl),
-        expires_unix,
+        lease: RwLock::new(lease),
         touched: Mutex::new(Instant::now()),
         gate: Arc::new(Mutex::new(())),
         revoked: AtomicBool::new(false),
     });
-    let result = json!({"token":key,"shares":s.shares,"expiresAt":expires_unix,"maxFileBytes":app.config.max_file_bytes});
+    let result = json!({"token":key,"shares":s.shares,"expiresAt":expires_unix,"maxFileBytes":app.config.max_file_bytes,"followsWebSession":input.follow_web_session});
     app.sessions.lock().await.insert(key, s);
     Ok(Json(result))
 }
 async fn status(State(app): State<Arc<App>>, h: HeaderMap) -> Result<Json<Value>, Error> {
     let (s, _guard) = session(&app, &h).await?;
+    let lease = s.lease.read().map_err(|_| Error::expired())?;
     Ok(Json(
-        json!({"shares":s.shares,"expiresAt":s.expires_unix,"maxFileBytes":app.config.max_file_bytes}),
+        json!({"shares":s.shares,"expiresAt":lease.expires_unix,"maxFileBytes":app.config.max_file_bytes,"followsWebSession":lease.follows_web}),
     ))
 }
 async fn logout(State(app): State<Arc<App>>, h: HeaderMap) -> Result<Json<Value>, Error> {
@@ -507,6 +564,8 @@ pub async fn run() -> Result<()> {
             && c.idle_seconds <= 3600
             && c.lifetime_seconds > 0
             && c.lifetime_seconds <= 3600
+            && c.web_session_max_seconds > 0
+            && c.web_session_max_seconds <= MAX_WEB_SECONDS
             && c.max_file_bytes <= 512 * 1024 * 1024,
         "invalid limits"
     );
@@ -531,13 +590,29 @@ pub async fn run() -> Result<()> {
                 .map(|(k, v)| (k.clone(), v.clone()))
                 .collect::<Vec<_>>();
             for (key, s) in all {
-                if s.live().is_err()
-                    || s.touched.lock().await.elapsed()
-                        > Duration::from_secs(cleanup.config.idle_seconds)
-                {
+                // A request/transfer owns this gate. Do not race its validated renewal.
+                let Ok(guard) = s.gate.clone().try_lock_owned() else {
+                    continue;
+                };
+                if s.expired(cleanup.config.idle_seconds).await {
                     cleanup.sessions.lock().await.remove(&key);
+                    s.revoked.store(true, Ordering::Release);
                     tokio::spawn(async move {
+                        let _guard = guard;
                         s.close().await;
+                    });
+                } else if s.lease.read().map(|l| l.follows_web).unwrap_or(false)
+                    && s.touched.lock().await.elapsed() >= Duration::from_secs(60)
+                {
+                    // Keep the authenticated transports alive without retaining a
+                    // password. Probes never renew the owner's application lease.
+                    let app = cleanup.clone();
+                    tokio::spawn(async move {
+                        let _guard = guard;
+                        if s.probe(&app).await.is_err() {
+                            app.sessions.lock().await.remove(&key);
+                            s.close().await;
+                        }
                     });
                 }
             }

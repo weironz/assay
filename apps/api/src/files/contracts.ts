@@ -1,4 +1,5 @@
 import { z } from 'zod';
+export const MAX_FILE_SESSION_SECONDS = 7 * 24 * 60 * 60;
 export const filePath = z.string().max(4096).refine(p => !p || p.split('/').every(s =>
   !!s && s !== '.' && s !== '..' && s.length <= 255 && !/[\\:*?"<>|\x00-\x1f\x7f]/.test(s) &&
   !/[. ]$/.test(s) && !s.toLowerCase().startsWith('.assay-upload-')));
