@@ -251,7 +251,7 @@ export function EditorDialog({
   submit,
   cancel,
   busy = false,
-  submitLabel = '确认并验证身份',
+  submitLabel = '确认提交',
 }: {
   editor: Editor;
   setEditor: (value: Editor) => void;

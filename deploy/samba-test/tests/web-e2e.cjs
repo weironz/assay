@@ -17,13 +17,27 @@ const save = () => fs.writeFileSync(fixturePath, JSON.stringify(f, null, 2), { m
 const secrets = [adminPassword, f.ad_password, f.assay_password];
 const results = [];
 let browser, page;
+const responses = new WeakMap();
 function pass(name) { results.push(name); console.log('PASS ' + name); }
 async function login(p, email, password) {
+ const queue = []; responses.set(p, queue);
+ p.on('response', r => { if (r.request().method() === 'POST') queue.push(r); });
  await p.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
  await p.goto(origin + '/login'); if ((await (await p.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await p.getByRole('button', { name: '本地账号', exact: true }).click(); await p.locator('form input').first().fill(email);
  await p.locator('input[type=password]').fill(password); await p.locator('form button[type=submit]').click(); await p.waitForURL('**/dashboard');
 }
 async function verify(p = page, password = adminPassword, endpoint = '/api/samba/commands', expected = 201) {
+ const security = await (await p.request.get(origin + '/api/me/security')).json();
+ if (security.stepUpExemptPurposes?.includes(endpoint === '/api/users' ? 'roles' : 'samba') && endpoint !== '/api/samba/me/password') {
+  const matches = r => new URL(r.url()).pathname === endpoint;
+  const queue = responses.get(p); const index = queue.findIndex(matches);
+  const r = index < 0 ? await p.waitForResponse(matches) : queue.splice(index, 1)[0];
+  const queued = queue.indexOf(r); if (queued >= 0) queue.splice(queued, 1);
+  const body = await r.json(); assert.equal(r.status(), expected, body.message || body.error || 'request failed');
+  await p.locator('[data-admin-action]').waitFor({ state: 'hidden' });
+  assert.equal(await p.locator('[data-step-up-dialog] input[type=password]').count(), 0);
+  return body;
+ }
  const d = p.getByRole('dialog'); await d.locator('input[type=password]').fill(password);
  const promise = p.waitForResponse(r => new URL(r.url()).pathname === endpoint && r.request().method() === 'POST').catch(() => null);
  await d.getByRole('button', { name: '验证并继续', exact: true }).click();
@@ -40,7 +54,7 @@ async function fill(title, fields, endpoint) {
   else if (value?.select) await input.selectOption(value.select);
   else await input.fill(value);
  }
- await d.getByRole('button', { name: '确认并验证身份' }).click(); return verify(page, adminPassword, endpoint);
+ await d.getByRole('button', { name: '确认提交' }).click(); return verify(page, adminPassword, endpoint);
 }
 async function form(button, title, fields, endpoint) { await page.getByRole('button', { name: button, exact: true }).click(); return fill(title, fields, endpoint); }
 async function detail(section, id) { await page.goto(origin + '/samba/' + section + '/' + id); await page.getByRole('heading', { name: /详情$/, level: 1 }).waitFor(); }

@@ -24,6 +24,7 @@ test('GET security status uses the cookie-aware API and returns the contract fie
     privilegedMfaMode: 'enforce', privileged: true, enrolled: false,
     enrollmentRequired: true, stepUpTtlSeconds: 300,
     purposes: ['roles', 'api-tokens', 'two-factor', 'account'],
+    stepUpExemptPurposes: ['roles', 'api-tokens', 'samba'],
   };
   let request;
   api.defaults.adapter = async (config) => {
@@ -110,6 +111,18 @@ test('guarded no-body mutation does not reuse a prior token or add a JSON body',
     expect(new Headers(request.headers).has('Content-Type')).toBe(false);
   }
   expect(stepUpHeaders('third')).toEqual({ 'x-step-up-token': 'third' });
+});
+
+test('administrator management sends the cookie session without an empty step-up header', async () => {
+  let request;
+  globalThis.fetch = async (_url, options) => {
+    request = options;
+    return Response.json({ id: 'operation' }, { status: 201 });
+  };
+  await guardedApi('POST', '/samba/commands', '', { action: 'user.password' });
+  expect(request.credentials).toBe('include');
+  expect(new Headers(request.headers).has('x-step-up-token')).toBe(false);
+  expect(stepUpHeaders('')).toEqual({});
 });
 
 test('guarded mutation failure keeps only status, without response body or request config', async () => {

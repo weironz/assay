@@ -26,6 +26,8 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState('');
   const [actionRejected, setActionRejected] = useState(false);
+  const actionStarted = useRef(false);
+  const exempt = status?.stepUpExemptPurposes?.includes(purpose) === true;
 
   useEffect(() => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -52,8 +54,27 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   // Capture the opener once; parent state can change while the guarded action runs.
   }, []);
   useEffect(() => {
-    if (status && enrollmentRequired(status)) panel.current?.querySelector<HTMLElement>('a[href]')?.focus();
-  }, [status]);
+    if (!status || exempt) return;
+    if (enrollmentRequired(status)) panel.current?.querySelector<HTMLElement>('a[href]')?.focus();
+    else passwordInput.current?.focus();
+  }, [status, exempt]);
+
+  const execute = async () => {
+    if (busy) return;
+    setErrorKey(''); setBusy(true);
+    try {
+      await onAuthorized('', '');
+      onCancel();
+    } catch (err: unknown) {
+      setErrorKey(securityErrorKey(err));
+    } finally { setBusy(false); }
+  };
+  useEffect(() => {
+    if (!exempt || actionStarted.current) return;
+    // A render or StrictMode effect replay must never repeat a management write.
+    actionStarted.current = true;
+    void execute();
+  }, [exempt]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -86,8 +107,12 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   const needsEnrollment = status ? enrollmentRequired(status) : false;
   const focus = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-gray-900';
   return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
-    <div ref={panel} data-step-up-dialog tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} onKeyDown={trapFocus} className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:p-6">
+    <div ref={panel} data-step-up-dialog={exempt ? undefined : true} data-admin-action={exempt ? true : undefined} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} onKeyDown={trapFocus} className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:p-6">
       <h2 id={`${id}-title`} className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+      {!status ? <p id={`${id}-hint`} role={errorKey ? 'alert' : 'status'} className="mt-4 text-sm">{t(errorKey || 'common.processing')}</p> : exempt ? <>
+        <p id={`${id}-hint`} role={errorKey ? 'alert' : 'status'} className="mt-4 text-sm">{t(errorKey || 'common.processing')}</p>
+        {errorKey && <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onCancel} className={`min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button></div>}
+      </> : <>
       <p id={`${id}-hint`} className="mt-2 text-sm text-gray-600 dark:text-gray-300">{t(status?.passwordSource === 'directory' ? 'stepUp.directoryHint' : 'stepUp.hint')}</p>
       {needsEnrollment ? <div className="mt-4 space-y-4"><p role="alert" className="text-sm text-amber-800 dark:text-amber-300">{t('stepUp.enrollRequired')}</p><Link to="/settings?tab=security" onClick={onCancel} className={`inline-flex min-h-11 items-center rounded-md bg-brand-700 px-4 text-sm text-white ${focus}`}>{t('stepUp.openSecurity')}</Link></div> : <form onSubmit={submit} className="mt-5 space-y-4">
         <div><label htmlFor={`${id}-password`} className="mb-1 block text-sm font-medium">{t(status?.passwordSource === 'directory' ? 'stepUp.directoryPassword' : 'stepUp.password')}</label><input ref={passwordInput} id={`${id}-password`} type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className={`min-h-11 w-full rounded-md border border-gray-300 bg-white px-3 dark:border-gray-700 dark:bg-gray-800 ${focus}`} /></div>
@@ -96,6 +121,7 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
         <div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} onClick={onCancel} className={`min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button><button type="submit" disabled={busy || !status} className={`min-h-11 rounded-md bg-brand-700 px-4 text-sm text-white disabled:opacity-60 ${focus}`}>{busy ? t('common.processing') : t('stepUp.verify')}</button></div>
       </form>}
       {needsEnrollment && <button type="button" onClick={onCancel} className={`mt-4 min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button>}
+      </>}
     </div>
   </div>, document.body);
 }

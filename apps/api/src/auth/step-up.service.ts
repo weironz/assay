@@ -11,6 +11,10 @@ import {
   reserveTotpCode, releaseSuccessfulStepUpAttempt, StepUpPurpose, STEP_UP_TTL_SECONDS,
 } from './step-up-store';
 
+// Global administrators authorize management operations with their active Web
+// session. Personal account recovery and MFA changes keep their own proof.
+const ADMIN_MANAGEMENT_PURPOSES: StepUpPurpose[] = ['roles', 'api-tokens', 'samba'];
+
 @Injectable()
 export class StepUpService {
   constructor(private readonly prisma: PrismaService) {}
@@ -27,14 +31,16 @@ export class StepUpService {
   async status(req: Request, user: AuthUser) {
     await this.session(req, user);
     const privileged = hasPrivilegedRole(user.roles);
+    const enrollmentRequired = privileged && privilegedMfaMode() === 'enforce' && !user.twoFactorEnabled;
     return {
       privilegedMfaMode: privilegedMfaMode(),
       privileged,
       enrolled: user.twoFactorEnabled,
       passwordSource: user.passwordSource || 'local',
-      enrollmentRequired: privileged && privilegedMfaMode() === 'enforce' && !user.twoFactorEnabled,
+      enrollmentRequired,
       stepUpTtlSeconds: STEP_UP_TTL_SECONDS,
       purposes: ['roles', 'api-tokens', 'two-factor', 'account', 'samba'],
+      stepUpExemptPurposes: user.roles.includes('admin') && !enrollmentRequired ? ADMIN_MANAGEMENT_PURPOSES : [],
     };
   }
 
@@ -75,6 +81,16 @@ export class StepUpService {
 
   async consume(req: Request, user: AuthUser, purpose: StepUpPurpose) {
     const session = await this.session(req, user);
+    if (user.roles.includes('admin') && ADMIN_MANAGEMENT_PURPOSES.includes(purpose) && !req.headers['x-step-up-token']) {
+      // The session and current RBAC are checked by the guards. A trusted Origin
+      // still prevents another site from submitting cookie-authenticated writes.
+      const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+      if (!req.headers.origin || !origins.includes(req.headers.origin)) {
+        throw new ForbiddenException('管理操作来源校验失败');
+      }
+      return;
+    }
+    // Existing clients that explicitly supply a proof keep the one-use contract.
     await consumeStepUp(req.headers['x-step-up-token'], user.id, session.token, purpose);
   }
 }

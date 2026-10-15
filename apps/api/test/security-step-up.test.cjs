@@ -188,9 +188,61 @@ test('Nest role and token mutation handlers require step-up before side effects'
 test('API token authentication cannot issue or consume step-up tickets', async () => {
   const service = new StepUpService({});
   const req = { headers: { authorization: 'Bearer ast_fake', 'x-step-up-token': 'fake' } };
-  const user = { id: 'u', authType: 'token' };
+  const user = { id: 'u', authType: 'token', roles: ['admin'] };
   await assert.rejects(service.issue(req, user, { purpose: 'roles', password: 'irrelevant' }), { status: 401 });
   await assert.rejects(service.consume(req, user, 'roles'), { status: 401 });
+});
+
+test('an active administrator Web session authorizes management without another credential', async (t) => {
+  const service = new StepUpService({});
+  const user = { id: 'admin', authType: 'session', roles: ['admin'], twoFactorEnabled: true };
+  const origin = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim();
+  const req = { headers: { origin } };
+  t.mock.method(auth.api, 'getSession', async () => ({ user: { id: user.id }, session: { token: 'active-session' } }));
+  assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, ['roles', 'api-tokens', 'samba']);
+  for (const purpose of ['roles', 'api-tokens', 'samba']) await service.consume(req, user, purpose);
+  for (const purpose of ['account', 'two-factor']) await assert.rejects(service.consume(req, user, purpose), { status: 403 });
+  for (const headers of [{}, { origin: 'https://untrusted.example' }, { origin: 'null' }]) {
+    await assert.rejects(service.consume({ headers }, user, 'samba'), { status: 403 });
+  }
+  await assert.rejects(service.consume({ headers: { origin, authorization: 'Bearer fake' } }, user, 'samba'), { status: 401 });
+  const legacy = { headers: { 'x-step-up-token': await store.issueStepUp(user.id, 'active-session', 'samba') } };
+  await service.consume(legacy, user, 'samba');
+  await assert.rejects(service.consume(legacy, user, 'samba'), { status: 403 });
+  const previous = process.env.PRIVILEGED_MFA_MODE;
+  try {
+    process.env.PRIVILEGED_MFA_MODE = 'enforce';
+    const unenrolled = await service.status(req, { ...user, twoFactorEnabled: false });
+    assert.equal(unenrolled.enrollmentRequired, true);
+    assert.deepEqual(unenrolled.stepUpExemptPurposes, []);
+  } finally {
+    if (previous === undefined) delete process.env.PRIVILEGED_MFA_MODE;
+    else process.env.PRIVILEGED_MFA_MODE = previous;
+  }
+});
+
+test('delegated managers and users whose admin role was removed still need a matching one-use proof', async (t) => {
+  const service = new StepUpService({});
+  const req = { headers: {} };
+  t.mock.method(auth.api, 'getSession', async () => ({ user: { id: 'u' }, session: { token: 's' } }));
+  for (const role of ['requester', 'supervisor', 'samba_manager', 'asset_manager', 'inventory_manager']) {
+    const user = { id: 'u', authType: 'session', roles: [role] };
+    assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, []);
+    await assert.rejects(service.consume(req, user, 'samba'), { status: 403 });
+    req.headers['x-step-up-token'] = await store.issueStepUp('u', 's', 'samba');
+    await service.consume(req, user, 'samba');
+    await assert.rejects(service.consume(req, user, 'samba'), { status: 403 });
+    delete req.headers['x-step-up-token'];
+  }
+});
+
+test('admin exemption cannot authorize an absent, expired or different user session', async (t) => {
+  const service = new StepUpService({});
+  const user = { id: 'admin', authType: 'session', roles: ['admin'] };
+  const getSession = t.mock.method(auth.api, 'getSession', async () => null);
+  await assert.rejects(service.consume({ headers: {} }, user, 'samba'), { status: 401 });
+  getSession.mock.mockImplementation(async () => ({ user: { id: 'other' }, session: { token: 's' } }));
+  await assert.rejects(service.consume({ headers: {} }, user, 'roles'), { status: 401 });
 });
 
 test('privileged MFA enforcement blocks app routes only when opted in', async () => {

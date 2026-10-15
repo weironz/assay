@@ -9,6 +9,7 @@ export type SecurityStatus = {
   passwordSource?: 'local' | 'directory';
   enrollmentRequired?: boolean;
   stepUpTtlSeconds: number;
+  stepUpExemptPurposes?: StepUpPurpose[];
 };
 
 export class SecurityRequestError extends Error {
@@ -65,6 +66,6 @@ export function enrollmentRequired(status: SecurityStatus) {
 }
 
 // Use only on the immediately following mutation. Never store this token in app state or storage.
-export function stepUpHeaders(token: string) {
-  return { 'x-step-up-token': token };
+export function stepUpHeaders(token: string): Record<string, string> {
+  return token ? { 'x-step-up-token': token } : {};
 }
