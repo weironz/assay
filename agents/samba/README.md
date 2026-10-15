@@ -30,7 +30,10 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 - `users_dn` 为员工 OU，`groups_dn` 为受管组 OU，均限定在 `base_dn` 内。
 - 若现有部门组位于 `CN=Users`，可配置 `groups_dn` 为该容器，并明确设置 `group_prefix`，例如 `dept_`，无需移动原组。其他前缀及内置/高权限对象不可管理。
 - `primary_gid` 按现有文件服务器的 RFC2307 规则配置。已有用户 UID/GID 不被修改；新用户 UID 由域内已有值扫描后分配。每个域使用一个写入 Agent，避免多个独立分配器竞争。
-- `shares_root` 与 Samba 的 `/shares` 挂载保持一致；只允许管理 Agent 自己创建的共享，不覆盖其他配置或接管现有文件夹。
+- `shares_root` 是 Agent 本地共享挂载根；`samba_shares_root` 是同一存储在 Samba 内的绝对路径，默认 `/shares`，两者可不同。
+- `shares_file_name`、`samba_config_file_name` 分别指定 Agent 注册表和生成的 Samba 配置文件名，默认 `assay-shares.json`、`assay-shares.conf`。均为 `config_dir` 内的简单文件名，不接受目录或路径穿越。
+- 已有共享可通过部署维护的 `external_shares_file` JSON 显式登记，并配置只读挂载的 `external_samba_config_file`。JSON 格式为 `{ "config_sha256": "源配置文件的 SHA256", "shares": [{ "name": "scan", "comment": "扫描", "groups": ["dept_scan", "Domain Admins"], "read_only": false, "ready": true, "active": true, "path": "common/scans", "browseable": false }] }`。`path` 是 `shares_root` 内的真实相对路径，逐段拒绝符号链接；源配置变化后先更新清单，防止继续使用过期准入信息。
+- 登记不会修改原配置、移动文件、初始化 ACL 或重新分配 SID；已有共享的定义继续由服务器配置维护，Web 禁止覆盖/移除其定义，但可按既有权限管理组成员、子目录和 Windows ACL。隐藏共享不会进入员工根目录列表。新共享仍由 Agent 独立生成，不接管已有目录。
 - `smb_pid_file` 指向只读挂载的 smbd PID 文件，统一 Agent 与目标容器共享 PID namespace。
 - `read_only: true` 限制管理写操作；员工文件写权限仍由本人 SMB 会话和 Samba ACL 决定。
 
@@ -64,7 +67,7 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 - 传播先检查目录、权限和资源版本，拒绝 reparse point；单次最多 10000 个子项，超出需选取较小目录。遇到并发变更、部分执行失败或超时，必须人工核对，不盲目重试。
 - 用户可能仍从其他组、显式条目或受保护分支获得权限；旧 SMB 登录令牌需重新连接才能反映成员变化。
 
-生产接入与现有共享的显式接管是独立部署步骤。本次测试不修改公司原域或原共享。
+生产接入须先备份 AD、Assay 数据库、附件及共享（含 ACL/xattr），并在隔离环境验证恢复。共享登记与目录身份切换是部署步骤，不自动按同名账号合并身份。
 
 ## 从分离部署升级
 

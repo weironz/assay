@@ -20,6 +20,17 @@ pub struct Config {
     pub smb_username: String,
     pub shares_root: PathBuf,
     pub config_dir: PathBuf,
+    #[serde(default = "registry_name")]
+    pub shares_file_name: String,
+    #[serde(default = "config_name")]
+    pub samba_config_file_name: String,
+    #[serde(default = "samba_root")]
+    pub samba_shares_root: PathBuf,
+    // Deployment-owned inventory of existing shares; never written by the HTTP API.
+    #[serde(default)]
+    pub external_shares_file: Option<PathBuf>,
+    #[serde(default)]
+    pub external_samba_config_file: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub primary_gid: u32,
     // Present only for compatibility with deployments that still run a helper.
@@ -31,9 +42,58 @@ pub struct Config {
     #[serde(default)]
     pub read_only: bool,
 }
+fn registry_name() -> String {
+    "assay-shares.json".into()
+}
+fn config_name() -> String {
+    "assay-shares.conf".into()
+}
+fn samba_root() -> PathBuf {
+    "/shares".into()
+}
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let c: Self = serde_json::from_slice(&fs::read(path)?)?;
+        for name in [&c.shares_file_name, &c.samba_config_file_name] {
+            ensure!(
+                !name.is_empty()
+                    && name.len() <= 128
+                    && name != "."
+                    && name != ".."
+                    && name
+                        .chars()
+                        .all(|ch| ch.is_ascii_alphanumeric() || "._-".contains(ch)),
+                "configuration filenames must be simple filenames"
+            );
+        }
+        ensure!(
+            c.shares_file_name != c.samba_config_file_name,
+            "distinct configuration filenames required"
+        );
+        ensure!(
+            c.samba_shares_root.is_absolute()
+                && c.samba_shares_root.to_str().is_some_and(|p| p
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || "/_-".contains(ch)))
+                && !c
+                    .samba_shares_root
+                    .components()
+                    .any(|p| matches!(p, std::path::Component::ParentDir)),
+            "invalid Samba-visible shares root"
+        );
+        ensure!(
+            c.external_shares_file.is_some() == c.external_samba_config_file.is_some(),
+            "external inventory and source config must be configured together"
+        );
+        for path in [&c.external_shares_file, &c.external_samba_config_file]
+            .into_iter()
+            .flatten()
+        {
+            ensure!(
+                path.is_absolute(),
+                "absolute external inventory paths required"
+            );
+        }
         ensure!(c.ldap_url.starts_with("ldaps://"), "LDAPS is required");
         ensure!(
             c.users_dn.to_lowercase().starts_with("ou=")

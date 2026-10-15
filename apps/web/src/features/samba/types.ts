@@ -28,6 +28,9 @@ export type Share = {
   groups: string[];
   read_only: boolean;
   active: boolean;
+  external?: boolean;
+  path?: string;
+  browseable?: boolean;
 };
 export type Snapshot = {
   enabled: boolean;

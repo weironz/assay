@@ -133,7 +133,7 @@ export class SambaService {
     const data = await this.agent('/v1/snapshot');
     const account = data.users.find((u: any) => u.id === link.adObjectId && !u.disabled && u.manageable);
     if (!account || normalizedDomainDN(data.domain) !== normalizedDomainDN(link.domain)) throw new ForbiddenException('关联的 AD 员工账号不可用');
-    const active = data.shares.filter((s: any) => s.active && s.ready !== false);
+    const active = data.shares.filter((s: any) => s.active && s.ready !== false && s.browseable !== false);
     return {
       identity: { id: account.id as string, name: account.name as string, dn: account.dn as string },
       domain: link.domain,

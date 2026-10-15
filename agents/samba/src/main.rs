@@ -239,6 +239,14 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
                 sids.push(d.principal_sid(id, true).await?);
             }
             let rows = files::call(&a.c, files::Local::List).await?;
+            ensure!(
+                !rows
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["name"] == x.name && r["external"] == true),
+                "existing share definition is managed by the Samba configuration"
+            );
             let new = !rows
                 .as_array()
                 .unwrap()
@@ -255,6 +263,9 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
                         read_only: false,
                         ready: false,
                         active: true,
+                        external: false,
+                        path: String::new(),
+                        browseable: true,
                     }),
                 )
                 .await?;
@@ -270,6 +281,9 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
                     read_only: x.read_only,
                     ready: true,
                     active: true,
+                    external: false,
+                    path: String::new(),
+                    browseable: true,
                 }),
             )
             .await
@@ -672,11 +686,105 @@ mod unified_tests {
                 read_only: false,
                 ready: false,
                 active: true,
+                external: false,
+                path: String::new(),
+                browseable: true,
             }),
         )
         .await;
         assert!(result.is_err());
         assert_eq!(fs::read_dir(&config.shares_root).unwrap().count(), 0);
         assert_eq!(fs::read_dir(&config.config_dir).unwrap().count(), 0);
+    }
+
+    #[tokio::test]
+    async fn existing_shares_keep_nested_paths_and_cannot_be_overwritten() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config(false);
+        config.read_only = false;
+        config.external_samba_config_file = Some(fixture.0.join("company.conf"));
+        config.external_shares_file = Some(fixture.0.join("inventory.json"));
+        fs::write(fixture.0.join("company.conf"), "original config").unwrap();
+        fs::create_dir_all(config.shares_root.join("common/scans/部门")).unwrap();
+        let share = json!({"name":"scan","comment":"existing","groups":["dept_scan","Domain Admins"],
+            "read_only":false,"active":true,"ready":true,"path":"common/scans","browseable":false});
+        let inventory = json!({"config_sha256":format!("{:x}", Sha256::digest(b"original config")),"shares":[share.clone()]});
+        fs::write(fixture.0.join("inventory.json"), inventory.to_string()).unwrap();
+        let rows = files::call(&config, files::Local::List).await.unwrap();
+        assert_eq!(rows[0]["external"], true);
+        assert_eq!(rows[0]["browseable"], false);
+        let listing = files::call(
+            &config,
+            files::Local::Directories {
+                share: "scan".into(),
+                path: "".into(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(listing["directories"], json!(["部门"]));
+        assert!(
+            files::call(
+                &config,
+                files::Local::Remove {
+                    name: "scan".into()
+                }
+            )
+            .await
+            .is_err()
+        );
+        let mut edit: files::Share = serde_json::from_value(share).unwrap();
+        edit.path.clear();
+        assert!(
+            files::call(&config, files::Local::Save(edit))
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.0.join("company.conf")).unwrap(),
+            "original config"
+        );
+        assert!(
+            !config
+                .config_dir
+                .join(&config.samba_config_file_name)
+                .exists()
+        );
+        // A symlink inside the configured relative root cannot escape the mounted share tree.
+        fs::remove_dir(config.shares_root.join("common/scans/部门")).unwrap();
+        fs::remove_dir(config.shares_root.join("common/scans")).unwrap();
+        std::os::unix::fs::symlink(&fixture.0, config.shares_root.join("common/scans")).unwrap();
+        assert!(
+            files::call(
+                &config,
+                files::Local::Directories {
+                    share: "scan".into(),
+                    path: "".into()
+                }
+            )
+            .await
+            .is_err()
+        );
+        fs::write(fixture.0.join("company.conf"), "external change").unwrap();
+        assert!(files::call(&config, files::Local::List).await.is_err());
+    }
+
+    #[test]
+    fn deployment_paths_are_configurable_but_filenames_cannot_escape() {
+        let fixture = Fixture::new();
+        fixture.config(false);
+        let path = fixture.0.join("agent.json");
+        let mut value: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        value["shares_file_name"] = json!("registered.json");
+        value["samba_config_file_name"] = json!("managed.conf");
+        value["samba_shares_root"] = json!("/storage/company");
+        fs::write(&path, value.to_string()).unwrap();
+        let loaded = Config::load(path.to_str().unwrap()).unwrap();
+        assert_eq!(loaded.shares_file_name, "registered.json");
+        for bad in ["../company.conf", "/etc/samba.conf", "a\nb", ".."] {
+            value["samba_config_file_name"] = json!(bad);
+            fs::write(&path, value.to_string()).unwrap();
+            assert!(Config::load(path.to_str().unwrap()).is_err());
+        }
     }
 }

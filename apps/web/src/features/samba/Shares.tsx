@@ -207,7 +207,7 @@ export function Shares({
         <div className="flex flex-wrap gap-2">
           <button
             className={button}
-            disabled={!canWrite}
+            disabled={!canWrite || share.external}
             onClick={() => edit(share)}
           >
             {share.active ? '编辑共享目录' : '恢复共享目录'}
@@ -215,7 +215,7 @@ export function Shares({
           {share.active && (
             <button
               className={button}
-              disabled={!canWrite}
+              disabled={!canWrite || share.external}
               onClick={() =>
                 confirm('移除共享（保留目录和文件）', 'share.remove', {
                   name: share.name,
@@ -227,6 +227,11 @@ export function Shares({
           )}
         </div>
       </div>
+      {share.external && (
+        <p className="text-sm text-gray-500">
+          此共享沿用文件服务器现有配置。可管理组成员、子目录和文件权限；共享名称、路径与准入规则由服务器配置维护。
+        </p>
+      )}
       <section className={card + ' p-5'}>
         <dl className="grid gap-5 sm:grid-cols-3">
           <Info label="发布状态">
@@ -238,6 +243,8 @@ export function Shares({
             {share.read_only ? '共享只读' : '按目录权限'}
           </Info>
           <Info label="SMB 共享名称">{share.name}</Info>
+          <Info label="相对存储路径">{share.path || share.name}</Info>
+          <Info label="员工入口可见性">{share.browseable === false ? '隐藏共享' : '按用户权限显示'}</Info>
         </dl>
       </section>
       <section className="space-y-3">

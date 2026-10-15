@@ -24,6 +24,10 @@ on:
         description: '镜像版本号（留空则用 commit sha）'
         type: string
         default: ''
+      publish_latest:
+        description: '同时更新 latest（候选构建默认只推送指定标签）'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -36,8 +40,24 @@ concurrency:
 env:
   HUB_API: willdockerhub/assay-api
   HUB_WEB: willdockerhub/assay-web
+  HUB_AGENT: willdockerhub/assay-samba-agent
 
 jobs:
+  samba_agent:
+    name: Samba Agent · 原生 Rust 检查
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: agents/samba
+      - run: cargo fmt --manifest-path agents/samba/Cargo.toml --check
+      - run: cargo clippy --locked --manifest-path agents/samba/Cargo.toml --all-targets -- -D warnings
+      - run: cargo test --locked --manifest-path agents/samba/Cargo.toml
+
   cli:
     name: CLI · 测试与构建
     runs-on: ubuntu-latest
@@ -265,7 +285,7 @@ jobs:
     name: 构建并推送镜像
     # 只有类型检查、编译、整栈冒烟测试全过，才允许构建发布镜像；
     # 且必须是手动触发——推代码不会自动发版
-    needs: [cli, web, api, smoke]
+    needs: [cli, web, api, smoke, samba_agent]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
@@ -273,21 +293,27 @@ jobs:
       acr_registry: ${{ steps.meta.outputs.acr_registry }}
       api_digest: ${{ steps.digests.outputs.api_digest }}
       web_digest: ${{ steps.digests.outputs.web_digest }}
+      samba-agent_digest: ${{ steps.digests.outputs.samba-agent_digest }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 计算镜像标签与仓库地址
         id: meta
+        env:
+          RELEASE_VERSION: ${{ inputs.release_version }}
+          IMAGE_TAG: ${{ inputs.image_tag }}
         run: |
-          if [ -n "${{ inputs.release_version }}" ]; then
-            VERSION="${{ inputs.release_version }}"
+          set -euo pipefail
+          if [ -n "$RELEASE_VERSION" ]; then
+            VERSION="$RELEASE_VERSION"
             if ! echo "$VERSION" | grep -Eq '^1\.3\.[0-9]+$'; then
               echo "::error::统一发布版本必须为 1.3.x，例如 1.3.5"
               exit 1
             fi
             echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
-          elif [ -n "${{ inputs.image_tag }}" ]; then
-            echo "tag=${{ inputs.image_tag }}" >> "$GITHUB_OUTPUT"
+          elif [ -n "$IMAGE_TAG" ]; then
+            [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ && "$IMAGE_TAG" != latest ]] || { echo '::error::无效或可变镜像标签'; exit 1; }
+            echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
           else
             echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
@@ -315,9 +341,9 @@ jobs:
           context: ./apps/api
           push: true
           tags: |
-            ${{ env.HUB_API }}:latest
+            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_API) || '' }}
             ${{ env.HUB_API }}:${{ steps.meta.outputs.tag }}
-            ${{ secrets.ACR_URL }}/assay-api:latest
+            ${{ inputs.publish_latest && format('{0}/assay-api:latest', secrets.ACR_URL) || '' }}
             ${{ secrets.ACR_URL }}/assay-api:${{ steps.meta.outputs.tag }}
           # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
           # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
@@ -333,9 +359,9 @@ jobs:
           push: true
           build-args: VITE_API_BASE_URL=
           tags: |
-            ${{ env.HUB_WEB }}:latest
+            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_WEB) || '' }}
             ${{ env.HUB_WEB }}:${{ steps.meta.outputs.tag }}
-            ${{ secrets.ACR_URL }}/assay-web:latest
+            ${{ inputs.publish_latest && format('{0}/assay-web:latest', secrets.ACR_URL) || '' }}
             ${{ secrets.ACR_URL }}/assay-web:${{ steps.meta.outputs.tag }}
           # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
           # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
@@ -344,6 +370,21 @@ jobs:
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
 
+      - name: 构建并推送统一 Samba Agent
+        uses: docker/build-push-action@v6
+        with:
+          context: ./agents/samba
+          push: true
+          tags: |
+            ${{ env.HUB_AGENT }}:${{ steps.meta.outputs.tag }}
+            ${{ secrets.ACR_URL }}/assay-samba-agent:${{ steps.meta.outputs.tag }}
+            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_AGENT) || '' }}
+            ${{ inputs.publish_latest && format('{0}/assay-samba-agent:latest', secrets.ACR_URL) || '' }}
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=samba-agent
+          cache-to: type=gha,scope=samba-agent,mode=max
+
       - name: 记录 ACR 中本次镜像的 digest
         id: digests
         env:
@@ -351,7 +392,7 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
         run: |
           set -euo pipefail
-          for service in api web; do
+          for service in api web samba-agent; do
             digest=$(docker buildx imagetools inspect "$ACR_URL/assay-$service:$TAG" | awk '$1 == "Digest:" { print $2; exit }')
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::$service 的 ACR digest 缺失"; exit 1; }
             echo "${service}_digest=$digest" >> "$GITHUB_OUTPUT"
