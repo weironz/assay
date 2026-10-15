@@ -19,6 +19,7 @@ const { registerFileSessionRenewal, webSessionFingerprint } = require('../dist/a
 
 test('business session refresh can renew only an existing file connection using the bounded owner scope', async () => {
   const previous = process.env.AUTH_SECRET; process.env.AUTH_SECRET = 'unit-scope-secret';
+  const enabled = [process.env.SAMBA_ENABLED, process.env.FILES_ENABLED]; process.env.SAMBA_ENABLED = 'true'; process.env.FILES_ENABLED = 'true';
   const seen = []; registerFileSessionRenewal(async scope => { seen.push(scope); });
   try {
     const token = 'business-only-sliding-session', expiresAt = new Date(Date.now() + 10 * 86400_000);
@@ -27,7 +28,22 @@ test('business session refresh can renew only an existing file connection using 
     assert(seen[0].expiresAt <= Date.now() + 604800_000); assert(!JSON.stringify(seen).includes(token));
     await epoch.refreshSessionMarker('other-token', JSON.stringify({ session: { token, userId: 'u', expiresAt } }), 100);
     assert.equal(seen.length, 1);
-  } finally { registerFileSessionRenewal(); if (previous === undefined) delete process.env.AUTH_SECRET; else process.env.AUTH_SECRET = previous; }
+  } finally { registerFileSessionRenewal(); if (previous === undefined) delete process.env.AUTH_SECRET; else process.env.AUTH_SECRET = previous; for (const [i, name] of ['SAMBA_ENABLED', 'FILES_ENABLED'].entries()) { if (enabled[i] === undefined) delete process.env[name]; else process.env[name] = enabled[i]; } }
+});
+
+test('disabled or unconfigured optional files never add a dependency to ordinary Web session refresh', async () => {
+  const names = ['AUTH_SECRET', 'SAMBA_ENABLED', 'FILES_ENABLED'], previous = names.map(name => process.env[name]);
+  let calls = 0; registerFileSessionRenewal(async () => { calls++; });
+  try {
+    const token = 'local-only-session', value = JSON.stringify({ session: { token, userId: 'u', expiresAt: new Date(Date.now() + 60000) } });
+    for (const name of names) delete process.env[name];
+    await epoch.refreshSessionMarker(token, value, 60);
+    process.env.AUTH_SECRET = 'unit-scope-secret'; process.env.SAMBA_ENABLED = 'true';
+    await epoch.refreshSessionMarker(token, value, 60);
+    process.env.FILES_ENABLED = 'true'; delete process.env.AUTH_SECRET;
+    await epoch.refreshSessionMarker(token, value, 60);
+    assert.equal(calls, 0);
+  } finally { registerFileSessionRenewal(); for (const [i, name] of names.entries()) { if (previous[i] === undefined) delete process.env[name]; else process.env[name] = previous[i]; } }
 });
 
 test('sliding Web expiry retains existing directory authentication without recreating a revoked stamp', async () => {

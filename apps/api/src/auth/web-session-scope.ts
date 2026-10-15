@@ -12,7 +12,7 @@ type FileSessionRenewal = (scope: { fingerprint: string; expiresAt: number; user
 let renewFiles: FileSessionRenewal | undefined;
 export function registerFileSessionRenewal(renewal?: FileSessionRenewal) { renewFiles = renewal; }
 export function renewExistingFileSession(session: { token: string; userId?: string; expiresAt?: Date | string }, ttl: number) {
-  if (!renewFiles || !session.userId || !session.expiresAt) return;
+  if (!renewFiles || process.env.SAMBA_ENABLED !== 'true' || process.env.FILES_ENABLED !== 'true' || !process.env.AUTH_SECRET || !session.userId || !session.expiresAt) return;
   const expiresAt = Math.min(new Date(session.expiresAt).getTime(), Date.now() + ttl * 1000);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
   // Optional file transport must not delay business login/requests. No callback
