@@ -79,6 +79,8 @@ def main():
             env = re.sub(r'^' + key + r'=.*$', setting, env, flags=re.M) if re.search(r'^' + key + '=', env, re.M) else env.rstrip() + '\n' + setting + '\n'
         (ROOT / '.env').write_text(env)
         run('docker', 'compose', 'up', '-d', '--no-deps', 'agent', 'api')
+        # nginx resolves the API service at reload; its container IP may have changed.
+        run('docker', 'exec', 'assay-samba-test-web-1', 'nginx', '-s', 'reload')
         health = "Promise.all(['http://agent:8080/health','http://agent:8080/files/health','http://127.0.0.1:3000/health'].map(async u=>{const r=await fetch(u,{signal:AbortSignal.timeout(3000)});if(!r.ok)throw Error()})).catch(()=>process.exit(1))"
         for _ in range(30):
             if run('docker', 'exec', 'assay-samba-test-api-1', 'node', '-e', health, check=False).returncode == 0:
@@ -104,6 +106,7 @@ def main():
             if path.is_file() and not path.is_symlink():
                 shutil.chown(path, 10001, 10001)
         run('docker', 'compose', '--profile', 'files', 'up', '-d', '--no-deps', 'helper', 'agent', 'file-gateway', 'api')
+        run('docker', 'exec', 'assay-samba-test-web-1', 'nginx', '-s', 'reload')
         raise SystemExit('Upgrade failed; previous deployment configuration restored. Inspect private Docker logs and retained backup; no data volumes were removed.')
 
 
