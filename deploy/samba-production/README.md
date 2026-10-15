@@ -24,6 +24,7 @@ gh workflow run ci-cd.yml --ref main -f skip_deploy=true -f image_tag=sha-COMMIT
 - `postgres_container`、`postgres_user`、`postgres_database`：数据库来源。
 - `trees`：备份标签到源绝对目录的映射，包含 AD 部署、Assay 配置/Agent 状态、附件。
 - `content_verify_trees`：恢复时逐文件验证内容的树标签。
+- `content_verify_mode`：默认 `bytes` 逐字节读取并计算 SHA256；同盘 reflink 可选 `reflink`，逐文件用 Linux FIEMAP 确认逻辑区间映射到同一物理数据块（包括稀疏区间），不一致或不支持时回退到该文件的 SHA256。后者避免反复读取大文件，仍核对每个文件的数据对应关系；不能检测源与备份共享的数据块本身发生的磁盘损坏。
 - `ad_tree`、`ad_container`、`ad_restore_mounts`：恢复副本的 AD 根、镜像来源和相对目录到容器内路径的映射。
 - `sqlite_files`：备份根目录内需要完整性检查的 Agent SQLite 相对路径。
 
@@ -35,6 +36,8 @@ sudo python3 backup.py verify --config /private/backup.json --destination /data/
 ```
 
 验证会将 PostgreSQL dump 实际恢复到临时、无网络的容器，逐表核对数量和内容指纹；将文件恢复到独立 reflink 副本，检查内容、mode、uid/gid、mtime、ACL/xattr；在隔离 AD 副本上执行 `samba-tool dbcheck --cross-ncs`，并检查 Agent SQLite。只有成功后才生成 `RESTORE_VERIFIED.json`。这验证了切换回滚能力；同盘 reflink 不代替异盘或异地灾备。
+
+恢复验证将数据库及每棵目录树的结果分步写入私有验证目录，可在工作区断线后重跑；已完成的数据库恢复会核对记录，文件树仍重新核验。长任务应在服务器后台执行并将 stdout/stderr 重定向到私有日志，避免 SSH 断线影响结果保存。
 
 ## 准备与验收
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Host-side backup and isolated recovery verification; no AD provisioning or volume removal."""
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ from pathlib import Path
 import secrets
 import sqlite3
 import stat
+import struct
 import subprocess
 import time
 
@@ -82,6 +84,61 @@ def database_fingerprints(container, username, database):
     return [json.loads(line) for line in output.splitlines() if line]
 
 
+def extent_map(path):
+    """Linux FIEMAP: prove that reflink files reference identical physical data blocks."""
+    result = []
+    start = 0
+    with path.open('rb') as stream:
+        while True:
+            buffer = bytearray(32 + 256 * 56)
+            struct.pack_into('=QQIIII', buffer, 0, start, (1 << 64) - 1 - start, 1, 0, 256, 0)
+            fcntl.ioctl(stream, 0xC020660B, buffer, True)
+            count = struct.unpack_from('=I', buffer, 20)[0]
+            if not count:
+                break
+            last = False
+            for index in range(count):
+                entry = struct.unpack_from('=QQQQQIIII', buffer, 32 + index * 56)
+                logical, physical, length = entry[:3]
+                flags = entry[5]
+                if not physical or flags & ~(0x1 | 0x800 | 0x2000):
+                    raise OSError('Extent representation requires byte verification')
+                row = [logical, physical, length, flags & 0x800]
+                if result and result[-1][0] + result[-1][2] == logical and result[-1][1] + result[-1][2] == physical and result[-1][3] == row[3]:
+                    result[-1][2] += length
+                else:
+                    result.append(row)
+                start = logical + length
+                last = bool(flags & 1)
+            if last:
+                break
+    return result
+
+
+def verify_reflink_content(source, target):
+    if source.stat().st_dev != target.stat().st_dev:
+        raise ValueError('Physical extent verification requires the same filesystem')
+    counts = {'extent_verified_files': 0, 'byte_verified_files': 0, 'bytes': 0}
+    for path in source.rglob('*'):
+        if not stat.S_ISREG(path.lstat().st_mode):
+            continue
+        restored = target / path.relative_to(source)
+        same = False
+        try:
+            same = extent_map(path) == extent_map(restored)
+        except OSError:
+            pass
+        if same:
+            counts['extent_verified_files'] += 1
+        else:
+            with path.open('rb') as first, restored.open('rb') as second:
+                if hashlib.file_digest(first, 'sha256').digest() != hashlib.file_digest(second, 'sha256').digest():
+                    raise RuntimeError('Restored file contents differ')
+            counts['byte_verified_files'] += 1
+        counts['bytes'] += path.stat().st_size
+    return {'method': 'identical physical extents, SHA256 fallback', **counts}
+
+
 def backup(config, destination):
     if destination.exists():
         raise ValueError('Backup destination already exists')
@@ -134,7 +191,7 @@ def verify(config, destination):
     if not (destination / 'BACKUP_COMPLETE.json').is_file():
         raise ValueError('Backup has not completed')
     restore = destination / 'restore-validation'
-    restore.mkdir(mode=0o700)
+    restore.mkdir(mode=0o700, exist_ok=True)
     name = 'assay-restore-' + secrets.token_hex(6)
     database = config['postgres_database']
     username = config['postgres_user']
@@ -143,21 +200,29 @@ def verify(config, destination):
     credentials.chmod(0o600)
     created = False
     try:
-        image = inspect(config['postgres_container'])['Image']
-        run('docker', 'run', '-d', '--name', name, '--network', 'none', '--env-file', str(credentials),
-            '--mount', f'type=bind,src={destination / "assay.pgdump"},dst=/backup/assay.pgdump,readonly', image)
-        created = True
-        for _ in range(60):
-            ready = subprocess.run(['docker', 'exec', name, 'pg_isready', '-U', username, '-d', database],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            if ready.returncode == 0:
-                break
-            time.sleep(1)
+        complete = json.loads((destination / 'BACKUP_COMPLETE.json').read_text())
+        with (destination / 'assay.pgdump').open('rb') as dump:
+            if hashlib.file_digest(dump, 'sha256').hexdigest() != complete['database_sha256']:
+                raise RuntimeError('Backup database dump changed')
+        checkpoint = restore / 'database-fingerprints.json'
+        if checkpoint.exists():
+            restored = json.loads(checkpoint.read_text())
         else:
-            raise RuntimeError('Isolated recovery database did not start')
-        run('docker', 'exec', name, 'pg_restore', '--exit-on-error', '--no-owner',
-            '-U', username, '-d', database, '/backup/assay.pgdump')
-        restored = database_fingerprints(name, username, database)
+            image = inspect(config['postgres_container'])['Image']
+            run('docker', 'run', '-d', '--name', name, '--network', 'none', '--env-file', str(credentials),
+                '--mount', f'type=bind,src={destination / "assay.pgdump"},dst=/backup/assay.pgdump,readonly', image)
+            created = True
+            for _ in range(60):
+                ready = subprocess.run(['docker', 'exec', name, 'pg_isready', '-U', username, '-d', database],
+                                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if ready.returncode == 0:
+                    break
+                time.sleep(1)
+            else:
+                raise RuntimeError('Isolated recovery database did not start')
+            run('docker', 'exec', name, 'pg_restore', '--exit-on-error', '--no-owner',
+                '-U', username, '-d', database, '/backup/assay.pgdump')
+            restored = database_fingerprints(name, username, database)
         if restored != json.loads((destination / 'database-fingerprints.json').read_text()):
             raise RuntimeError('Restored database differs from backup')
         write_json(restore / 'database-fingerprints.json', restored)
@@ -167,12 +232,21 @@ def verify(config, destination):
         credentials.unlink(missing_ok=True)
     trees = {}
     for label in config['trees']:
-        clone(destination / label, restore / label)
-        expected = fingerprint(destination / label, content=label in config['content_verify_trees'])
-        actual = fingerprint(restore / label, content=label in config['content_verify_trees'])
+        if fingerprint(destination / label) != json.loads((destination / 'tree-fingerprints.json').read_text())[label]:
+            raise RuntimeError('Backup filesystem metadata changed since the snapshot')
+        if not (restore / label).exists():
+            clone(destination / label, restore / label)
+        bytes_mode = config.get('content_verify_mode', 'bytes') == 'bytes'
+        expected = fingerprint(destination / label, content=bytes_mode and label in config['content_verify_trees'])
+        actual = fingerprint(restore / label, content=bytes_mode and label in config['content_verify_trees'])
         if expected != actual:
             raise RuntimeError('Restored filesystem metadata, ACL, xattr or content differs')
         trees[label] = expected
+        if not bytes_mode and label in config['content_verify_trees']:
+            trees[label]['content_verification'] = verify_reflink_content(destination / label, restore / label)
+            if fingerprint(destination / label) != fingerprint(restore / label):
+                raise RuntimeError('Filesystem changed during extent verification')
+        write_json(restore / (label + '-verified.json'), trees[label])
         print(json.dumps({'verified_tree': label, 'files': expected['files'], 'bytes': expected['bytes']}), flush=True)
     # Validate the copied AD databases without networking or writing to the production tree.
     ad_source = restore / config['ad_tree']
@@ -204,6 +278,8 @@ def main():
     if os.geteuid() != 0:
         parser.error('Run on the deployment host as root to preserve ACLs and xattrs')
     config = json.loads(args.config.read_text())
+    if config.get('content_verify_mode', 'bytes') not in ['bytes', 'reflink']:
+        parser.error('content_verify_mode must be bytes or reflink')
     for key in ['postgres_user', 'postgres_database']:
         if not config[key] or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for ch in config[key]):
             parser.error('Invalid database identifier')
@@ -211,10 +287,17 @@ def main():
         if not label or any(ch not in 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-' for ch in label):
             parser.error('Invalid backup tree label')
     destination = args.destination.resolve()
-    if args.action == 'backup':
-        backup(config, destination)
-    else:
-        verify(config, destination)
+    try:
+        if args.action == 'backup':
+            backup(config, destination)
+        else:
+            verify(config, destination)
+    except subprocess.CalledProcessError as exc:
+        if destination.is_dir():
+            diagnostic = destination / 'command-error.log'
+            diagnostic.write_bytes((exc.stdout or b'') + b'\n' + (exc.stderr or b''))
+            diagnostic.chmod(0o600)
+        raise
 
 
 if __name__ == '__main__':
