@@ -63,6 +63,7 @@ const th: Resource = {
   nav: {
     companyAccounts: 'บัญชีบริษัทและไฟล์ที่แชร์',
     companyDirectory: 'ไดเรกทอรีและไฟล์บริษัท',
+    myFiles: 'ไฟล์ของฉัน',
     administrationHome: 'ภาพรวมการจัดการ',
     directoryEmployees: 'บัญชีพนักงาน',
     directoryGroups: 'กลุ่มผู้ใช้',

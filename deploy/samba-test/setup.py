@@ -21,6 +21,7 @@ db_password = secrets.token_hex(24)
 def private(name, value, owner=0):
     p=root/name; p.write_text(value+'\n'); p.chmod(0o400); os.chown(p,owner,owner)
 private('secrets/agent-token',secrets.token_urlsafe(48),10001)
+private('secrets/files-token',secrets.token_urlsafe(48),10001)
 private('secrets/ad-password',ad_password,10001)
 private('secrets/test-admin-password',admin_password)
 private('database.env',f'POSTGRES_USER=assay\nPOSTGRES_DB=assay\nPOSTGRES_PASSWORD={db_password}')
@@ -38,6 +39,7 @@ PRIVILEGED_MFA_MODE=optional''')
 (root/'.env').chmod(0o600)
 config = dict(listen='0.0.0.0:8080',token_file='/secrets/agent-token',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',ldap_bind_dn='CN=Administrator,CN=Users,DC=assay,DC=test',ldap_password_file='/secrets/ad-password',base_dn='DC=assay,DC=test',users_dn='OU=Employees,DC=assay,DC=test',groups_dn='OU=Groups,DC=assay,DC=test',smb_server='172.30.225.10',smb_username='ASSAY\\Administrator',shares_root='/shares',config_dir='/managed',state_dir='/state',primary_gid=20000,helper_socket='/helper-run/helper.sock',smb_pid_file='/samba-run/smbd.pid',read_only=False)
 (root/'agent.json').write_text(json.dumps(config,indent=2))
+(root/'files.json').write_text(json.dumps(dict(listen='0.0.0.0:8081',token_file='/secrets/files-token',smb_server='172.30.225.10',domain='ASSAY',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',users_dn='OU=Employees,DC=assay,DC=test'),indent=2))
 for name in ['compose.yaml','nginx.conf']:
     src=pathlib.Path(__file__).parent/name
     if src.resolve()!=(root/name).resolve(): shutil.copyfile(src,root/name)

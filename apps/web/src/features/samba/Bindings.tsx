@@ -32,7 +32,7 @@ export function Bindings({
         </div>
         <p className="mt-4 border-t border-gray-100 pt-4 text-sm text-gray-500 dark:border-gray-800">
           当前两者独立，关联不会同步密码、自动创建账号或修改角色。员工关联后可在“个人设置
-          → 安全”自助修改 AD 密码。以后若启用由 AD 提供身份的 OIDC
+          → 安全”自助修改 AD 密码；启用“我的文件”后，也可验证本人 AD 密码访问文件。以后若启用由 AD 提供身份的 OIDC
           登录，可使用公司身份登录 Assay；Assay 业务权限仍由业务角色控制。
         </p>
       </section>

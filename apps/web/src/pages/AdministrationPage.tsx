@@ -5,11 +5,11 @@ import { api } from '../lib/api';
 import { displayDomain, type Snapshot } from '../features/samba/types';
 import { Badge, card, link } from '../features/samba/components';
 
-export default function AdministrationPage() {
+export default function AdministrationPage({ directoryMode = false }: { directoryMode?: boolean }) {
   const { has } = useAuth();
   const [directory, setDirectory] = useState<Snapshot | null>(null);
   const [error, setError] = useState('');
-  const readDirectory = has('samba:read');
+  const readDirectory = directoryMode && has('samba:read');
   useEffect(() => {
     if (readDirectory)
       void api
@@ -48,8 +48,8 @@ export default function AdministrationPage() {
       ],
     },
     {
-      title: '平台组织与访问',
-      description: '管理 Assay 业务组织、系统账号和业务角色。',
+      title: directoryMode ? '登录账号关联' : '平台组织与访问',
+      description: directoryMode ? '明确员工的 Assay 登录身份与 AD 文件访问身份。' : '管理 Assay 业务组织、系统账号和业务角色。',
       items: [
         {
           to: '/organization',
@@ -68,7 +68,7 @@ export default function AdministrationPage() {
         {
           to: '/samba/bindings',
           title: '登录账号关联',
-          description: '关联公司 AD 账号，支持员工自助改密',
+          description: '关联公司 AD 账号，支持自助改密和员工文件验证',
           permission: 'samba:read',
           count: directory?.bindings?.length,
         },
@@ -91,10 +91,10 @@ export default function AdministrationPage() {
   return (
     <div className="mx-auto max-w-[1500px] space-y-8">
       <div>
-        <p className="mb-2 text-sm text-gray-500">平台管理</p>
+        <p className="mb-2 text-sm text-gray-500">{directoryMode ? '公司目录与文件' : '平台管理'}</p>
         <h1 className="text-2xl font-semibold tracking-tight">管理概览</h1>
         <p className="mt-2 text-sm text-gray-500">
-          从员工身份、文件访问到平台业务权限，按管理对象进入对应工作区。
+          {directoryMode ? '管理员工资料、用户组、账号关联及文件访问权限。员工文件入口在“我的文件”模块。' : '管理 Assay 的组织架构、系统账号和业务角色。'}
         </p>
       </div>
       {error && (
@@ -111,7 +111,7 @@ export default function AdministrationPage() {
         </div>
       )}
       {sections.map((section) => {
-        const items = section.items.filter((i) => has(i.permission));
+        const items = section.items.filter((i) => has(i.permission) && i.to.startsWith('/samba') === directoryMode);
         return items.length ? (
           <section key={section.title}>
             <h2 className="font-semibold">{section.title}</h2>

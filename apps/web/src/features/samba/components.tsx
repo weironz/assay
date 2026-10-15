@@ -250,11 +250,15 @@ export function EditorDialog({
   setEditor,
   submit,
   cancel,
+  busy = false,
+  submitLabel = '确认并验证身份',
 }: {
   editor: Editor;
   setEditor: (value: Editor) => void;
   submit: (e: FormEvent) => void;
   cancel: () => void;
+  busy?: boolean;
+  submitLabel?: string;
 }) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -353,11 +357,11 @@ export function EditorDialog({
             ),
           )}
           <div className="flex justify-end gap-2 border-t border-gray-100 pt-4 dark:border-gray-800">
-            <button type="button" className={button} onClick={cancel}>
+            <button type="button" className={button} onClick={cancel} disabled={busy}>
               取消
             </button>
-            <button className={primary} type="submit">
-              确认并验证身份
+            <button className={primary} type="submit" disabled={busy}>
+              {busy ? '正在处理…' : submitLabel}
             </button>
           </div>
         </form>

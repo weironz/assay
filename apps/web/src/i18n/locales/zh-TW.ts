@@ -63,6 +63,7 @@ const zhTW: Resource = {
   nav: {
     companyAccounts: '公司帳號與檔案共享',
     companyDirectory: '公司目錄與檔案',
+    myFiles: '我的檔案',
     administrationHome: '管理概覽',
     directoryEmployees: '員工帳號',
     directoryGroups: '使用者群組',

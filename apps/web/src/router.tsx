@@ -1,5 +1,6 @@
 import SambaPage from './features/samba/SambaPage';
 import AdministrationPage from './pages/AdministrationPage';
+import FilesPage from './features/files/FilesPage';
 import { PLATFORM_PERMISSIONS } from './lib/business-navigation';
 import AssetsPage, { AssetDetailPage } from './features/cop/AssetsPage';
 import PartsPage, { PartDetailPage } from './features/cop/PartsPage';
@@ -97,6 +98,8 @@ export const router = createBrowserRouter([
         ),
       },
       { path: 'samba', element: <Navigate to="/samba/users" replace /> },
+      { path: 'samba/overview', element: <ProtectedRoute permission="samba:read"><AdministrationPage directoryMode /></ProtectedRoute> },
+      { path: 'files', element: <FilesPage /> },
       {
         path: 'samba/:section/:id?',
         element: (

@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../stores/auth';
+import { useModules } from '../stores/modules';
+import { api } from '../lib/api';
 import { signOut } from '../lib/auth-client';
 import {
   BUSINESS_MODULES,
@@ -37,11 +39,13 @@ const MenuIcon = () => (
 export default function AppLayout() {
   const { t } = useTranslation();
   const { has, clear } = useAuth();
+  const { features, load } = useModules();
+  useEffect(() => { void load(); }, [load]);
   const navigate = useNavigate();
   const location = useLocation();
   const params = new URLSearchParams(location.search);
   const modules = BUSINESS_MODULES.filter(
-    (module) => allowedItems(module.items, has).length > 0,
+    (module) => allowedItems(module.items, has, features).length > 0,
   );
   const requestedModule = moduleForPath(location.pathname);
   const platformItems = allowedItems(PLATFORM_MODULE.items, has);
@@ -50,7 +54,7 @@ export default function AppLayout() {
       ? PLATFORM_MODULE
       : modules.find((module) => module.id === requestedModule?.id);
   const moduleItems = currentModule
-    ? allowedItems(currentModule.items, has)
+    ? allowedItems(currentModule.items, has, features)
     : [];
   const activeItem = activeMenuItem(moduleItems, location.pathname, params);
   const [open, setOpen] = useState(() => window.matchMedia(DESKTOP).matches);
@@ -75,6 +79,7 @@ export default function AppLayout() {
   }, [open]);
 
   const logout = async () => {
+    if (features.files) { try { await api.delete('/files/session'); } catch { /* Sign-out also revokes the server-side file session. */ } }
     await signOut();
     clear();
     navigate('/login', { replace: true });
@@ -86,7 +91,7 @@ export default function AppLayout() {
     modules.map((module) => (
       <Link
         key={module.id}
-        to={allowedItems(module.items, has)[0].to}
+        to={allowedItems(module.items, has, features)[0].to}
         onClick={closeOnMobile}
         aria-current={currentModule?.id === module.id ? 'page' : undefined}
         className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${

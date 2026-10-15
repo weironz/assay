@@ -19,7 +19,7 @@ function pass(message) { results.push(message); console.log('PASS ' + message); 
   await page.locator('input[type=password]').fill(password);
   await page.locator('form button[type=submit]').click();
   await page.waitForURL('**/dashboard');
-  await page.goto(origin + '/platform');
+  await page.goto(origin + '/samba/overview');
   await page.getByRole('heading', { name: '管理概览', exact: true }).waitFor();
   for (const asset of ['greenstor-lockup.png', 'greenstor-lockup-dark.png', 'favicon.png']) assert.equal((await page.request.get(origin + '/brand/' + asset)).status(), 200);
   for (const theme of ['light', 'dark']) {
@@ -66,7 +66,7 @@ function pass(message) { results.push(message); console.log('PASS ' + message); 
   await page.getByText(/当前两者独立，关联不会同步密码/).waitFor();
   pass('Account-link page explicitly explains separate login and AD credentials');
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(origin + '/platform');
+  await page.goto(origin + '/samba/overview');
   await page.getByRole('heading', { name: '管理概览', exact: true }).waitFor();
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
   await page.locator('button[aria-controls="workspace-sidebar"]').click();

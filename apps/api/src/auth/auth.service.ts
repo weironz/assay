@@ -7,6 +7,7 @@ import { AuthUser } from './auth.types';
 import { isSystemRoleName } from './role-policy';
 import { ApiTokensService } from '../api-tokens/api-tokens.service';
 import { assertSessionEpoch } from './session-epoch';
+import { webSessionFingerprint, webSessionScopes } from './web-session-scope';
 
 @Injectable()
 export class AuthService {
@@ -43,6 +44,8 @@ export class AuthService {
       },
     });
     if (!user) return null;
+    if (process.env.FILES_ENABLED === 'true')
+      webSessionScopes.set(req, { fingerprint: webSessionFingerprint(session.session.token), expiresAt: new Date(session.session.expiresAt).getTime() });
     return this.toAuthUser(user, null);
   }
 

@@ -23,3 +23,4 @@ jobs:
       - run: cargo clippy --locked --manifest-path agents/samba/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --locked --manifest-path agents/samba/Cargo.toml
       - run: docker build -t assay-samba-agent:ci agents/samba
+      - run: docker build -f agents/samba/Dockerfile.files -t assay-file-gateway:ci agents/samba

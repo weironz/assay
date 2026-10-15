@@ -82,6 +82,19 @@ services:
       timeout: 5s
       retries: 20
     networks: [management]
+  file-gateway:
+    profiles: [files]
+    image: ${ASSAY_FILE_GATEWAY_IMAGE:-assay-file-gateway:test}
+    user: "10001:10001"
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./files.json:/config/files.json:ro
+      - ./secrets/files-token:/secrets/files-token:ro
+      - ./tls/ca.crt:/tls/ca.crt:ro
+    networks: [directory, management]
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -100,12 +113,16 @@ services:
       SAMBA_ENABLED: "true"
       SAMBA_AGENT_URL: http://agent:8080
       SAMBA_AGENT_TOKEN_FILE: /secrets/agent-token
+      FILES_ENABLED: ${FILES_ENABLED:-false}
+      FILES_GATEWAY_URL: http://file-gateway:8081
+      FILES_GATEWAY_TOKEN_FILE: /secrets/files-token
       NODE_ENV: production
       REDIS_HOST: redis
       STORAGE_DRIVER: local
       STORAGE_LOCAL_DIR: /data/attachments
     volumes:
       - ./secrets/agent-token:/secrets/agent-token:ro
+      - ./secrets/files-token:/secrets/files-token:ro
       - attachments:/data/attachments
     depends_on:
       postgres:

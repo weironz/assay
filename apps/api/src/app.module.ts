@@ -1,4 +1,5 @@
 import { SambaModule } from './samba/samba.module';
+import { FilesModule } from './files/files.module';
 import { OperationsModule } from './operations/operations.module';
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -27,6 +28,7 @@ import { PermissionsGuard } from './auth/permissions.guard';
   imports: [
     OperationsModule,
     SambaModule,
+    FilesModule,
     ConfigModule.forRoot({ isGlobal: true }),
     BullModule.forRoot({
       connection: {

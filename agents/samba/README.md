@@ -18,6 +18,8 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 
 标准 Dockerfile 使用 Rust 1.99 / musl。云环境可用 BuildKit `proxy_ca` secret 提供构建 CA，不写入镜像。`BUILDER_IMAGE` 可指定同版本的本地编译缓存镜像；默认仍为官方 Rust 镜像。
 
+员工文件访问使用另一个独立二进制 `assay-file-gateway`，由 `Dockerfile.files` 构建，不使用管理 Agent 的 AD 凭据或本地 helper。它用本人的 LDAPS/SMB 会话流式传输文件，详见 [员工文件模块](../../docs/samba/05-员工文件模块.md)。该模块默认关闭，管理 Agent 仍不提供任意文件内容接口。
+
 ## 配置
 
 挂载 `/config/agent.json`，字段见 `src/config.rs` 和隔离测试的 `deploy/samba-test/setup.py`。生产凭据自行以文件挂载，不提交版本控制。

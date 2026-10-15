@@ -137,6 +137,7 @@ dependencies = [
  "subtle",
  "tokio",
  "uuid",
+ "zeroize",
 ]
 
 [[package]]

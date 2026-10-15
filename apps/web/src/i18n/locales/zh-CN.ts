@@ -63,6 +63,7 @@ const zhCN: Resource = {
   nav: {
     companyAccounts: '公司账号与文件共享',
     companyDirectory: '公司目录与文件',
+    myFiles: '我的文件',
     administrationHome: '管理概览',
     directoryEmployees: '员工账号',
     directoryGroups: '用户组',

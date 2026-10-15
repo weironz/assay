@@ -47,7 +47,7 @@ export class SambaService {
   async operation(id: string) {
     const op = await this.prisma.sambaOperation.findUnique({ where: { id } });
     if (!op) throw new BadRequestException('操作不存在');
-    if (['pending', 'queued', 'running', 'uncertain'].includes(op.state) && !op.action.startsWith('identity.')) {
+    if (['pending', 'queued', 'running', 'uncertain'].includes(op.state) && !op.action.startsWith('identity.') && !op.action.startsWith('file.')) {
       try {
         const r = await this.agent(`/v1/operations/${encodeURIComponent(id)}`);
         await this.prisma.sambaOperation.update({ where: { id }, data: { state: r.state, result: r } });
@@ -116,6 +116,19 @@ export class SambaService {
   async identity(user: AuthUser) {
     if (process.env.SAMBA_ENABLED !== 'true') return { enabled: false, identity: null };
     return { enabled: true, identity: await this.prisma.sambaIdentity.findUnique({ where: { userId: user.id }, select: { accountName: true, domain: true } }) };
+  }
+  async fileIdentity(user: AuthUser) {
+    const link = await this.prisma.sambaIdentity.findUnique({ where: { userId: user.id } });
+    if (!link) return null;
+    const data = await this.agent('/v1/snapshot');
+    const account = data.users.find((u: any) => u.id === link.adObjectId && !u.disabled && u.manageable);
+    if (!account || data.domain !== link.domain) throw new ForbiddenException('关联的 AD 员工账号不可用');
+    return {
+      identity: { id: account.id as string, name: account.name as string, dn: account.dn as string },
+      domain: link.domain,
+      // Restrict employee access to active shares explicitly managed by Assay.
+      shares: data.shares.filter((s: any) => s.active && s.ready !== false).map((s: any) => s.name as string),
+    };
   }
   async selfPassword(user: AuthUser, input: unknown) {
     const p = selfPasswordSchema.safeParse(input);

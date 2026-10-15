@@ -4,6 +4,7 @@ export interface MenuItem {
   permission?: string;
   anyPermissions?: string[];
   groupKey?: string;
+  feature?: 'directory' | 'files';
 }
 
 export interface BusinessModule {
@@ -14,6 +15,21 @@ export interface BusinessModule {
 }
 
 export const BUSINESS_MODULES: BusinessModule[] = [
+  {
+    id: 'directory', labelKey: 'nav.companyDirectory', areas: ['/samba'],
+    items: [
+      { to: '/samba/overview', labelKey: 'nav.administrationHome', permission: 'samba:read', feature: 'directory' },
+      { to: '/samba/users', labelKey: 'nav.directoryEmployees', permission: 'samba:read', feature: 'directory' },
+      { to: '/samba/groups', labelKey: 'nav.directoryGroups', permission: 'samba:read', feature: 'directory' },
+      { to: '/samba/shares', labelKey: 'nav.sharedDirectories', permission: 'samba:read', feature: 'directory' },
+      { to: '/samba/bindings', labelKey: 'nav.accountLinks', permission: 'samba:read', feature: 'directory' },
+      { to: '/samba/history', labelKey: 'nav.directoryOperations', permission: 'samba:read', feature: 'directory', groupKey: 'nav.managementAudit' },
+    ],
+  },
+  {
+    id: 'files', labelKey: 'nav.myFiles', areas: ['/files'],
+    items: [{ to: '/files', labelKey: 'nav.myFiles', feature: 'files' }],
+  },
   {
     id: 'tickets',
     labelKey: 'nav.ticketSystem',
@@ -81,37 +97,18 @@ export const BUSINESS_MODULES: BusinessModule[] = [
 ];
 
 export const PLATFORM_PERMISSIONS = [
-  'samba:read',
   'organization:manage',
   'user:manage',
 ];
 export const PLATFORM_MODULE: BusinessModule = {
   id: 'platform',
   labelKey: 'nav.platformManagement',
-  areas: ['/platform', '/organization', '/users', '/samba'],
+  areas: ['/platform', '/organization', '/users'],
   items: [
     {
       to: '/platform',
       labelKey: 'nav.administrationHome',
       anyPermissions: PLATFORM_PERMISSIONS,
-    },
-    {
-      to: '/samba/users',
-      labelKey: 'nav.directoryEmployees',
-      permission: 'samba:read',
-      groupKey: 'nav.companyDirectory',
-    },
-    {
-      to: '/samba/groups',
-      labelKey: 'nav.directoryGroups',
-      permission: 'samba:read',
-      groupKey: 'nav.companyDirectory',
-    },
-    {
-      to: '/samba/shares',
-      labelKey: 'nav.sharedDirectories',
-      permission: 'samba:read',
-      groupKey: 'nav.companyDirectory',
     },
     {
       to: '/organization',
@@ -125,27 +122,17 @@ export const PLATFORM_MODULE: BusinessModule = {
       permission: 'user:manage',
       groupKey: 'nav.platformAccess',
     },
-    {
-      to: '/samba/bindings',
-      labelKey: 'nav.accountLinks',
-      permission: 'samba:read',
-      groupKey: 'nav.platformAccess',
-    },
-    {
-      to: '/samba/history',
-      labelKey: 'nav.directoryOperations',
-      permission: 'samba:read',
-      groupKey: 'nav.managementAudit',
-    },
   ],
 };
 
 export function allowedItems(
   items: MenuItem[],
   has: (permission: string) => boolean,
+  features: Partial<Record<'directory' | 'files', boolean>> = {},
 ) {
   return items.filter(
     (item) =>
+      (!item.feature || features[item.feature] === true) &&
       (!item.permission || has(item.permission)) &&
       (!item.anyPermissions || item.anyPermissions.some(has)),
   );

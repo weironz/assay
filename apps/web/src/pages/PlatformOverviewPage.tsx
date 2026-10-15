@@ -3,13 +3,15 @@ import { useTranslation } from 'react-i18next';
 import CopOverview from '../features/cop/Overview';
 import { BUSINESS_MODULES, allowedItems } from '../lib/business-navigation';
 import { useAuth } from '../stores/auth';
+import { useModules } from '../stores/modules';
 
 export default function PlatformOverviewPage() {
   const { t } = useTranslation();
   const { has } = useAuth();
+  const features = useModules(s => s.features);
   const modules = BUSINESS_MODULES.map((module) => ({
     ...module,
-    items: allowedItems(module.items, has),
+    items: allowedItems(module.items, has, features),
   })).filter((module) => module.items.length > 0);
 
   return (

@@ -67,6 +67,7 @@ const en = {
   nav: {
     companyAccounts: 'Company accounts & file shares',
     companyDirectory: 'Company directory & files',
+    myFiles: 'My files',
     administrationHome: 'Administration overview',
     directoryEmployees: 'Employees',
     directoryGroups: 'Groups',

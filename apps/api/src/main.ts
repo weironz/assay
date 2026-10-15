@@ -1,9 +1,11 @@
 import { NestFactory } from '@nestjs/core';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
-import { toNodeHandler } from 'better-auth/node';
+import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { AppModule } from './app.module';
 import { auth } from './auth/auth';
+import { FilesService } from './files/files.service';
+import { webSessionFingerprint } from './auth/web-session-scope';
 
 async function bootstrap() {
   // 关闭全局 body parser：better-auth 处理器需要读取原始请求体
@@ -17,7 +19,20 @@ async function bootstrap() {
   const expressApp = app.getHttpAdapter().getInstance();
 
   // better-auth 路由（登录/注册/登出/会话/邮箱验证/密码重置等）挂在 body parser 之前
-  expressApp.all(/^\/api\/auth\//, toNodeHandler(auth));
+  const authHandler = toNodeHandler(auth);
+  expressApp.all(/^\/api\/auth\//, async (req: any, res: any) => {
+    if (process.env.FILES_ENABLED === 'true' && req.method === 'POST' && req.path === '/api/auth/sign-out') {
+      const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
+      if (session?.session?.token) {
+        const owner = webSessionFingerprint(session.session.token);
+        res.once('finish', () => {
+          if (res.statusCode >= 200 && res.statusCode < 300)
+            void app.get(FilesService).revoke(owner, true).catch(() => new Logger('Files').warn('文件会话回收延迟，将由服务端到期清理'));
+        });
+      }
+    }
+    return authHandler(req, res);
+  });
 
   // 其余接口恢复 JSON / 表单解析
   app.use(json({ limit: '2mb' }));
