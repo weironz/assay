@@ -11,7 +11,7 @@ import { SambaService } from '../samba/samba.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { enabledModules, fileCommandSchema, locationSchema, loginSchema } from './contracts';
 
-interface Capability { token: string; id: string; domain: string }
+interface Capability { token: string; id: string; domain: string; policies: Record<string, string> }
 @Injectable()
 export class FilesService {
   constructor(private readonly samba: SambaService, private readonly prisma: PrismaService) {}
@@ -74,11 +74,16 @@ export class FilesService {
     let identity: Awaited<ReturnType<SambaService['fileIdentity']>>;
     try { identity = await this.samba.fileIdentity(user); }
     catch (e) { await this.revoke(scope.fingerprint); throw e; }
-    if (!identity || identity.identity.id !== cap.id || identity.domain !== cap.domain || (share && !identity.shares.includes(share))) {
+    if (!identity || identity.identity.id !== cap.id || identity.domain !== cap.domain || this.policiesChanged(cap, identity.sharePolicies)) {
       await this.revoke(scope.fingerprint);
       throw new HttpException('身份关联或共享配置已变化，请重新验证', 410);
     }
+    // An arbitrary GET share parameter must not revoke a valid employee session.
+    if (share && (!identity.shares.includes(share) || !Object.hasOwn(cap.policies, share))) throw new ForbiddenException('无权访问该共享目录');
     return { owner: scope.fingerprint, cap };
+  }
+  private policiesChanged(cap: Capability, current: Record<string, string>) {
+    return !cap.policies || Object.entries(cap.policies).some(([share, revision]) => current[share] !== revision);
   }
   async status(req: Request, user: AuthUser) {
     const scope = this.scope(req, user);
@@ -87,7 +92,7 @@ export class FilesService {
     if (!linked) { await this.revoke(scope.fingerprint); return { enabled: true, connected: false, identity }; }
     const cap = await this.stored(scope.fingerprint);
     if (!cap) return { enabled: true, connected: false, identity };
-    if (cap.id !== linked.identity.id || cap.domain !== linked.domain) { await this.revoke(scope.fingerprint); return { enabled: true, connected: false, identity }; }
+    if (cap.id !== linked.identity.id || cap.domain !== linked.domain || this.policiesChanged(cap, linked.sharePolicies)) { await this.revoke(scope.fingerprint); return { enabled: true, connected: false, identity }; }
     try {
       const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, cap), scope.fingerprint);
       return { enabled: true, connected: true, identity, ...data, shares: data.shares.filter((s: string) => linked.shares.includes(s)) };
@@ -111,7 +116,7 @@ export class FilesService {
       const ttl = Math.min(3600, Math.floor((scope.expiresAt - Date.now()) / 1000));
       if (ttl <= 0) throw new ForbiddenException('Assay 会话已到期');
       const data = await this.json(await this.gateway('/v1/session', scope.fingerprint, null, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ owner: scope.fingerprint, identity: linked.identity, shares: linked.shares, password: parsed.data.password, ttl }) }), scope.fingerprint);
-      newCap = { token: data.token, id: linked.identity.id, domain: linked.domain };
+      newCap = { token: data.token, id: linked.identity.id, domain: linked.domain, policies: Object.fromEntries(data.shares.map((share: string) => [share, linked.sharePolicies[share]])) };
       const stored = await authRedis.eval("if redis.call('EXISTS',KEYS[2])==1 then return 0 end; redis.call('SET',KEYS[1],ARGV[1],'EX',ARGV[2]); return 1", {
         keys: [this.key(scope.fingerprint), `assay:files:closed:${scope.fingerprint}`], arguments: [JSON.stringify(newCap), String(ttl)],
       });

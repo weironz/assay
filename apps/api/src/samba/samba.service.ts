@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import { createHmac } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { readFileSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -123,11 +123,13 @@ export class SambaService {
     const data = await this.agent('/v1/snapshot');
     const account = data.users.find((u: any) => u.id === link.adObjectId && !u.disabled && u.manageable);
     if (!account || data.domain !== link.domain) throw new ForbiddenException('关联的 AD 员工账号不可用');
+    const active = data.shares.filter((s: any) => s.active && s.ready !== false);
     return {
       identity: { id: account.id as string, name: account.name as string, dn: account.dn as string },
       domain: link.domain,
       // Restrict employee access to active shares explicitly managed by Assay.
-      shares: data.shares.filter((s: any) => s.active && s.ready !== false).map((s: any) => s.name as string),
+      shares: active.map((s: any) => s.name as string),
+      sharePolicies: Object.fromEntries(active.map((s: any) => [s.name, createHash('sha256').update(JSON.stringify({ groups: [...s.groups].sort(), readOnly: s.read_only })).digest('hex')])) as Record<string, string>,
     };
   }
   async selfPassword(user: AuthUser, input: unknown) {

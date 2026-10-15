@@ -11,13 +11,13 @@ const { webSessionScopes } = require('../dist/auth/web-session-scope');
 test('employee file requests are bound to a web session, current identity and managed share', async () => {
   const previous = [process.env.FILES_ENABLED, process.env.SAMBA_ENABLED];
   process.env.FILES_ENABLED = 'true'; process.env.SAMBA_ENABLED = 'true';
-  const linked = { identity: { id: 'ad-a', name: 'alice', dn: 'CN=alice' }, domain: 'domain-a', shares: ['finance'] };
+  const linked = { identity: { id: 'ad-a', name: 'alice', dn: 'CN=alice' }, domain: 'domain-a', shares: ['finance'], sharePolicies: { finance: 'policy-a' } };
   let identity = linked, calls = 0;
   const service = new FilesService({ fileIdentity: async () => identity }, {});
   service.gateway = async path => { calls++; return new Response(JSON.stringify(path.startsWith('/v1/list') ? { entries: [] } : { ok: true })); };
   const user = { id: 'employee-a', authType: 'session' };
   const req = { headers: {} }; webSessionScopes.set(req, { fingerprint: 'scope-a', expiresAt: Date.now() + 60000 });
-  const cap = { token: 'private-capability', id: 'ad-a', domain: 'domain-a' };
+  const cap = { token: 'private-capability', id: 'ad-a', domain: 'domain-a', policies: { finance: 'policy-a' } };
   const reset = () => { values.set('assay:files:session:scope-a', JSON.stringify(cap)); calls = 0; identity = linked; };
   const denied = code => e => e.getStatus() === code;
   try {
@@ -28,8 +28,11 @@ test('employee file requests are bound to a web session, current identity and ma
     assert.deepEqual(await service.list(req, user, { share: 'finance', path: '' }), { entries: [] }); assert.equal(calls, 1);
     reset(); identity = { ...linked, identity: { ...linked.identity, id: 'ad-b' } };
     await assert.rejects(() => service.list(req, user, { share: 'finance', path: '' }), denied(410)); assert.equal(values.has('assay:files:session:scope-a'), false);
-    reset(); identity = { ...linked, shares: [] };
+    reset(); identity = { ...linked, shares: [], sharePolicies: {} };
     await assert.rejects(() => service.list(req, user, { share: 'finance', path: '' }), denied(410)); assert.equal(values.has('assay:files:session:scope-a'), false);
+    reset(); identity = { ...linked, sharePolicies: { finance: 'new-read-only-or-group-policy' } };
+    await assert.rejects(() => service.list(req, user, { share: 'finance', path: '' }), denied(410)); assert.equal(values.has('assay:files:session:scope-a'), false);
+    reset(); await assert.rejects(() => service.list(req, user, { share: 'unknown-share', path: '' }), denied(403)); assert.equal(calls, 0); assert.equal(values.has('assay:files:session:scope-a'), true);
     reset(); identity = null;
     await assert.rejects(() => service.list(req, user, { share: 'finance', path: '' }), denied(410)); assert.equal(values.has('assay:files:session:scope-a'), false);
     reset(); await assert.rejects(() => service.command(req, user, { action: 'delete', share: 'finance', path: 'report.txt' }), denied(403)); assert.equal(calls, 0);

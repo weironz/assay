@@ -30,6 +30,22 @@ test('batch members are scoped GUIDs, unique and bounded', () => {
   assert.equal(actions['group.members'].safeParse({ ...base, command: 'id' }).success, false);
 });
 const { SambaService } = require('../src/samba/samba.service');
+test('employee SMB admission versions track security policy rather than group order or labels', async () => {
+  const link = { adObjectId: 'staff-guid', domain: 'DC=assay,DC=test' };
+  const share = { name: 'finance', active: true, ready: true, groups: ['finance', 'managers'], read_only: false, comment: 'Original' };
+  const data = { domain: link.domain, users: [{ id: link.adObjectId, name: 'alice', dn: 'CN=alice', disabled: false, manageable: true }], shares: [share] };
+  const service = new SambaService({ sambaIdentity: { findUnique: async () => link } });
+  service.agent = async () => data;
+  const initial = (await service.fileIdentity({ id: 'employee' })).sharePolicies.finance;
+  share.groups.reverse(); share.comment = 'Updated label';
+  assert.equal((await service.fileIdentity({ id: 'employee' })).sharePolicies.finance, initial);
+  share.read_only = true;
+  assert.notEqual((await service.fileIdentity({ id: 'employee' })).sharePolicies.finance, initial);
+  share.read_only = false; share.groups = ['different-team'];
+  assert.notEqual((await service.fileIdentity({ id: 'employee' })).sharePolicies.finance, initial);
+  share.active = false;
+  assert.deepEqual((await service.fileIdentity({ id: 'employee' })).sharePolicies, {});
+});
 test('running asynchronous jobs remain running while reconciled', async () => {
   const updates = [];
   const db = { sambaOperation: {

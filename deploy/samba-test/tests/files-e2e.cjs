@@ -125,6 +125,10 @@ async function adminCommand(page, action, args) {
   try { assert.equal((await (await checked(await employee.request.get(origin + '/api/files/status'), 200)).json()).connected, false); }
   finally { await adminCommand(admin, 'group.members', { group_id: fixture.group_id, user_ids: [fixture.user_id], add: true }); }
   await adLogin(employee); pass('Effective AD group change invalidates a previously authenticated SMB session');
+  await adminCommand(admin, 'share.save', { name: readonly, comment: '员工文件只读测试', groups: [fixture.group_id], read_only: false });
+  try { assert.equal((await (await checked(await employee.request.get(origin + '/api/files/status'), 200)).json()).connected, false); }
+  finally { await adminCommand(admin, 'share.save', { name: readonly, comment: '员工文件只读测试', groups: [fixture.group_id], read_only: true }); }
+  await adLogin(employee); pass('A connected share policy change invalidates existing SMB admission before further access');
   const oldCookies = await ec.cookies();
   await checked(await employee.request.post(origin + '/api/auth/sign-out', { headers, data: {} }), 200);
   await checked(await employee.request.get(origin + '/api/files/status'), 401);
