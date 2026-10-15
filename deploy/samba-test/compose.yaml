@@ -130,7 +130,7 @@ services:
       - ./tls/ca.crt:/usr/share/nginx/html/test-ca.crt:ro
     depends_on: [api]
     healthcheck:
-      test: [CMD-SHELL, "wget -qO- http://127.0.0.1/test-ca.crt >/dev/null"]
+      test: [CMD-SHELL, "wget -qO- http://127.0.0.1/healthz >/dev/null"]
       interval: 10s
       timeout: 3s
       retries: 10
