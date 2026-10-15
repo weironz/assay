@@ -165,8 +165,8 @@ const en = {
   },
 
   stepUp: {
-    hint: 'Confirm your identity to continue. This verification is used for one action only.',
-    password: 'Current password',
+    hint: 'Enter the password for your current Assay sign-in account. This verification is used for one action only.',
+    password: 'Current Assay sign-in password',
     code: '6-digit authenticator code',
     codeHint: 'You can paste the code from your authenticator app.',
     verify: 'Verify and continue',
@@ -177,7 +177,9 @@ const en = {
     forbidden: 'Verification expired or this action is not permitted.',
     conflict: 'This conflicts with existing data. Review the details and try again.',
     rateLimited: 'Too many attempts. Wait a moment before trying again.',
-    actionFailed: 'Could not complete the action. Check your connection and try again.',
+    actionFailed: 'Could not complete the action. Try again later or check the operation history.',
+    verifiedActionFailed: 'Identity verified, but the requested action did not complete.',
+    actionRecovery: 'Cancel this dialog, review the action details and operation history, then submit again.',
     statusRecovery: 'Close this dialog and try again. If the problem continues, contact an administrator.',
     recovery: 'Try again with fresh credentials. If the problem continues, contact an administrator.',
     enrollRequired: 'Your privileged role requires an authenticator app before sensitive actions. Set it up and verify it in Security settings, then try again.',

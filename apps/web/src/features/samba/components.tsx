@@ -300,6 +300,7 @@ export function EditorDialog({
           <p className="mt-2 text-sm text-gray-500">{editor.description}</p>
         )}
         <form onSubmit={submit} className="mt-5 space-y-4">
+          {editor.error && <p role="alert" className="text-sm text-red-600">{editor.error}</p>}
           {editor.fields.map((f) =>
             f.type === 'multi' ? (
               <MultiPicker
@@ -346,6 +347,7 @@ export function EditorDialog({
                       f.type === 'password' ? 'new-password' : 'off'
                     }
                     required={!f.optional}
+                    minLength={f.minLength}
                     maxLength={
                       f.maxLength || (f.type === 'password' ? 512 : 128)
                     }
@@ -353,6 +355,7 @@ export function EditorDialog({
                     onChange={(e) => update(f.name, e.target.value)}
                   />
                 )}
+                {f.hint && <span className="block text-xs text-gray-500">{f.hint}</span>}
               </label>
             ),
           )}

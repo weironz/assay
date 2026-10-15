@@ -151,6 +151,11 @@ export default function SambaPage() {
     event.preventDefault();
     if (!editor) return;
     const args = { ...editor.values };
+    if (['user.create', 'user.password'].includes(editor.action) &&
+        (typeof args.password !== 'string' || args.password.length < 8 || args.password.length > 512 || args.password.includes('\0'))) {
+      setEditor({ ...editor, error: '新的 AD 密码需为 8–512 个字符，且不能包含空字符。' });
+      return;
+    }
     if (['user.create', 'user.update'].includes(editor.action)) {
       args.profile = Object.fromEntries(
         profileFields.map((f) => [f.name, args[f.name]]),

@@ -54,7 +54,7 @@ export function Employees({
         { name: 'name', label: '登录账号' },
         { name: 'display_name', label: '员工姓名' },
         ...profileFields,
-        { name: 'password', label: '初始 AD 密码', type: 'password' },
+        { name: 'password', label: '初始 AD 密码', type: 'password', minLength: 8, hint: '至少 8 个字符，并符合公司 AD 的密码复杂度与历史密码要求。' },
       ],
       values: {
         name: '',
@@ -190,7 +190,7 @@ export function Employees({
                 title: '重置 AD 密码',
                 action: 'user.password',
                 fields: [
-                  { name: 'password', label: '新的 AD 密码', type: 'password' },
+                  { name: 'password', label: '新的 AD 密码', type: 'password', minLength: 8, hint: '至少 8 个字符，并符合公司 AD 的密码复杂度与历史密码要求。' },
                 ],
                 values: { id: employee.id, password: '' },
               })

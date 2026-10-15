@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
+import { AxiosError } from 'axios';
 import { api } from '../src/lib/api.ts';
 import {
   SecurityRequestError,
@@ -134,6 +135,14 @@ test('status errors map to localizable keys with a safe fallback', () => {
   for (const [status, key] of cases) expect(securityErrorKey(new SecurityRequestError(status))).toBe(key);
   expect(securityErrorKey(new Error('raw backend message'))).toBe('stepUp.actionFailed');
   expect(securityErrorKey(new SecurityRequestError(), 'twoFactor.failed')).toBe('twoFactor.failed');
+});
+
+test('post-verification Axios failures keep HTTP semantics without rendering request secrets', () => {
+  for (const [status, key] of [[400, 'stepUp.invalidRequest'], [401, 'stepUp.invalidCredentials'], [403, 'stepUp.forbidden'], [409, 'stepUp.conflict'], [429, 'stepUp.rateLimited']]) {
+    const error = new AxiosError('raw internal error', 'ERR_BAD_REQUEST', { data: 'AD-PASSWORD', headers: {} }, {}, { status, data: { message: 'raw secret' }, headers: {}, config: {} });
+    expect(securityErrorKey(error)).toBe(key);
+  }
+  expect(securityErrorKey({ response: { status: 400 }, message: 'untrusted object' })).toBe('stepUp.actionFailed');
 });
 
 test('enrollmentRequired obeys explicit status and derives enforce-only fallback', () => {

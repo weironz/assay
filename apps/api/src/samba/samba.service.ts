@@ -89,7 +89,11 @@ export class SambaService {
     if (!parsed.success) throw new BadRequestException('操作参数无效');
     const { requestId, action, args } = parsed.data;
     const validated = actions[action].safeParse(args);
-    if (!validated.success) throw new BadRequestException('操作参数无效');
+    if (!validated.success) {
+      if (['user.create', 'user.password'].includes(action) && validated.error.issues.some(issue => issue.path[0] === 'password'))
+        throw new BadRequestException('新的 AD 密码需为 8–512 个字符，且不能包含空字符。');
+      throw new BadRequestException('操作参数无效');
+    }
     return this.submit(user, requestId, action, validated.data);
   }
   async bind(user: AuthUser, input: unknown) {

@@ -158,8 +158,8 @@ const zhTW: Resource = {
   },
 
   stepUp: {
-    hint: '請再次驗證身分以繼續。本次驗證僅用於目前操作。',
-    password: '目前密碼',
+    hint: '請輸入目前登入 Assay 帳號的密碼。本次驗證僅用於目前操作。',
+    password: '目前 Assay 登入密碼',
     code: '驗證器的 6 位動態碼',
     codeHint: '可以從驗證器應用程式貼上動態碼。',
     verify: '驗證並繼續',
@@ -170,7 +170,9 @@ const zhTW: Resource = {
     forbidden: '驗證已過期，或您無權執行此操作。',
     conflict: '與現有資料衝突，請檢查填寫內容後重試。',
     rateLimited: '嘗試次數過多，請稍後再試。',
-    actionFailed: '操作未完成，請檢查網路連線後重試。',
+    actionFailed: '操作未完成，請稍後重試或核對操作記錄。',
+    verifiedActionFailed: '身分驗證已通過，但目前操作未完成。',
+    actionRecovery: '請取消此視窗，核對填寫內容和操作記錄後重新提交。',
     statusRecovery: '請關閉此視窗後重試；如仍無法載入，請聯絡管理員。',
     recovery: '請使用最新憑據重試；如問題持續，請聯絡管理員。',
     enrollRequired: '目前的特權角色須先啟用驗證器。請到安全設定完成啟用和驗證，再重試此操作。',

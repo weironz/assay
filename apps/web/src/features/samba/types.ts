@@ -60,8 +60,11 @@ export type Field = {
   options?: Option[];
   optional?: boolean;
   maxLength?: number;
+  minLength?: number;
+  hint?: string;
 };
 export type Editor = {
+  error?: string;
   title: string;
   action: string;
   fields: Field[];

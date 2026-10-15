@@ -1,4 +1,5 @@
 import { api, apiOrigin } from './api';
+import { isAxiosError } from 'axios';
 
 export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account' | 'samba';
 export type SecurityStatus = {
@@ -17,8 +18,8 @@ export class SecurityRequestError extends Error {
 }
 
 export function securityErrorKey(error: unknown, fallback = 'stepUp.actionFailed'): string {
-  if (!(error instanceof SecurityRequestError)) return fallback;
-  switch (error.status) {
+  const status = error instanceof SecurityRequestError ? error.status : isAxiosError(error) ? error.response?.status : undefined;
+  switch (status) {
     case 400: case 422: return 'stepUp.invalidRequest';
     case 401: return 'stepUp.invalidCredentials';
     case 403: return 'stepUp.forbidden';

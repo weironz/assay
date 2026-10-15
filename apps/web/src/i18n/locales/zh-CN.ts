@@ -158,8 +158,8 @@ const zhCN: Resource = {
   },
 
   stepUp: {
-    hint: '请再次验证身份以继续。本次验证仅用于当前操作。',
-    password: '当前密码',
+    hint: '请输入当前登录 Assay 账号的密码。本次验证仅用于当前操作。',
+    password: '当前 Assay 登录密码',
     code: '验证器的 6 位动态码',
     codeHint: '可以从验证器应用粘贴动态码。',
     verify: '验证并继续',
@@ -170,7 +170,9 @@ const zhCN: Resource = {
     forbidden: '验证已过期，或您无权执行此操作。',
     conflict: '与现有数据冲突，请检查填写内容后重试。',
     rateLimited: '尝试次数过多，请稍后再试。',
-    actionFailed: '操作未完成，请检查网络连接后重试。',
+    actionFailed: '操作未完成，请稍后重试或核对操作记录。',
+    verifiedActionFailed: '身份验证已通过，但当前操作未完成。',
+    actionRecovery: '请取消此窗口，核对填写内容和操作记录后重新提交。',
     statusRecovery: '请关闭此窗口后重试；如仍无法加载，请联系管理员。',
     recovery: '请使用最新凭据重试；如问题持续，请联系管理员。',
     enrollRequired: '当前特权角色要求先启用验证器。请到安全设置完成启用和验证，再重试此操作。',

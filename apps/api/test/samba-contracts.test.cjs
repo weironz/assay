@@ -30,6 +30,17 @@ test('batch members are scoped GUIDs, unique and bounded', () => {
   assert.equal(actions['group.members'].safeParse({ ...base, command: 'id' }).success, false);
 });
 const { SambaService } = require('../src/samba/samba.service');
+test('new AD password validation rejects invalid values before any external write without echoing them', async () => {
+  const service = new SambaService({}); let writes = 0;
+  service.submit = async () => { writes++; return { state: 'succeeded' }; };
+  for (const password of ['short7', 'x'.repeat(513), 'Aa9!bad\0value']) {
+    await assert.rejects(() => service.command({}, { requestId: crypto.randomUUID(), action: 'user.password', args: { id: 'a'.repeat(32), password } }), e =>
+      e.getStatus() === 400 && e.message.includes('8–512') && !e.message.includes(password));
+  }
+  assert.equal(writes, 0);
+  await service.command({}, { requestId: crypto.randomUUID(), action: 'user.password', args: { id: 'a'.repeat(32), password: 'TestOnlyValid9!Password' } });
+  assert.equal(writes, 1);
+});
 test('employee SMB admission versions track security policy rather than group order or labels', async () => {
   const link = { adObjectId: 'staff-guid', domain: 'DC=assay,DC=test' };
   const share = { name: 'finance', active: true, ready: true, groups: ['finance', 'managers'], read_only: false, comment: 'Original' };

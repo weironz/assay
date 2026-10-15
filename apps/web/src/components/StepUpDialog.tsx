@@ -25,6 +25,7 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [errorKey, setErrorKey] = useState('');
+  const [actionRejected, setActionRejected] = useState(false);
 
   useEffect(() => {
     returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -57,13 +58,16 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (!status || busy) return;
-    setErrorKey(''); setBusy(true);
+    setErrorKey(''); setActionRejected(false); setBusy(true);
+    let verified = false;
     try {
       const token = await issueStepUp(purpose, password, status.enrolled ? code.trim() : undefined);
+      verified = true;
       await onAuthorized(token, password);
       setPassword(''); setCode('');
       onCancel();
     } catch (err: unknown) {
+      setActionRejected(verified);
       setErrorKey(securityErrorKey(err));
       setCode('');
       requestAnimationFrame(() => (status.enrolled ? codeInput.current : passwordInput.current)?.focus());
@@ -88,7 +92,7 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
       {needsEnrollment ? <div className="mt-4 space-y-4"><p role="alert" className="text-sm text-amber-800 dark:text-amber-300">{t('stepUp.enrollRequired')}</p><Link to="/settings?tab=security" onClick={onCancel} className={`inline-flex min-h-11 items-center rounded-md bg-brand-700 px-4 text-sm text-white ${focus}`}>{t('stepUp.openSecurity')}</Link></div> : <form onSubmit={submit} className="mt-5 space-y-4">
         <div><label htmlFor={`${id}-password`} className="mb-1 block text-sm font-medium">{t('stepUp.password')}</label><input ref={passwordInput} id={`${id}-password`} type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} className={`min-h-11 w-full rounded-md border border-gray-300 bg-white px-3 dark:border-gray-700 dark:bg-gray-800 ${focus}`} /></div>
         {status?.enrolled && <div><label htmlFor={`${id}-code`} className="mb-1 block text-sm font-medium">{t('stepUp.code')}</label><input ref={codeInput} id={`${id}-code`} type="text" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={(event) => setCode(event.target.value)} className={`min-h-11 w-full rounded-md border border-gray-300 bg-white px-3 dark:border-gray-700 dark:bg-gray-800 ${focus}`} /><p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t('stepUp.codeHint')}</p></div>}
-        {errorKey && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{t(errorKey)} {t(status ? 'stepUp.recovery' : 'stepUp.statusRecovery')}</p>}
+        {errorKey && <p role="alert" className="text-sm text-red-700 dark:text-red-400">{actionRejected && <>{t('stepUp.verifiedActionFailed')} </>}{t(errorKey)} {t(actionRejected ? 'stepUp.actionRecovery' : status ? 'stepUp.recovery' : 'stepUp.statusRecovery')}</p>}
         <div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} onClick={onCancel} className={`min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button><button type="submit" disabled={busy || !status} className={`min-h-11 rounded-md bg-brand-700 px-4 text-sm text-white disabled:opacity-60 ${focus}`}>{busy ? t('common.processing') : t('stepUp.verify')}</button></div>
       </form>}
       {needsEnrollment && <button type="button" onClick={onCancel} className={`mt-4 min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button>}
