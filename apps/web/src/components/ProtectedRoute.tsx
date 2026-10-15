@@ -1,5 +1,5 @@
 import { ReactNode } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../stores/auth';
 
@@ -14,6 +14,7 @@ export default function ProtectedRoute({
   anyPermissions?: string[];
 }) {
   const { t } = useTranslation();
+  const location = useLocation();
   const { user, loading, has } = useAuth();
 
   if (loading) {
@@ -23,7 +24,9 @@ export default function ProtectedRoute({
       </div>
     );
   }
-  if (!user) return <Navigate to="/login" replace />;
+  if (!user) return (
+    <Navigate to="/login" replace state={location.pathname === '/files' ? { returnTo: '/files' } : undefined} />
+  );
   if (
     (permission && !has(permission)) ||
     (anyPermissions && !anyPermissions.some(has))

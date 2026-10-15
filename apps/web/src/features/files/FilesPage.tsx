@@ -35,6 +35,10 @@ const join = (path: string, name: string) => (path ? `${path}/${name}` : name);
 export default function FilesPage() {
   const navigateTo = useNavigate();
   const clearLogin = useAuth((s) => s.clear);
+  const directoryFilesReady = useAuth((s) => s.directoryFilesReady);
+  const companyAccount = useAuth((s) => s.user?.passwordSource === "directory");
+  const redirecting = useRef(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
   const [status, setStatus] = useState<Status | null>(null);
   const [password, setPassword] = useState("");
   const [share, setShare] = useState("");
@@ -49,23 +53,38 @@ export default function FilesPage() {
   const uploadRef = useRef<HTMLInputElement>(null);
   const uploadAbort = useRef<AbortController | null>(null);
   const browseAbort = useRef<AbortController | null>(null);
-  const fail = useCallback((e: any) => {
-    const message =
-      e.response?.data?.message || "请求未完成，请刷新核对文件状态后再试。";
-    setError(typeof message === "string" ? message : "文件请求失败");
-    if (e.response?.status === 410) {
-      setStatus((s) => (s ? { ...s, connected: false } : s));
-      setEntries([]);
-      setPassword("");
-    }
-  }, []);
+  const companyMode =
+    companyAccount || status?.reconnectWithCompanyLogin === true;
+  const fail = useCallback(
+    (e: any) => {
+      const message =
+        e.response?.data?.message || "请求未完成，请刷新核对文件状态后再试。";
+      setError(
+        e.response?.status === 410 && companyMode
+          ? ""
+          : typeof message === "string"
+            ? message
+            : "文件请求失败",
+      );
+      if (e.response?.status === 410) {
+        setStatus((s) => (s ? { ...s, connected: false } : s));
+        setEntries([]);
+        setPassword("");
+      }
+    },
+    [companyMode],
+  );
   const refreshStatus = useCallback(async () => {
+    setCheckingStatus(true);
     try {
       const { data } = await api.get<Status>("/files/status");
       setStatus(data);
+      setError("");
       setShare((s) => (data.shares?.includes(s) ? s : ""));
     } catch (e) {
       fail(e);
+    } finally {
+      setCheckingStatus(false);
     }
   }, [fail]);
   const refresh = useCallback(async () => {
@@ -125,20 +144,41 @@ export default function FilesPage() {
       document.removeEventListener("visibilitychange", check);
     };
   }, [busy, refreshStatus]);
-  const companyLogin = async () => {
+  const companyLogin = useCallback(async () => {
+    if (redirecting.current) return;
+    redirecting.current = true;
     setBusy(true);
     setError("");
     try {
       const result = await signOut();
       if (result.error) throw new Error("SIGN_OUT_FAILED");
       clearLogin();
-      navigateTo("/login", { replace: true });
+      navigateTo("/login", { replace: true, state: { returnTo: "/files" } });
     } catch {
-      setError("暂时无法退出当前登录，请稍后重试。");
+      redirecting.current = false;
+      setError("暂时无法完成登录跳转，请稍后重试。");
     } finally {
       setBusy(false);
     }
-  };
+  }, [clearLogin, navigateTo]);
+  useEffect(() => {
+    if (
+      status?.identity &&
+      !status.connected &&
+      companyMode &&
+      directoryFilesReady !== false &&
+      !checkingStatus &&
+      !error
+    )
+      void companyLogin();
+  }, [
+    status,
+    companyMode,
+    directoryFilesReady,
+    checkingStatus,
+    error,
+    companyLogin,
+  ]);
   const verify = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
@@ -300,6 +340,24 @@ export default function FilesPage() {
     modified: 0,
     blocked: false,
   }));
+  const serviceUnavailable = (
+    <section className={card + " max-w-lg space-y-4 p-6"}>
+      <h2 className="font-semibold">文件服务暂不可用</h2>
+      <p className="text-sm text-gray-500">
+        请稍后重试，你仍可使用其他业务模块。
+      </p>
+      <button
+        className={button}
+        disabled={busy || checkingStatus}
+        onClick={() => {
+          if (companyMode && directoryFilesReady === false) void companyLogin();
+          else void refreshStatus();
+        }}
+      >
+        重试
+      </button>
+    </section>
+  );
   const verificationForm = (
     <form onSubmit={verify} className={card + " max-w-lg space-y-4 p-6"}>
       <h2 className="font-semibold">验证自己的 AD 密码</h2>
@@ -339,7 +397,7 @@ export default function FilesPage() {
               {displayDomain(status.identity.domain)} /{" "}
               {status.identity.accountName}
             </Badge>
-            {status.connected && (
+            {status.connected && !companyMode && (
               <button className={button} onClick={disconnect} disabled={busy}>
                 断开文件会话
               </button>
@@ -347,7 +405,7 @@ export default function FilesPage() {
           </div>
         )}
       </div>
-      {error && (
+      {error && (!companyMode || status?.connected) && (
         <p
           role="alert"
           className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300"
@@ -361,9 +419,13 @@ export default function FilesPage() {
         </p>
       )}
       {!status ? (
-        <p className="text-sm text-gray-500">
-          {error ? "文件模块暂不可用。" : "正在检查文件会话…"}
-        </p>
+        error ? (
+          serviceUnavailable
+        ) : (
+          <p role="status" className="text-sm text-gray-500">
+            正在加载文件…
+          </p>
+        )
       ) : !status.identity ? (
         <section className={card + " p-6"}>
           <h2 className="font-semibold">尚未关联公司账号</h2>
@@ -372,31 +434,14 @@ export default function FilesPage() {
           </p>
         </section>
       ) : !status.connected ? (
-        status.reconnectWithCompanyLogin ? (
-          <section className={card + " max-w-lg space-y-4 p-6"}>
-            <h2 className="font-semibold">公司文件连接已断开</h2>
-            <p className="text-sm text-gray-500">
-              重新登录公司账号即可恢复文件访问。正常文件连接随 Assay
-              登录保留，无需因短时间闲置重复验证。
+        companyMode ? (
+          error || directoryFilesReady === false ? (
+            serviceUnavailable
+          ) : (
+            <p role="status" className="text-sm text-gray-500">
+              正在返回登录页…
             </p>
-            <button
-              className={primary}
-              disabled={busy}
-              onClick={() => void companyLogin()}
-            >
-              {busy ? "正在处理…" : "重新登录公司账号"}
-            </button>
-            <details className="border-t border-gray-100 pt-4 text-sm dark:border-gray-800">
-              <summary className="cursor-pointer text-gray-500">
-                其他连接方式
-              </summary>
-              <p className="mt-3 text-sm text-gray-500">
-                通过本地或单点登录访问文件的账号，也可使用本人的 AD
-                密码建立连接。
-              </p>
-              <div className="mt-4">{verificationForm}</div>
-            </details>
-          </section>
+          )
         ) : (
           verificationForm
         )

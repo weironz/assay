@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { authClient, signIn } from '../lib/auth-client';
 import BrandMark from '../components/BrandMark';
@@ -19,6 +19,9 @@ export default function LoginPage() {
   const { t } = useTranslation();
   const msg = useMsg();
   const navigate = useNavigate();
+  const location = useLocation();
+  const returnToFiles = location.state?.returnTo === '/files';
+  const setDirectoryFilesReady = useAuth((s) => s.setDirectoryFilesReady);
   const [params] = useSearchParams();
   const fetchMe = useAuth((s) => s.fetchMe);
 
@@ -72,7 +75,10 @@ export default function LoginPage() {
         if (result.twoFactorRequired) { setDirectoryMfa(true); return; }
         setPassword(''); setFactorCode(''); setDirectoryMfa(false);
         const me = await fetchMe();
-        if (me) navigate(result.destination === '/files' ? '/files' : '/dashboard', { replace: true });
+        if (me) {
+          setDirectoryFilesReady(result.filesConnected === true);
+          navigate(returnToFiles || result.destination === '/files' ? '/files' : '/dashboard', { replace: true });
+        }
         else setError({ key: 'auth.errSessionFailed' });
         return;
       }
