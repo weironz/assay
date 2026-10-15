@@ -76,7 +76,11 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       agent: {condition: service_started}
-    networks: [management, edge]
+    networks:
+      management: {}
+      edge:
+        ipv4_address: ${API_DIRECTORY_SOURCE_IP:?set a dedicated directory client IP}
+        gw_priority: 1
   web:
     image: ${ASSAY_WEB_IMAGE:?set an immutable Web image}
     restart: unless-stopped
@@ -105,4 +109,7 @@ networks:
       config:
         - subnet: ${MANAGEMENT_SUBNET:?set a non-conflicting management subnet}
           gateway: ${AGENT_BIND_IP}
-  edge: {}
+  edge:
+    ipam:
+      config:
+        - subnet: ${APPLICATION_SUBNET:?set a non-conflicting application subnet}

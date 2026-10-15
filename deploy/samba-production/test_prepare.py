@@ -51,6 +51,15 @@ hide unreadable = yes
         second = prepare.inventory(self.text.replace('read only = no', 'read only = yes'), '/storage/company', 'ACME', 'svc_manage')
         self.assertNotEqual(first['config_sha256'], second['config_sha256'])
 
+    def test_directory_client_adds_only_one_fixed_address(self):
+        source = '[global]\nhosts allow = LOCAL 127.0.0.0/8 192.0.2.0/24\nworkgroup = ACME\n'
+        expected = source.replace('192.0.2.0/24', '192.0.2.0/24 172.29.225.10')
+        self.assertEqual(prepare.allow_directory_client(source, '172.29.225.10'), expected)
+        self.assertEqual(prepare.allow_directory_client(expected, '172.29.225.10'), expected)
+        for address in ['0.0.0.0/0', '172.29.225.10\ninclude = /bad', 'hostname']:
+            with self.assertRaises(ValueError):
+                prepare.allow_directory_client(source, address)
+
 
 if __name__ == '__main__':
     unittest.main()

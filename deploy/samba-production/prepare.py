@@ -97,6 +97,17 @@ def admit_management(text, principal):
     return modified
 
 
+def allow_directory_client(text, address):
+    address = str(ipaddress.IPv4Address(address))
+    matches = list(re.finditer(r'^(\s*hosts allow\s*=\s*)([^\r\n]*)$', text, re.M | re.I))
+    if len(matches) != 1:
+        raise ValueError('Expected one explicit Samba hosts allow directive')
+    match = matches[0]
+    if address in match.group(2).split():
+        return text
+    return text[:match.end(2)] + ' ' + address + text[match.end(2):]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
@@ -126,6 +137,10 @@ def main():
     subnet = ipaddress.ip_network(c['management_subnet'])
     if ipaddress.ip_address(c['agent_bind_ip']) not in subnet or not subnet.is_private:
         raise ValueError('Agent must bind to the configured private management bridge gateway')
+    application = ipaddress.ip_network(c['application_subnet'])
+    client_ip = ipaddress.ip_address(c['api_directory_source_ip'])
+    if not application.is_private or application.overlaps(subnet) or client_ip not in application or client_ip in [application.network_address, application.broadcast_address]:
+        raise ValueError('Dedicated directory client must be inside a separate private application subnet')
     if not re.fullmatch(r'[A-Za-z0-9.-]+', c['directory_host']):
         raise ValueError('Invalid certificate DNS name')
     for name in ['https_port', 'agent_port']:
@@ -214,6 +229,7 @@ def main():
     env = dict(ASSAY_PROJECT=c['project'], SAMBA_CONTAINER=c['ad_container'], DIRECTORY_HOST=c['directory_host'],
                AGENT_DIRECTORY_IP=c['agent_directory_ip'], API_DIRECTORY_IP=c['api_directory_ip'],
                AGENT_BIND_IP=c['agent_bind_ip'], AGENT_PORT=c['agent_port'], WEB_LAN_IP=c['lan_ip'],
+               APPLICATION_SUBNET=c['application_subnet'], API_DIRECTORY_SOURCE_IP=c['api_directory_source_ip'],
                WEB_VPN_IP=c['vpn_ip'], WEB_HTTPS_PORT=c['https_port'], MANAGEMENT_SUBNET=c['management_subnet'],
                SAMBA_ETC_DIR=str(etc), SAMBA_SHARES_DIR=str(ad / c['shares_relative']), MANAGED_CONFIG_DIR=str(managed),
                ASSAY_API_IMAGE=c['images']['api'], ASSAY_WEB_IMAGE=c['images']['web'], ASSAY_AGENT_IMAGE=c['images']['agent'])
@@ -226,6 +242,7 @@ def main():
     include = '/etc/samba/' + c['managed_subdirectory'] + '/' + c['managed_config_name']
     modified_main = main_text.replace('include = ' + original_include,
                                      'include = ' + original_include + '\n\n[global]\ninclude = ' + include)
+    modified_main = allow_directory_client(modified_main, c['api_directory_source_ip'])
     candidate = root / 'rollback' / 'candidate-etc'
     shutil.copytree(etc, candidate)
     (candidate / c['smb_config_name']).write_text(modified_main)

@@ -26,6 +26,8 @@
   "managed_config_name": "shares.conf",
   "managed_registry_name": "shares.json",
   "management_subnet": "172.29.224.0/24",
+  "application_subnet": "172.29.225.0/24",
+  "api_directory_source_ip": "172.29.225.10",
   "agent_bind_ip": "172.29.224.1",
   "agent_port": 18080,
   "lan_ip": "192.0.2.10",
