@@ -2,6 +2,8 @@ export interface MenuItem {
   to: string;
   labelKey: string;
   permission?: string;
+  anyPermissions?: string[];
+  groupKey?: string;
 }
 
 export interface BusinessModule {
@@ -78,21 +80,62 @@ export const BUSINESS_MODULES: BusinessModule[] = [
   },
 ];
 
+export const PLATFORM_PERMISSIONS = [
+  'samba:read',
+  'organization:manage',
+  'user:manage',
+];
 export const PLATFORM_MODULE: BusinessModule = {
   id: 'platform',
   labelKey: 'nav.platformManagement',
-  areas: ['/organization', '/users', '/samba'],
+  areas: ['/platform', '/organization', '/users', '/samba'],
   items: [
-    { to: '/samba', labelKey: 'nav.companyAccounts', permission: 'samba:read' },
+    {
+      to: '/platform',
+      labelKey: 'nav.administrationHome',
+      anyPermissions: PLATFORM_PERMISSIONS,
+    },
+    {
+      to: '/samba/users',
+      labelKey: 'nav.directoryEmployees',
+      permission: 'samba:read',
+      groupKey: 'nav.companyDirectory',
+    },
+    {
+      to: '/samba/groups',
+      labelKey: 'nav.directoryGroups',
+      permission: 'samba:read',
+      groupKey: 'nav.companyDirectory',
+    },
+    {
+      to: '/samba/shares',
+      labelKey: 'nav.sharedDirectories',
+      permission: 'samba:read',
+      groupKey: 'nav.companyDirectory',
+    },
     {
       to: '/organization',
       labelKey: 'cop.organization',
       permission: 'organization:manage',
+      groupKey: 'nav.platformAccess',
     },
     {
       to: '/users',
       labelKey: 'nav.userPermissions',
       permission: 'user:manage',
+      groupKey: 'nav.platformAccess',
+    },
+    {
+      to: '/samba/bindings',
+      labelKey: 'nav.accountLinks',
+      permission: 'samba:read',
+      groupKey: 'nav.platformAccess',
+    },
+    {
+      to: '/samba/history',
+      labelKey: 'nav.directoryOperations',
+      permission: 'samba:read',
+      groupKey: 'nav.managementAudit',
     },
   ],
 };
@@ -101,7 +144,11 @@ export function allowedItems(
   items: MenuItem[],
   has: (permission: string) => boolean,
 ) {
-  return items.filter((item) => !item.permission || has(item.permission));
+  return items.filter(
+    (item) =>
+      (!item.permission || has(item.permission)) &&
+      (!item.anyPermissions || item.anyPermissions.some(has)),
+  );
 }
 
 export function moduleForPath(pathname: string) {

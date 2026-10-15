@@ -62,6 +62,15 @@ const th: Resource = {
 
   nav: {
     companyAccounts: 'บัญชีบริษัทและไฟล์ที่แชร์',
+    companyDirectory: 'ไดเรกทอรีและไฟล์บริษัท',
+    administrationHome: 'ภาพรวมการจัดการ',
+    directoryEmployees: 'บัญชีพนักงาน',
+    directoryGroups: 'กลุ่มผู้ใช้',
+    sharedDirectories: 'ไดเรกทอรีที่แชร์',
+    accountLinks: 'การเชื่อมโยงบัญชี',
+    directoryOperations: 'ประวัติไดเรกทอรี',
+    platformAccess: 'องค์กรและการเข้าถึง',
+    managementAudit: 'การตรวจสอบการจัดการ',
     platformManagement: 'การจัดการแพลตฟอร์ม',
     userPermissions: 'ผู้ใช้และสิทธิ์',
     accountMenu: 'เมนูบัญชี',

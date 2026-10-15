@@ -177,3 +177,5 @@ docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" 
 ### 可选 Samba 管理
 
 Rust Agent、Web 管理与独立 IP 测试环境见 [设计方案](docs/samba/01-设计与实施计划.md)、[部署与运维](docs/samba/02-测试部署与运维.md)、[测试验收](docs/samba/03-测试验收记录.md) 和 [Agent 文档](agents/samba/README.md)。默认不启用 Samba 集成，不自动接管现有域或共享。
+
+平台管理的员工资料、用户组成员、共享目录详情及登录账号关联说明见 [交互与账号模型](docs/samba/04-平台管理交互与账号模型.md)。

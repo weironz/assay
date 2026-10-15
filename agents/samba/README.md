@@ -42,13 +42,14 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 | `POST /v1/commands` | 提交 `{request_id, action, args}` |
 | `GET /v1/operations/:id` | 查询执行结果 |
 
-动作包含 `user.create/update/password/change_password`、`group.create/update/delete/member`、`share.save/remove`、`directory.create/delete`、`acl.grant`。字段和未知参数检查见 `main.rs` 与 Assay 的 `samba/contracts.ts`。没有任意命令或任意文件内容接口。
+动作包含 `user.create/update/password/change_password`、`group.create/update/delete/member/members`、`share.save/remove`、`directory.create/delete`、`acl.grant`。员工创建/编辑接受选填 `profile`，对应工号、邮箱、部门、岗位、电话、公司、办公地点的标准 AD 属性；省略保留已有值，空字符串清除。`group.members` 接受 `group_id`、唯一 `user_ids` 列表（1–100 个 GUID）和 `add`，先核验全部员工再一次 LDAP Modify，只增删选中的成员关系。字段和未知参数检查见 `main.rs` 与 Assay 的 `samba/contracts.ts`。没有任意命令或任意文件内容接口。
 
 写任务异步执行，返回 queued/running 后必须轮询，不能把接受请求当作完成。最多 20 个排队/执行任务，任务截止时间 300 秒。SQLite WAL 持久化请求的 HMAC 和结果，密码只存在工作任务内存中。请求 ID 相同但内容不同会被拒绝。进程重启后未完成任务标记 uncertain，不自动重放外部写入；操作人核对资源后重新提交明确动作。
 
 ## 权限与数据语义
 
 - 账号停用代替硬删除，保留 SID、文件所有者及历史引用。
+- 删除组前必须移空成员，并从受管目录的共享准入组中解除引用。
 - 新共享发布给员工前先安装限制性的 Windows DACL；初始化失败的共享只允许管理服务访问。
 - 移除共享只停用配置，保留文件与 ACL；可通过 Web 恢复。
 - 目录删除经 SMB 执行，只允许空目录，禁止删除共享根目录。

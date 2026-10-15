@@ -2,6 +2,7 @@ use crate::config::{Config, secret};
 use anyhow::{Result, anyhow, ensure};
 use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Mod, Scope, SearchEntry};
 use regex::Regex;
+use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
@@ -92,9 +93,12 @@ fn row(e: &SearchEntry) -> Value {
         "sid": raw(e,"objectSid").map(|x|sid(&x)).unwrap_or_default(),
         "name": attr(e,"sAMAccountName"), "displayName": attr(e,"displayName"), "description": attr(e,"description"),
         "disabled": attr(e,"userAccountControl").parse::<u32>().unwrap_or(0) & 2 != 0,
-        "members": e.attrs.get("member").cloned().unwrap_or_default(), "dn":e.dn})
+        "members": e.attrs.get("member").cloned().unwrap_or_default(), "dn":e.dn,
+        "employeeId":attr(e,"employeeID"),"email":attr(e,"mail"),"department":attr(e,"department"),
+        "title":attr(e,"title"),"phone":attr(e,"telephoneNumber"),"company":attr(e,"company"),"office":attr(e,"physicalDeliveryOfficeName"),
+        "manageable":attr(e,"adminCount")!="1" && name(&attr(e,"sAMAccountName")).is_ok()})
 }
-const ATTRS: [&str; 10] = [
+const ATTRS: [&str; 17] = [
     "objectGUID",
     "objectSid",
     "sAMAccountName",
@@ -105,7 +109,68 @@ const ATTRS: [&str; 10] = [
     "adminCount",
     "uidNumber",
     "gidNumber",
+    "employeeID",
+    "mail",
+    "department",
+    "title",
+    "telephoneNumber",
+    "company",
+    "physicalDeliveryOfficeName",
 ];
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct EmployeeProfile {
+    pub employee_id: Option<String>,
+    pub email: Option<String>,
+    pub department: Option<String>,
+    pub title: Option<String>,
+    pub phone: Option<String>,
+    pub company: Option<String>,
+    pub office: Option<String>,
+}
+impl EmployeeProfile {
+    fn attributes(&self) -> Result<Vec<(&'static str, &str)>> {
+        let mut values = vec![];
+        let email_pattern = Regex::new(r"^[^\s@]+@[^\s@]+\.[^\s@]+$").unwrap();
+        for (key, value, max) in [
+            ("employeeID", &self.employee_id, 16),
+            ("mail", &self.email, 254),
+            ("department", &self.department, 64),
+            ("title", &self.title, 64),
+            ("telephoneNumber", &self.phone, 64),
+            ("company", &self.company, 64),
+            ("physicalDeliveryOfficeName", &self.office, 128),
+        ] {
+            if let Some(value) = value {
+                ensure!(
+                    value.chars().count() <= max && !value.chars().any(char::is_control),
+                    "invalid employee profile attribute"
+                );
+                if key == "mail" && !value.is_empty() {
+                    ensure!(email_pattern.is_match(value), "invalid employee email");
+                }
+                values.push((key, value.as_str()));
+            }
+        }
+        Ok(values)
+    }
+    fn modifications(&self) -> Result<Vec<Mod<&str>>> {
+        Ok(self
+            .attributes()?
+            .into_iter()
+            .map(|(key, value)| {
+                Mod::Replace(
+                    key,
+                    if value.is_empty() {
+                        HashSet::new()
+                    } else {
+                        HashSet::from([value])
+                    },
+                )
+            })
+            .collect())
+    }
+}
 pub struct Directory {
     pub ldap: Ldap,
     c: Config,
@@ -156,8 +221,19 @@ impl Directory {
         let groups = self
             .entries(&self.c.groups_dn.clone(), &group_filter)
             .await?;
+        let groups = groups
+            .iter()
+            .map(|e| {
+                let mut value = row(e);
+                value["manageable"] = json!(
+                    value["manageable"] == true
+                        && attr(e, "sAMAccountName").starts_with(&self.c.group_prefix)
+                );
+                value
+            })
+            .collect::<Vec<_>>();
         Ok(
-            json!({"users":users.iter().map(row).collect::<Vec<_>>(),"groups":groups.iter().map(row).collect::<Vec<_>>(),"groupPrefix":self.c.group_prefix}),
+            json!({"users":users.iter().map(row).collect::<Vec<_>>(),"groups":groups,"groupPrefix":self.c.group_prefix}),
         )
     }
     pub async fn object(&mut self, id: &str, group: bool) -> Result<SearchEntry> {
@@ -193,10 +269,17 @@ impl Directory {
         );
         Ok(e)
     }
-    pub async fn create_user(&mut self, username: &str, display: &str, pwd: &str) -> Result<Value> {
+    pub async fn create_user(
+        &mut self,
+        username: &str,
+        display: &str,
+        pwd: &str,
+        profile: &EmployeeProfile,
+    ) -> Result<Value> {
         name(username)?;
         text(display)?;
         let encoded = password(pwd)?;
+        let profile_attrs = profile.attributes()?;
         let dn = format!("CN={username},{}", self.c.users_dn);
         let mut uid = 20000;
         let (rows, _) = self
@@ -215,7 +298,7 @@ impl Directory {
                 .unwrap_or(0);
             uid = uid.max(n.saturating_add(1));
         }
-        let attrs = vec![
+        let mut attrs = vec![
             (
                 "objectClass",
                 vec!["top", "person", "organizationalPerson", "user"],
@@ -225,6 +308,12 @@ impl Directory {
             ("displayName", vec![display]),
             ("userAccountControl", vec!["514"]),
         ];
+        attrs.extend(
+            profile_attrs
+                .into_iter()
+                .filter(|(_, value)| !value.is_empty())
+                .map(|(key, value)| (key, vec![value])),
+        );
         check(
             self.ldap
                 .add(
@@ -265,23 +354,24 @@ impl Directory {
         let rows = self.entries(&dn, "(objectClass=user)").await?;
         Ok(row(&rows[0]))
     }
-    pub async fn update_user(&mut self, id: &str, display: &str, disabled: bool) -> Result<Value> {
+    pub async fn update_user(
+        &mut self,
+        id: &str,
+        display: &str,
+        disabled: bool,
+        profile: &EmployeeProfile,
+    ) -> Result<Value> {
         text(display)?;
+        let mut modifications = profile.modifications()?;
         let e = self.object(id, false).await?;
         let flags = attr(&e, "userAccountControl").parse::<u32>()?;
         let flags = if disabled { flags | 2 } else { flags & !2 };
         let flags = flags.to_string();
-        check(
-            self.ldap
-                .modify(
-                    &e.dn,
-                    vec![
-                        Mod::Replace("displayName", HashSet::from([display])),
-                        Mod::Replace("userAccountControl", HashSet::from([flags.as_str()])),
-                    ],
-                )
-                .await?,
-        )?;
+        modifications.extend([
+            Mod::Replace("displayName", HashSet::from([display])),
+            Mod::Replace("userAccountControl", HashSet::from([flags.as_str()])),
+        ]);
+        check(self.ldap.modify(&e.dn, modifications).await?)?;
         Ok(row(&self.object(id, false).await?))
     }
     pub async fn reset_password(&mut self, id: &str, pwd: &str) -> Result<Value> {
@@ -402,6 +492,48 @@ impl Directory {
         ensure!(rows.len() == 1, "service identity not found");
         Ok(row(&rows[0])["sid"].as_str().unwrap().to_owned())
     }
+    pub async fn members(&mut self, id: &str, users: &[String], add: bool) -> Result<Value> {
+        ensure!(
+            !users.is_empty() && users.len() <= 100,
+            "select 1 to 100 employees"
+        );
+        ensure!(
+            users.iter().collect::<HashSet<_>>().len() == users.len(),
+            "duplicate employees"
+        );
+        let group = self.object(id, true).await?;
+        let current = group.attrs.get("member").cloned().unwrap_or_default();
+        let mut changes = HashSet::new();
+        // Resolve and validate every target before issuing a single LDAP Modify.
+        // Modifying selected values preserves unselected and unmanaged members.
+        for user in users {
+            let employee = self.object(user, false).await?;
+            let exists = current
+                .iter()
+                .any(|dn| dn.eq_ignore_ascii_case(&employee.dn));
+            if exists != add {
+                changes.insert(employee.dn);
+            }
+        }
+        let count = changes.len();
+        if count > 0 {
+            check(
+                self.ldap
+                    .modify(
+                        &group.dn,
+                        vec![if add {
+                            Mod::Add("member".to_owned(), changes)
+                        } else {
+                            Mod::Delete("member".to_owned(), changes)
+                        }],
+                    )
+                    .await?,
+            )?;
+        }
+        let mut result = row(&self.object(id, true).await?);
+        result["changedMembers"] = json!(count);
+        Ok(result)
+    }
     pub async fn principal_sid(&mut self, id: &str, group: bool) -> Result<String> {
         let e = self.object(id, group).await?;
         let s = row(&e)["sid"].as_str().unwrap_or_default().to_owned();
@@ -433,6 +565,38 @@ mod tests {
                 .encode_utf16()
                 .flat_map(u16::to_le_bytes)
                 .collect::<Vec<_>>()
+        );
+    }
+    #[test]
+    fn employee_profile_clears_only_explicit_empty_attributes() {
+        let profile: EmployeeProfile =
+            serde_json::from_value(json!({"employee_id":"E001", "email":""})).unwrap();
+        let modifications = profile.modifications().unwrap();
+        assert_eq!(modifications.len(), 2);
+        assert!(matches!(&modifications[1], Mod::Replace("mail", values) if values.is_empty()));
+        assert!(
+            EmployeeProfile {
+                department: Some("a\nb".into()),
+                ..Default::default()
+            }
+            .attributes()
+            .is_err()
+        );
+        assert!(
+            EmployeeProfile {
+                employee_id: Some("a".repeat(17)),
+                ..Default::default()
+            }
+            .attributes()
+            .is_err()
+        );
+        assert!(
+            EmployeeProfile {
+                email: Some("invalid".into()),
+                ..Default::default()
+            }
+            .attributes()
+            .is_err()
         );
     }
 }

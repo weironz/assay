@@ -217,13 +217,33 @@ export default function AppLayout() {
             </h2>
             <div className="flex-1 overflow-y-auto p-3">
               <nav aria-label={t(currentModule.labelKey)} className="space-y-1">
-                {moduleItems.map(sidebarLink)}
+                {moduleItems.map((item, index) => (
+                  <div key={item.to}>
+                    {item.groupKey &&
+                      moduleItems[index - 1]?.groupKey !== item.groupKey && (
+                        <h3
+                          className={`px-3 pb-2 text-xs font-medium tracking-wide text-gray-400 ${index ? 'pt-6' : 'pt-2'}`}
+                        >
+                          {t(item.groupKey)}
+                        </h3>
+                      )}
+                    {sidebarLink(item)}
+                  </div>
+                ))}
               </nav>
             </div>
           </aside>
         )}
         <main className="min-w-0 flex-1 p-4 sm:p-6">
-          <Outlet />
+          <div
+            className={
+              currentModule?.id === 'platform'
+                ? 'mx-auto max-w-[1500px]'
+                : undefined
+            }
+          >
+            <Outlet />
+          </div>
         </main>
       </div>
     </div>

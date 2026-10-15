@@ -62,8 +62,17 @@ const zhTW: Resource = {
 
   nav: {
     companyAccounts: '公司帳號與檔案共享',
+    companyDirectory: '公司目錄與檔案',
+    administrationHome: '管理概覽',
+    directoryEmployees: '員工帳號',
+    directoryGroups: '使用者群組',
+    sharedDirectories: '共用目錄',
+    accountLinks: '登入帳號關聯',
+    directoryOperations: '目錄操作記錄',
+    platformAccess: '平台組織與存取',
+    managementAudit: '管理稽核',
     platformManagement: '平台管理',
-    userPermissions: '使用者與權限',
+    userPermissions: '系統帳號與角色',
     accountMenu: '帳戶選單',
     personalSettings: '個人設定',
     securitySettings: '安全驗證',

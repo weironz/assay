@@ -31,11 +31,15 @@ async function completed(page, id) {
  const c = await browser.newContext({ ignoreHTTPSErrors: true }); const page = await c.newPage();
  assert.equal((await page.request.get(origin + '/api/samba/snapshot')).status(), 401); pass('Anonymous access denied');
  await login(page, 'admin@assay.test', password);
+ const employeeBefore = (await (await page.request.get(origin + '/api/samba/snapshot')).json()).users.find(u => u.id === fixture.user_id);
  const command = { requestId: randomUUID(), action: 'user.update', args: { id: fixture.user_id, display_name: '测试财务员工（已编辑）', disabled: false } };
  assert.equal((await post(page, command)).status(), 403); pass('Administrator mutations require step-up');
  assert.equal((await post(page, command, await token(page, 'roles'))).status(), 403); pass('Step-up purpose cannot cross authorization boundaries');
  const oneTime = await token(page);
  assert.equal((await post(page, command, oneTime)).status(), 201); assert.equal((await completed(page, command.requestId)).state, 'succeeded');
+ const employeeAfter = (await (await page.request.get(origin + '/api/samba/snapshot')).json()).users.find(u => u.id === fixture.user_id);
+ for (const field of ['employeeId', 'email', 'department', 'title', 'phone', 'company', 'office']) assert.equal(employeeAfter[field], employeeBefore[field]);
+ pass('Legacy profile omissions preserve existing employee attributes');
  assert.equal((await post(page, command, oneTime)).status(), 403); pass('Step-up ticket can be consumed only once');
  assert.equal((await post(page, command, await token(page))).status(), 201);
  const history = await (await page.request.get(origin + '/api/samba/operations')).json(); assert.equal(history.filter(v => v.id === command.requestId).length, 1); pass('Repeated request ID does not execute another external write');
@@ -50,6 +54,16 @@ async function completed(page, id) {
  const after = await (await page.request.get(origin + '/api/samba/acl?share=' + fixture.share + '&path=')).json(); assert.equal(before.revision, after.revision); pass('Stale ACL version rejects overwrite before resource changes');
  const foreign = { requestId: randomUUID(), action: 'user.password', args: { id: '0'.repeat(32), password: 'Test-not-a-real-password123!' } };
  assert.equal((await post(page, foreign, await token(page))).status(), 201); assert.equal((await completed(page, foreign.requestId)).state, 'failed'); pass('Objects outside managed scope cannot be modified');
+ const groupBefore = (await (await page.request.get(origin + '/api/samba/snapshot')).json()).groups.find(g => g.id === fixture.group_id);
+ for (const add of [true, false]) {
+  const batch = { requestId: randomUUID(), action: 'group.members', args: { group_id: fixture.group_id, user_ids: [add ? fixture.user2_id : fixture.user_id, '0'.repeat(32)], add } };
+  assert.equal((await post(page, batch, await token(page))).status(), 201); assert.equal((await completed(page, batch.requestId)).state, 'failed');
+  const groupAfter = (await (await page.request.get(origin + '/api/samba/snapshot')).json()).groups.find(g => g.id === fixture.group_id);
+  assert.deepEqual(groupAfter.members, groupBefore.members);
+ }
+ pass('Batch membership validates all targets before modifying any member');
+ assert.equal((await post(page, { requestId: randomUUID(), action: 'group.members', args: { group_id: fixture.group_id, user_ids: [fixture.user_id, fixture.user_id], add: true } }, await token(page))).status(), 400);
+ pass('Duplicate batch members rejected before dispatch');
  const ec = await browser.newContext({ ignoreHTTPSErrors: true }); const ep = await ec.newPage(); await login(ep, fixture.assay_email, fixture.assay_password);
  assert.equal((await ep.request.get(origin + '/api/samba/me/operations/' + command.requestId)).status(), 403); pass('Employees cannot inspect another actor operation');
  const t = await token(ep, 'account', fixture.assay_password);

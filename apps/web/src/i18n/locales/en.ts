@@ -66,8 +66,17 @@ const en = {
 
   nav: {
     companyAccounts: 'Company accounts & file shares',
+    companyDirectory: 'Company directory & files',
+    administrationHome: 'Administration overview',
+    directoryEmployees: 'Employees',
+    directoryGroups: 'Groups',
+    sharedDirectories: 'Shared directories',
+    accountLinks: 'Login account links',
+    directoryOperations: 'Directory operations',
+    platformAccess: 'Organization & access',
+    managementAudit: 'Administration audit',
     platformManagement: 'Platform administration',
-    userPermissions: 'Users & permissions',
+    userPermissions: 'System accounts & roles',
     accountMenu: 'Account menu',
     personalSettings: 'Personal settings',
     securitySettings: 'Security settings',

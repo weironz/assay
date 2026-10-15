@@ -1,0 +1,78 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { chromium } = require('playwright');
+const origin = process.env.SAMBA_E2E_ORIGIN || 'https://100.70.220.77:8446';
+const dir = process.env.SAMBA_E2E_PRIVATE_DIR;
+const password = fs.readFileSync(process.env.SAMBA_E2E_ADMIN_PASSWORD_FILE, 'utf8').trim();
+let browser;
+const results = [];
+function pass(message) { results.push(message); console.log('PASS ' + message); }
+(async () => {
+  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY, bypass: `${new URL(origin).hostname},127.0.0.1,localhost` } } : {}) });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } });
+  // Simulate an intranet browser with no external connectivity.
+  await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+  const page = await context.newPage();
+  await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
+  await page.goto(origin + '/login');
+  await page.locator('form input').first().fill('admin@assay.test');
+  await page.locator('input[type=password]').fill(password);
+  await page.locator('form button[type=submit]').click();
+  await page.waitForURL('**/dashboard');
+  await page.goto(origin + '/platform');
+  await page.getByRole('heading', { name: '管理概览', exact: true }).waitFor();
+  for (const asset of ['greenstor-lockup.png', 'greenstor-lockup-dark.png', 'favicon.png']) assert.equal((await page.request.get(origin + '/brand/' + asset)).status(), 200);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(value => document.documentElement.classList.toggle('dark', value === 'dark'), theme);
+    const loaded = await page.locator('header img:visible').evaluateAll(images => images.every(img => img.complete && img.naturalWidth > 0));
+    assert.equal(loaded, true);
+  }
+  pass('Bundled light/dark logos load with all external browser requests blocked');
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  await page.screenshot({ path: dir + '/platform-overview.png', fullPage: true });
+  const snapshot = await (await page.request.get(origin + '/api/samba/snapshot')).json();
+  // Synthetic read responses exercise scale without creating employees or changing AD.
+  const users = Array.from({ length: 55 }, (_, i) => ({ id: (1000 + i).toString(16).padStart(32, '0'), name: 'layout_' + i, displayName: '界面测试员工 ' + i, dn: 'CN=layout_' + i + ',OU=Employees,DC=assay,DC=test', employeeId: 'UI' + i, email: 'layout_' + i + '@assay.test', department: i % 2 ? '财务部' : '研发部', title: '工程师', company: '', office: '', phone: '', sid: '', disabled: false, manageable: true }));
+  const groups = Array.from({ length: 35 }, (_, i) => ({ id: (2000 + i).toString(16).padStart(32, '0'), name: 'layout_group_' + i, description: '界面测试用户组', sid: '', manageable: true, members: i === 0 ? users.map(u => u.dn) : [] }));
+  const share = { name: 'layout_directory', comment: '界面测试目录', active: false, read_only: false, groups: groups.map(g => g.name) };
+  await page.route('**/api/samba/snapshot', route => route.fulfill({ json: { ...snapshot, users, groups, shares: [share] } }));
+  await page.goto(origin + '/samba/users');
+  const table = page.getByRole('table', { name: '员工账号', exact: true });
+  await page.getByText('共 55 条 · 第 1 / 3 页', { exact: true }).waitFor();
+  assert.equal(await table.getByRole('row').count(), 21);
+  await page.getByRole('button', { name: '下一页', exact: true }).click();
+  await page.getByText('共 55 条 · 第 2 / 3 页', { exact: true }).waitFor();
+  await page.getByLabel('搜索员工账号', { exact: true }).fill('UI54');
+  await page.getByRole('link', { name: '界面测试员工 54', exact: true }).click();
+  assert.equal(new URL(page.url()).pathname, '/samba/users/' + users[54].id);
+  await page.reload(); await page.getByRole('heading', { name: '员工资料', exact: true }).waitFor();
+  await page.goBack(); await page.getByRole('heading', { name: '员工账号', exact: true }).waitFor();
+  await page.getByLabel('部门筛选', { exact: true }).selectOption('财务部');
+  await page.getByText('共 27 条 · 第 1 / 2 页', { exact: true }).waitFor();
+  pass('55 employees paginate, filter, search and open refreshable details with browser back');
+  await page.goto(origin + '/samba/groups/' + groups[0].id);
+  await page.getByText('共 55 条 · 第 1 / 3 页', { exact: true }).waitFor();
+  assert.equal(await page.getByRole('table', { name: '组成员', exact: true }).getByRole('row').count(), 21);
+  await page.getByLabel('搜索组成员', { exact: true }).fill('UI54');
+  await page.getByLabel('选择成员 layout_54', { exact: true }).check();
+  assert.equal(await page.getByRole('button', { name: '移出所选成员', exact: true }).isEnabled(), true);
+  pass('Large groups show searchable paginated members instead of an expanding table cell');
+  await page.goto(origin + '/samba/shares/' + share.name);
+  await page.getByText('共 35 条 · 第 1 / 2 页', { exact: true }).waitFor();
+  await page.getByLabel('搜索目录访问组', { exact: true }).fill('layout_group_34');
+  await page.getByRole('link', { name: 'layout_group_34', exact: true }).waitFor();
+  pass('Directory detail shows a searchable complete access-group list');
+  await page.goto(origin + '/samba/bindings');
+  await page.getByText(/当前两者独立，关联不会同步密码/).waitFor();
+  pass('Account-link page explicitly explains separate login and AD credentials');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(origin + '/platform');
+  await page.getByRole('heading', { name: '管理概览', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  await page.locator('button[aria-controls="workspace-sidebar"]').click();
+  await page.locator('#workspace-sidebar').getByRole('link', { name: '员工账号', exact: true }).click();
+  assert.equal(new URL(page.url()).pathname, '/samba/users');
+  assert.equal(await page.locator('button[aria-controls="workspace-sidebar"]').getAttribute('aria-expanded'), 'false');
+  pass('Mobile platform layout and sidebar navigation fit a 390px viewport');
+  fs.writeFileSync(dir + '/layout-result.json', JSON.stringify({ passed: results.length, results }, null, 2));
+})().catch(e => { console.error(e.message.replaceAll(password, '[redacted]')); process.exitCode = 1; }).finally(async () => { await browser?.close(); });

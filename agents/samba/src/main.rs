@@ -39,6 +39,8 @@ struct UserCreate {
     name: String,
     display_name: String,
     password: String,
+    #[serde(default)]
+    profile: ad::EmployeeProfile,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -46,6 +48,8 @@ struct UserUpdate {
     id: String,
     display_name: String,
     disabled: bool,
+    #[serde(default)]
+    profile: ad::EmployeeProfile,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -82,6 +86,13 @@ struct Id {
 struct Member {
     group_id: String,
     user_id: String,
+    add: bool,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Members {
+    group_id: String,
+    user_ids: Vec<String>,
     add: bool,
 }
 #[derive(Deserialize)]
@@ -168,11 +179,13 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
     match cmd.action.as_str() {
         "user.create" => {
             let x: UserCreate = parse(cmd.args.clone())?;
-            d.create_user(&x.name, &x.display_name, &x.password).await
+            d.create_user(&x.name, &x.display_name, &x.password, &x.profile)
+                .await
         }
         "user.update" => {
             let x: UserUpdate = parse(cmd.args.clone())?;
-            d.update_user(&x.id, &x.display_name, x.disabled).await
+            d.update_user(&x.id, &x.display_name, x.disabled, &x.profile)
+                .await
         }
         "user.password" => {
             let x: Reset = parse(cmd.args.clone())?;
@@ -192,12 +205,28 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         }
         "group.delete" => {
             let x: Id = parse(cmd.args.clone())?;
+            let group = d.object(&x.id, true).await?;
+            let rows = files::call(&a.c, files::Local::List).await?;
+            ensure!(
+                !rows
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|r| r["groups"].as_array().is_some_and(|groups| groups
+                        .iter()
+                        .any(|g| g.as_str() == Some(&group.attrs["sAMAccountName"][0])))),
+                "remove group from directory access lists before deleting group"
+            );
             d.group(&x.id, None, None, true).await
         }
         "group.member" => {
             let x: Member = parse(cmd.args.clone())?;
             d.group(&x.group_id, None, Some((&x.user_id, x.add)), false)
                 .await
+        }
+        "group.members" => {
+            let x: Members = parse(cmd.args.clone())?;
+            d.members(&x.group_id, &x.user_ids, x.add).await
         }
         "share.save" => {
             let x: ShareSave = parse(cmd.args.clone())?;

@@ -7,9 +7,11 @@ import { useAuth } from '../stores/auth';
 export default function ProtectedRoute({
   children,
   permission,
+  anyPermissions,
 }: {
   children: ReactNode;
   permission?: string;
+  anyPermissions?: string[];
 }) {
   const { t } = useTranslation();
   const { user, loading, has } = useAuth();
@@ -22,7 +24,10 @@ export default function ProtectedRoute({
     );
   }
   if (!user) return <Navigate to="/login" replace />;
-  if (permission && !has(permission)) {
+  if (
+    (permission && !has(permission)) ||
+    (anyPermissions && !anyPermissions.some(has))
+  ) {
     return (
       <div className="min-h-screen flex items-center justify-center text-red-500">
         {t('nav.noAccess')}

@@ -62,8 +62,17 @@ const zhCN: Resource = {
 
   nav: {
     companyAccounts: '公司账号与文件共享',
+    companyDirectory: '公司目录与文件',
+    administrationHome: '管理概览',
+    directoryEmployees: '员工账号',
+    directoryGroups: '用户组',
+    sharedDirectories: '共享目录',
+    accountLinks: '登录账号关联',
+    directoryOperations: '目录操作记录',
+    platformAccess: '平台组织与访问',
+    managementAudit: '管理审计',
     platformManagement: '平台管理',
-    userPermissions: '用户与权限',
+    userPermissions: '系统账号与角色',
     accountMenu: '账户菜单',
     personalSettings: '个人设置',
     securitySettings: '安全验证',
