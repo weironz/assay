@@ -27,6 +27,7 @@ async function api(context, path, method = 'GET', data, status = 200) {
   assert.equal(await page.getByRole('button', { name: '本地账号', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '注册账号', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '注册', exact: true }).count(), 0);
+  assert.equal(await page.getByRole('link', { name: '管理员应急登录', exact: true }).count(), 0);
   assert.equal(await page.getByPlaceholder('用户名或邮箱', { exact: true }).count(), 1);
   await page.screenshot({ path: dir + '/unified-login-desktop.png', fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
@@ -47,7 +48,7 @@ async function api(context, path, method = 'GET', data, status = 200) {
   pass('Existing administrator credentials use normal unified sign-in and preserve the original account and roles');
 
   const recovery = await context(); const recoveryPage = await recovery.newPage();
-  await recoveryPage.goto(origin + '/login'); await recoveryPage.getByRole('link', { name: '管理员应急登录', exact: true }).click();
+  await recoveryPage.goto(origin + '/login/admin');
   await recoveryPage.getByRole('heading', { name: '管理员应急登录', exact: true }).waitFor();
   await login(recoveryPage, fixture.ad_name, fixture.ad_password, undefined, 401);
   await recoveryPage.getByText('账号或密码错误', { exact: true }).waitFor();

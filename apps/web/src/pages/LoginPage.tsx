@@ -577,15 +577,17 @@ export default function LoginPage() {
             )}
           </form>
         </div>
-        <div className="mt-5 text-center text-xs text-gray-500">
-          <Link
-            to={emergency ? "/login" : "/login/admin"}
-            state={returnToFiles ? { returnTo: "/files" } : undefined}
-            className="hover:text-gray-700 hover:underline dark:hover:text-gray-300"
-          >
-            {t(emergency ? "auth.backToLogin" : "auth.emergencyLink")}
-          </Link>
-        </div>
+        {emergency && (
+          <div className="mt-5 text-center text-xs text-gray-500">
+            <Link
+              to="/login"
+              state={returnToFiles ? { returnTo: "/files" } : undefined}
+              className="hover:text-gray-700 hover:underline dark:hover:text-gray-300"
+            >
+              {t("auth.backToLogin")}
+            </Link>
+          </div>
+        )}
       </div>
     </div>
   );
