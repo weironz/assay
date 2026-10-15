@@ -171,6 +171,40 @@ fn shares(c: &Config) -> Result<Vec<Share>> {
     }
     Ok(rows)
 }
+fn reload_pid(c: &Config) -> Result<i32> {
+    if !c.reload_via_proc {
+        return Ok(fs::read_to_string(&c.smb_pid_file)?.trim().parse()?);
+    }
+    let mut masters = vec![];
+    for entry in fs::read_dir("/proc")? {
+        let entry = entry?;
+        let Ok(pid) = entry.file_name().to_string_lossy().parse::<i32>() else {
+            continue;
+        };
+        if fs::read_to_string(entry.path().join("comm"))
+            .unwrap_or_default()
+            .trim()
+            != "smbd"
+        {
+            continue;
+        }
+        let status = fs::read_to_string(entry.path().join("status"))?;
+        let parent = status
+            .lines()
+            .find_map(|line| line.strip_prefix("PPid:"))
+            .and_then(|value| value.trim().parse::<i32>().ok())
+            .ok_or_else(|| anyhow::anyhow!("smbd parent unavailable"))?;
+        let parent_name = fs::read_to_string(format!("/proc/{parent}/comm"))?;
+        if !parent_name.trim().starts_with("smbd") {
+            masters.push(pid);
+        }
+    }
+    ensure!(
+        masters.len() == 1,
+        "exactly one smbd master required in the shared PID namespace"
+    );
+    Ok(masters[0])
+}
 fn save(c: &Config, s: &[Share]) -> Result<()> {
     let target = c.config_dir.join(&c.samba_config_file_name);
     if target.exists() {
@@ -180,7 +214,7 @@ fn save(c: &Config, s: &[Share]) -> Result<()> {
         );
     }
     // Reload PID is fixed by deployment, never supplied by an HTTP request.
-    let pid = fs::read_to_string(&c.smb_pid_file)?.trim().parse::<i32>()?;
+    let pid = reload_pid(c)?;
     ensure!(pid > 1, "invalid smbd process");
     let comm = fs::read_to_string(format!("/proc/{pid}/comm"))?;
     ensure!(comm.trim() == "smbd", "configured process is not smbd");

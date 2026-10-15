@@ -39,6 +39,9 @@ pub struct Config {
     #[serde(default)]
     pub files: Option<crate::portal::Config>,
     pub smb_pid_file: PathBuf,
+    // For an existing AD container without a mounted PID directory. Requires its PID namespace.
+    #[serde(default)]
+    pub reload_via_proc: bool,
     #[serde(default)]
     pub read_only: bool,
 }
