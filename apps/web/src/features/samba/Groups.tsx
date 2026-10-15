@@ -116,7 +116,7 @@ export function Groups({
     group.manageable === false
       ? '此用户组受 AD 保护，仅允许查看。'
       : group.members.length
-        ? '请先在下方成员列表移出全部成员，再删除用户组。'
+        ? '请先移出全部成员，再删除用户组。'
         : referenced.length
           ? '请先从授权目录的访问组中移除此用户组，再删除。'
           : '';
