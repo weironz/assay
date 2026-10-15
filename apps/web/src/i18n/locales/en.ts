@@ -124,6 +124,7 @@ const en = {
     directoryUsername: 'Company username',
     directoryHint: 'Sign in with your company account to access business modules and authorized files.',
     directoryUnavailable: 'Company sign-in is temporarily unavailable.',
+    directoryLinkRequired: 'This company account has an existing file-access link. Ask an administrator to configure its login identity in Identity and Access. A file-access link does not change local sign-in.',
 
     oidcSignIn: "Sign in with {{provider}}",
     oidcLocalAlternative: "Or sign in with a local account",

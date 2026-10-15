@@ -169,6 +169,7 @@ function totp(uri) {
   const oldMe = await api(existing, 'GET', '/me'); assert.equal(oldMe.id, fixture.assay_user_id);
   const ticket = await api(existing, 'POST', '/tickets', { title: 'QA existing identity retention ' + suffix, body: '<p>Keep requester and original business ID during optional AD login.</p>' }, {}, 201);
   await api(existing, 'POST', '/auth/sign-out', {});
+  await api(admin, 'POST', '/directory/identities', { userId: oldMe.id, username: fixture.ad_name }, { 'x-step-up-token': await stepUp(admin, 'roles') }, 201);
   await directoryLogin(existing, fixture.ad_name, fixture.ad_password);
   assert.equal((await api(existing, 'GET', '/me')).id, oldMe.id);
   assert.equal((await api(existing, 'GET', '/tickets/' + ticket.id)).requesterId, oldMe.id);

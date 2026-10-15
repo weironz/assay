@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { authRedis } from './auth-redis';
 import { assertSessionEpochMigration } from './session-epoch';
 import { checkStepUpRate, releaseSuccessfulStepUpAttempt, reserveTotpCode } from './step-up-store';
-import { connectDirectoryFiles, directoryClient, directoryError, directorySettings, resolveDirectoryIdentity } from './directory-runtime';
+import { connectDirectoryFiles, directoryClient, directoryError, directorySettings, DirectoryLinkRequired, resolveDirectoryIdentity } from './directory-runtime';
 // This package exposes .d.mts only; the API still compiles with legacy CommonJS resolution.
 const { createOTP } = require('@better-auth/utils/otp') as { createOTP: (secret: string, options: { digits: number; period: number }) => { verify: (code: string) => Promise<boolean> } };
 
@@ -60,7 +60,10 @@ export function directoryPlugin(db: PrismaClient): BetterAuthPlugin {
         await setSessionCookie(ctx, { session, user }, !ctx.body.rememberMe);
         await authRedis.decr(key);
         return ctx.json({ ok: true, filesConnected, destination: filesConnected ? '/files' : '/dashboard' });
-      } catch (e) { directoryError(e); }
+      } catch (e) {
+        if (e instanceof DirectoryLinkRequired) await authRedis.decr(key);
+        directoryError(e);
+      }
       finally { ctx.body.password = ''; }
     }),
   } };

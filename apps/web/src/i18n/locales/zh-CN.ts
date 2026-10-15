@@ -120,6 +120,7 @@ const zhCN: Resource = {
     directoryUsername: '公司账号',
     directoryHint: '使用公司账号登录，即可访问业务模块和获授权的文件。',
     directoryUnavailable: '公司身份服务暂时不可用，请稍后重试。',
+    directoryLinkRequired: '此公司账号已有文件访问关联。请联系管理员在“身份与访问”中明确配置登录身份关联；文件关联不会自动切换本地账号的登录方式。',
 
     oidcSignIn: "使用 {{provider}} 登录",
     oidcLocalAlternative: "或使用本地账号登录",

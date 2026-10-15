@@ -77,9 +77,14 @@ function dbFixture({ bound = false, collision = false, disabled = false, mismatc
   db.$transaction = work => work(db);
   return { db, calls, user };
 }
-test('explicit AD binding reuses the original business user and never rewrites local credentials', async () => {
+test('a file access binding cannot silently claim a local account or its administrator role', async () => {
+  const { db, calls } = dbFixture({ bound: true });
+  await assert.rejects(() => runtime.resolveDirectoryIdentity(db, directoryProfile(entry())), runtime.DirectoryLinkRequired);
+  assert.equal(calls.creates, 0); assert.equal(calls.identity, null); assert.equal(calls.credentialWrites, 0);
+});
+test('an explicit login identity association reuses the original business user without rewriting credentials', async () => {
   const { db, calls, user } = dbFixture({ bound: true });
-  assert.equal((await runtime.resolveDirectoryIdentity(db, directoryProfile(entry()))).id, user.id);
+  assert.equal((await runtime.resolveDirectoryIdentity(db, directoryProfile(entry()), { userId: user.id, actorId: 'administrator', actorName: 'Administrator' })).id, user.id);
   assert.equal(calls.creates, 0); assert.equal(calls.credentialWrites, 0);
   assert.equal(calls.identity.userId, user.id); assert.deepEqual(calls.identity.roleNames, ['requester']);
 });

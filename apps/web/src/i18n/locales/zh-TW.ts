@@ -120,6 +120,7 @@ const zhTW: Resource = {
     directoryUsername: '公司帳號',
     directoryHint: '使用公司帳號登入，即可存取業務模組及獲授權的檔案。',
     directoryUnavailable: '公司身分服務暫時無法使用，請稍後重試。',
+    directoryLinkRequired: '此公司帳號已有檔案存取關聯。請聯絡管理員在「身分與存取」中明確設定登入身分關聯；檔案關聯不會自動切換本機帳號的登入方式。',
 
     oidcSignIn: "使用 {{provider}} 登入",
     oidcLocalAlternative: "或使用本機帳號登入",

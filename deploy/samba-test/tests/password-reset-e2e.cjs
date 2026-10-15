@@ -28,6 +28,7 @@ async function checked(r, status) { assert.equal(r.status(), status); return r; 
   const me = await (await checked(await page.request.get(origin + '/api/me'), 200)).json();
   assert(me.roles.includes('admin'));
   const bindingsBefore = before.bindings.filter(b => b.userId === me.id);
+  const companyLogin = before.bindings.some(b => b.userId === f.assay_user_id && b.directoryManaged);
   const employee = before.users.find(u => u.id === f.user_id);
   assert(employee && employee.name.startsWith('qa_') && employee.name === f.ad_name);
   const commands = [], challenges = [];
@@ -83,8 +84,14 @@ async function checked(r, status) { assert.equal(r.status(), status); return r; 
   await page.screenshot({ path: dir + '/password-policy-error.png', fullPage: true });
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   const unchangedContext = await browser.newContext({ ignoreHTTPSErrors: true });
-  const oldSession = await checked(await unchangedContext.request.post(origin + '/api/auth/sign-in/directory', { headers: { Origin: origin }, data: { username: f.ad_name, password: f.ad_password } }), 200);
-  assert.equal((await oldSession.json()).filesConnected, true);
+  if (companyLogin) {
+    const oldSession = await checked(await unchangedContext.request.post(origin + '/api/auth/sign-in/directory', { headers: { Origin: origin }, data: { username: f.ad_name, password: f.ad_password } }), 200);
+    assert.equal((await oldSession.json()).filesConnected, true);
+  } else {
+    await checked(await unchangedContext.request.post(origin + '/api/auth/sign-in/email', { headers: { Origin: origin }, data: { email: f.assay_email, password: f.assay_password } }), 200);
+    const oldSession = await checked(await unchangedContext.request.post(origin + '/api/files/session', { headers: { Origin: origin }, data: { password: f.ad_password } }), 201);
+    assert.equal((await oldSession.json()).connected, true);
+  }
   await checked(await unchangedContext.request.post(origin + '/api/auth/sign-out', { headers: { Origin: origin }, data: {} }), 200);
   await unchangedContext.close();
   pass('A real numeric-only AD password is rejected with a clear policy message; the original password and own SMB access remain valid');
@@ -107,7 +114,7 @@ async function checked(r, status) { assert.equal(r.status(), status); return r; 
 
   const ec = await browser.newContext({ ignoreHTTPSErrors: true }); const ep = await ec.newPage();
   const provider = await (await page.request.get(origin + '/api/auth/directory/provider')).json();
-  if (provider.enabled) {
+  if (provider.enabled && companyLogin) {
     await checked(await ep.request.post(origin + '/api/auth/sign-in/directory', { headers: { Origin: origin }, data: { username: f.ad_name, password: nextPassword } }), 200);
   } else {
     await checked(await ep.request.post(origin + '/api/auth/sign-in/email', { headers: { Origin: origin }, data: { email: f.assay_email, password: f.assay_password } }), 200);

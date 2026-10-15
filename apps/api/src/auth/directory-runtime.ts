@@ -9,11 +9,13 @@ import { isSystemRoleName, type SystemRoleName } from './role-policy';
 export const directorySettings = readDirectorySettings();
 export const directoryClient = directorySettings ? new DirectoryClient(directorySettings) : null;
 export const DIRECTORY_MAPPABLE_ROLES = ['handler', 'supervisor', 'ticket_viewer_all', 'asset_manager', 'inventory_manager', 'cop_viewer', 'samba_manager'] as const;
+export class DirectoryLinkRequired extends Error {}
 export type DirectorySession = { userId: string; providerId: string; objectId: string; securityStamp: string };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 export const directorySessionKey = (token: string) => `assay:directory:session:${hash(token)}`;
 const profileKey = (id: string) => `assay:directory:profile:${hash(`${directorySettings?.providerId}:${id}`)}`;
 export function directoryError(error: unknown): never {
+  if (error instanceof DirectoryLinkRequired) throw new APIError('FORBIDDEN', { code: 'DIRECTORY_LINK_REQUIRED', message: '此公司账号已有文件访问关联，请由管理员在“身份与访问”中明确配置登录身份关联。' });
   if (error instanceof DirectoryUnavailable) throw new APIError('SERVICE_UNAVAILABLE', { code: 'DIRECTORY_UNAVAILABLE', message: '公司身份服务暂时不可用，请稍后重试' });
   throw new APIError('UNAUTHORIZED', { code: 'DIRECTORY_LOGIN_REJECTED', message: '公司账号登录失败，请核对凭据或联系管理员检查账号关联' });
 }
@@ -29,13 +31,14 @@ export async function resolveDirectoryIdentity(db: PrismaClient, profile: Direct
   const user = await db.$transaction(async tx => {
     await tx.$queryRaw`SELECT pg_advisory_xact_lock(73020261015::bigint) IS NULL AS locked`;
     const existing = await tx.directoryIdentity.findUnique({ where: { providerId_objectId: { providerId: settings.providerId, objectId: profile.id } }, include: { user: true } });
-    // An explicit administrator-created binding may reuse an existing business principal.
+    // A file access binding is not permission to change login authority or to
+    // inherit the linked principal's roles. Only the identity settings can do so.
     const binding = await tx.sambaIdentity.findUnique({ where: { adObjectId: profile.id } });
     if (link && ((existing && existing.userId !== link.userId) || (binding && binding.userId !== link.userId))) throw new DirectoryRejected();
     let user = existing?.user || (link ? await tx.user.findUnique({ where: { id: link.userId } }) : null);
     if (binding && normalizedDomainDN(binding.domain) !== normalizedDomainDN(adDomainDN(settings.domain))) throw new DirectoryRejected();
     if (existing && binding && binding.userId !== existing.userId) throw new DirectoryRejected();
-    if (!user && binding) user = await tx.user.findUnique({ where: { id: binding.userId } });
+    if (!user && binding) throw new DirectoryLinkRequired();
     if (!user) {
       if (!settings.autoProvision || binding || link) throw new DirectoryRejected();
       const email = profile.email || `ad-${profile.id}@${settings.domain}.invalid`;

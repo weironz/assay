@@ -5,7 +5,7 @@ import { authClient, signIn } from '../lib/auth-client';
 import BrandMark from '../components/BrandMark';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { useAuth } from '../stores/auth';
-import { directoryProvider, directorySignIn, type DirectoryProvider } from '../lib/directory-auth';
+import { DirectorySignInError, directoryProvider, directorySignIn, type DirectoryProvider } from '../lib/directory-auth';
 import { SecurityRequestError } from '../lib/security-step-up';
 import { type Msg, useMsg } from '../lib/messages';
 import { beginOidc, oidcProvider, type OidcProvider } from '../lib/oidc';
@@ -103,7 +103,7 @@ export default function LoginPage() {
       if (loginSource === 'directory') {
         setPassword(''); setFactorCode('');
         const status = err instanceof SecurityRequestError ? err.status : undefined;
-        setError({ key: status === 429 ? 'auth.errTooManyLogin' : status === 503 ? 'auth.directoryUnavailable' : directoryMfa ? 'auth.twoFactorInvalid' : 'auth.errInvalidCredentials' });
+        setError({ key: err instanceof DirectorySignInError && err.code === 'DIRECTORY_LINK_REQUIRED' ? 'auth.directoryLinkRequired' : status === 429 ? 'auth.errTooManyLogin' : status === 503 ? 'auth.directoryUnavailable' : directoryMfa ? 'auth.twoFactorInvalid' : 'auth.errInvalidCredentials' });
         return;
       }
       setError(
