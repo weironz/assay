@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const { chromium } = require('playwright');
-const origin = process.env.SAMBA_E2E_ORIGIN || 'https://100.70.220.77:8446';
+const origin = require('./test-origin.cjs');
 const dir = process.env.SAMBA_E2E_PRIVATE_DIR;
 const f = JSON.parse(fs.readFileSync(dir + '/fixture.json', 'utf8'));
 const headers = { Origin: origin };

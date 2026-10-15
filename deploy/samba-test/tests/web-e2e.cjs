@@ -4,7 +4,7 @@ const path = require('node:path');
 const { randomBytes, randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { chromium } = require('playwright');
-const origin = process.env.SAMBA_E2E_ORIGIN || 'https://100.70.220.77:8446';
+const origin = require('./test-origin.cjs');
 const dir = process.env.SAMBA_E2E_PRIVATE_DIR;
 if (!dir || !process.env.SAMBA_E2E_ADMIN_PASSWORD_FILE) throw new Error('Private artifact directory and password file required');
 fs.mkdirSync(dir, { recursive: true, mode: 0o700 });

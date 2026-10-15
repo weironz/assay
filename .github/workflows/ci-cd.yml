@@ -48,6 +48,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: 部署工具与测试目标契约
+        run: |
+          python3 -m unittest discover -s deploy/samba-production -p 'test_*.py'
+          node --test deploy/samba-test/tests/test-origin.test.cjs
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
