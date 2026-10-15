@@ -228,7 +228,7 @@ export default function SambaPage() {
         aria-label="面包屑"
         className="flex flex-wrap items-center gap-2 text-sm text-gray-500"
       >
-        <Link to="/samba/overview">公司目录与文件</Link>
+        <Link to="/samba/overview">文件管理</Link>
         <span>/</span>
         <Link className={link} to={`/samba/${section}`}>
           {titles[section]}

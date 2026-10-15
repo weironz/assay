@@ -8,6 +8,7 @@ type UserState = {
   twoFactorEnabled: boolean;
   twoFactor?: { verified: boolean } | null;
   roles: { role: { name: string } }[];
+  directoryIdentity?: { roleNames: string[] } | null;
 };
 
 export async function enforceBetterAuthSensitiveStepUp(
@@ -42,7 +43,7 @@ export async function enforceBetterAuthSensitiveStepUp(
   if ((path === '/two-factor/enable' || path === '/two-factor/get-totp-uri') &&
       !user.twoFactorEnabled && !user.twoFactor?.verified) return;
   if (path === '/two-factor/disable' && privilegedMfaMode() === 'enforce' &&
-      hasPrivilegedRole(user.roles.map(r => r.role.name))) {
+      hasPrivilegedRole([...user.roles.map(r => r.role.name), ...(user.directoryIdentity?.roleNames || [])])) {
     throw new APIError('FORBIDDEN', { message: '强制 MFA 模式下需先移除特权角色才能停用 TOTP' });
   }
   try {

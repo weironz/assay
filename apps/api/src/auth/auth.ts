@@ -2,6 +2,7 @@ import { betterAuth, APIError } from 'better-auth';
 import { createAuthMiddleware } from 'better-auth/api';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { twoFactor } from 'better-auth/plugins';
+import { constantTimeEqual } from 'better-auth/crypto';
 import { PrismaClient } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { mailEnabled, mailTemplate, sendMail } from '../mail/mailer';
@@ -11,6 +12,9 @@ import { assertCanLoseActiveAdmin } from './last-admin';
 import { captureAuthEpoch, readValidatedSession, refreshSessionMarker, stampSessionEpoch, stampTwoFactorChallenge } from './session-epoch';
 import { readOidcSettings } from './oidc-config';
 import { oidcPlugin } from './oidc';
+import { directoryPlugin } from './directory';
+import { directorySettings, stampDirectorySession, validatedDirectorySession, verifyDirectoryPassword } from './directory-runtime';
+import { checkStepUpRate, releaseSuccessfulStepUpAttempt } from './step-up-store';
 
 /**
  * 是否强制邮箱验证后才能登录。
@@ -36,17 +40,56 @@ export const auth = betterAuth({
     ',',
   ),
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
-  plugins: [twoFactor({ issuer: 'Greenstor Assay' }), oidcPlugin(oidcSettings, prisma)],
+  plugins: [twoFactor({ issuer: 'Greenstor Assay', allowPasswordless: true }), oidcPlugin(oidcSettings, prisma), directoryPlugin(prisma)],
   account: { storeStateStrategy: 'database', accountLinking: { enabled: false } },
   ...(oidcSettings ? { onAPIError: { errorURL: `${oidcSettings.origins[0]}/login?oidc_error=1` } } : {}),
   // These routes are handled directly by Better Auth before Nest's guards.
   hooks: {
     before: createAuthMiddleware(async (ctx) => {
       await captureAuthEpoch(prisma, ctx);
+      if (directorySettings && ctx.path === '/sign-in/email') {
+        const email = (ctx.body as any)?.email;
+        if (typeof email === 'string' && await prisma.directoryIdentity.findFirst({ where: { user: { email: { equals: email.trim(), mode: 'insensitive' } } } }))
+          throw new APIError('UNAUTHORIZED', { code: 'INVALID_EMAIL_OR_PASSWORD', message: 'Invalid email or password' });
+      }
+      if (ctx.headers && !['/get-session', '/sign-out'].includes(ctx.path) && !ctx.path.startsWith('/sign-in/')) {
+        const current = await auth.api.getSession({ headers: ctx.headers });
+        if (current) {
+          try {
+            const directory = await validatedDirectorySession(prisma, current.session.token, current.user.id);
+            if (directory && ['/change-password', '/set-password'].includes(ctx.path)) throw new Error('DIRECTORY_MANAGED_PASSWORD');
+          }
+          catch { throw new APIError('UNAUTHORIZED', { message: '公司账号会话已失效，请重新登录' }); }
+        }
+      }
+      // Passwordless IdP users still prove fresh AD possession before MFA setup.
+      // Local accounts keep Better Auth's normal password checks.
+      if (['/two-factor/enable', '/two-factor/disable', '/two-factor/get-totp-uri', '/two-factor/generate-backup-codes'].includes(ctx.path)) {
+        const session = ctx.headers && await auth.api.getSession({ headers: ctx.headers });
+        if (session) {
+          const credential = await prisma.account.findFirst({ where: { userId: session.user.id, providerId: 'credential', password: { not: null } } });
+          const directory = directorySettings && await prisma.directoryIdentity.findUnique({ where: { userId: session.user.id } });
+          if (directory || !credential) {
+            await checkStepUpRate(session.user.id);
+            const password = (ctx.body as any)?.password;
+            try { await verifyDirectoryPassword(prisma, session.user.id, password); }
+            catch { throw new APIError('UNAUTHORIZED', { message: '安全验证失败' }); }
+            await releaseSuccessfulStepUpAttempt(session.user.id);
+            if (directory && credential?.password) {
+              // Better Auth clones this context for each request. A retained, inactive
+              // local hash must not force a second password during the AD user's MFA setup.
+              const retainedHash = credential.password;
+              ctx.context.password = { ...ctx.context.password,
+                verify: async input => constantTimeEqual(input.hash, retainedHash) && constantTimeEqual(input.password, password),
+              };
+            }
+          }
+        }
+      }
       await enforceBetterAuthSensitiveStepUp(ctx.path, ctx.headers, {
         session: () => auth.api.getSession({ headers: ctx.headers! }),
         user: (id) => prisma.user.findUnique({
-          where: { id }, select: { status: true, twoFactorEnabled: true, twoFactor: { select: { verified: true } }, roles: { include: { role: true } } },
+          where: { id }, select: { status: true, twoFactorEnabled: true, twoFactor: { select: { verified: true } }, roles: { include: { role: true } }, directoryIdentity: true },
         }),
       });
     }),
@@ -124,10 +167,15 @@ export const auth = betterAuth({
     },
   },
   databaseHooks: {
+    account: { create: { before: async (account) => {
+      if (account.providerId === 'credential' && await prisma.directoryIdentity.findUnique({ where: { userId: account.userId } }))
+        throw new APIError('FORBIDDEN', { message: '公司账号密码由 AD 管理，请联系管理员' });
+    } } },
     session: {
       create: {
         before: async (session, ctx) => {
           await stampSessionEpoch(prisma, ctx, session);
+          await stampDirectorySession(ctx, session, prisma);
         },
       },
     },
@@ -189,6 +237,7 @@ export const auth = betterAuth({
     storage: 'secondary-storage',
     customRules: {
       '/sign-in/email': { window: 60, max: 5 }, // 登录：每 IP 每分钟最多 5 次
+      '/sign-in/directory': { window: 60, max: 5 },
       '/sign-in/oidc': { window: 60, max: 10 },
       '/oidc/link': { window: 60, max: 5 },
       '/sign-up/email': { window: 3600, max: 5 }, // 注册：每 IP 每小时 5 个账号

@@ -4,6 +4,7 @@ import { Job } from 'bullmq';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SLA_QUEUE, SlaJobData, slaReceiptField } from './sla.service';
+import { directoryRoleUserIds } from '../auth/directory-policy';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) =>
@@ -17,6 +18,7 @@ export class SlaProcessor extends WorkerHost {
   async process(job: Job<SlaJobData>) {
     const { ticketId, kind, dueAt } = job.data;
     if (kind !== 'response' && kind !== 'resolve') return;
+    const directorySupervisors = kind === 'response' ? await directoryRoleUserIds(this.prisma, ['admin', 'supervisor']) : [];
     const alert = await this.prisma.$transaction(async (tx) => {
       // Ticket updates take the same row lock; competing workers serialize here.
       await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${ticketId} FOR UPDATE`;
@@ -59,7 +61,10 @@ export class SlaProcessor extends WorkerHost {
         if (ticket.assigneeId) targets = [ticket.assigneeId];
         else {
           const staff = await tx.user.findMany({
-            where: { status: 'ACTIVE', roles: { some: { role: { name: { in: ['admin', 'supervisor'] } } } } },
+            where: { status: 'ACTIVE', OR: [
+              { roles: { some: { role: { name: { in: ['admin', 'supervisor'] } } } }, ...(process.env.DIRECTORY_AUTH_ENABLED === 'true' ? { directoryIdentity: null } : {}) },
+              { id: { in: directorySupervisors } },
+            ] },
             select: { id: true },
           });
           targets = staff.map((user) => user.id);

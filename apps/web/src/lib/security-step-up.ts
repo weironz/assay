@@ -6,6 +6,7 @@ export type SecurityStatus = {
   privilegedMfaMode: 'optional' | 'enforce';
   privileged: boolean;
   enrolled: boolean;
+  passwordSource?: 'local' | 'directory';
   enrollmentRequired?: boolean;
   stepUpTtlSeconds: number;
 };

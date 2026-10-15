@@ -89,6 +89,7 @@ model User {
 
   // 业务关系
   roles                UserRole[]
+  directoryIdentity    DirectoryIdentity?
   requestedTickets     Ticket[]               @relation("Requester")
   assignedTickets      Ticket[]               @relation("Assignee")
   defaultForQueues     Queue[]                @relation("QueueDefaultAssignee")
@@ -760,6 +761,30 @@ model SambaIdentity {
   linkedBy     String
   linkedAt     DateTime @default(now())
   @@map("samba_identities")
+}
+
+// Optional directory authentication; business records continue to reference User.id.
+// Passwords and password hashes from AD are never stored here.
+model DirectoryIdentity {
+  userId        String   @id @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  providerId    String   @map("provider_id")
+  objectId      String   @map("object_id")
+  accountName   String   @map("account_name")
+  groupSids     String[] @default([]) @map("group_sids")
+  roleNames     String[] @default([]) @map("role_names")
+  checkedAt     DateTime @default(now()) @map("checked_at")
+  @@unique([providerId, objectId])
+  @@map("directory_identities")
+}
+
+model DirectoryGroupRole {
+  providerId String @map("provider_id")
+  groupSid   String @map("group_sid")
+  groupName  String @map("group_name")
+  roleName   String @map("role_name")
+  @@id([providerId, groupSid, roleName])
+  @@map("directory_group_roles")
 }
 
 model SambaOperation {

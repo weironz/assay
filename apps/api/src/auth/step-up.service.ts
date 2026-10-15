@@ -5,6 +5,7 @@ import type { Request } from 'express';
 import { auth } from './auth';
 import { AuthUser } from './auth.types';
 import { PrismaService } from '../prisma/prisma.service';
+import { verifyDirectoryPassword } from './directory-runtime';
 import {
   checkStepUpRate, consumeStepUp, issueStepUp, privilegedMfaMode,
   reserveTotpCode, releaseSuccessfulStepUpAttempt, StepUpPurpose, STEP_UP_TTL_SECONDS,
@@ -30,6 +31,7 @@ export class StepUpService {
       privilegedMfaMode: privilegedMfaMode(),
       privileged,
       enrolled: user.twoFactorEnabled,
+      passwordSource: user.passwordSource || 'local',
       enrollmentRequired: privileged && privilegedMfaMode() === 'enforce' && !user.twoFactorEnabled,
       stepUpTtlSeconds: STEP_UP_TTL_SECONDS,
       purposes: ['roles', 'api-tokens', 'two-factor', 'account', 'samba'],
@@ -41,7 +43,8 @@ export class StepUpService {
     await checkStepUpRate(user.id);
     const headers = fromNodeHeaders(req.headers);
     try {
-      await auth.api.verifyPassword({ headers, body: { password: body.password } });
+      if (user.passwordSource === 'directory') await verifyDirectoryPassword(this.prisma, user.id, body.password);
+      else await auth.api.verifyPassword({ headers, body: { password: body.password } });
     } catch {
       throw new UnauthorizedException('安全验证失败');
     }

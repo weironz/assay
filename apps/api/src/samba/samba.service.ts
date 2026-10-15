@@ -4,6 +4,7 @@ import { readFileSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { actions, bindingSchema, commandSchema, directoryPath, metadata, selfPasswordSchema } from './contracts';
+import { normalizedDomainDN } from '../auth/directory-config';
 
 @Injectable()
 export class SambaService {
@@ -30,11 +31,12 @@ export class SambaService {
   async snapshot() {
     if (process.env.SAMBA_ENABLED !== 'true') return { enabled: false };
     const data = await this.agent('/v1/snapshot');
-    const [bindings, assayUsers] = await Promise.all([
+    const [bindings, assayUsers, directoryIdentities] = await Promise.all([
       this.prisma.sambaIdentity.findMany(),
       this.prisma.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } }),
+      process.env.DIRECTORY_AUTH_ENABLED === 'true' ? this.prisma.directoryIdentity.findMany({ select: { userId: true } }) : Promise.resolve<{ userId: string }[]>([]),
     ]);
-    return { enabled: true, ...data, bindings, assayUsers };
+    return { enabled: true, ...data, bindings: bindings.map(b => ({ ...b, directoryManaged: directoryIdentities.some(i => i.userId === b.userId) })), assayUsers };
   }
   async directories(input: unknown, acl = false) {
     const parsed = directoryPath.safeParse(input);
@@ -110,6 +112,10 @@ export class SambaService {
     }
     try {
       return await this.prisma.$transaction(async tx => {
+        if (process.env.DIRECTORY_AUTH_ENABLED === 'true') {
+          const directory = await tx.directoryIdentity.findUnique({ where: { userId: p.data.userId } });
+          if (directory && directory.objectId !== p.data.adObjectId) throw new ConflictException('此账号已使用 AD 统一登录，不能直接解除或更换其文件身份');
+        }
         if (identity) await tx.sambaIdentity.upsert({ where: { userId: p.data.userId }, create: { userId: p.data.userId, ...identity }, update: identity });
         else await tx.sambaIdentity.deleteMany({ where: { userId: p.data.userId } });
         await tx.sambaOperation.create({ data: { id: crypto.randomUUID(), actorId: user.id, actorName: user.name, action: identity ? 'identity.bind' : 'identity.unbind', requestHash: '-', state: 'succeeded', metadata: { userId: p.data.userId, adObjectId: p.data.adObjectId } } });
@@ -126,7 +132,7 @@ export class SambaService {
     if (!link) return null;
     const data = await this.agent('/v1/snapshot');
     const account = data.users.find((u: any) => u.id === link.adObjectId && !u.disabled && u.manageable);
-    if (!account || data.domain !== link.domain) throw new ForbiddenException('关联的 AD 员工账号不可用');
+    if (!account || normalizedDomainDN(data.domain) !== normalizedDomainDN(link.domain)) throw new ForbiddenException('关联的 AD 员工账号不可用');
     const active = data.shares.filter((s: any) => s.active && s.ready !== false);
     return {
       identity: { id: account.id as string, name: account.name as string, dn: account.dn as string },
@@ -142,7 +148,7 @@ export class SambaService {
     const link = await this.prisma.sambaIdentity.findUnique({ where: { userId: user.id } });
     if (!link) throw new ForbiddenException('尚未绑定 AD 身份');
     const snapshot = await this.agent('/v1/snapshot');
-    if (snapshot.domain !== link.domain || !snapshot.users.some((u: any) => u.id === link.adObjectId && !u.disabled)) throw new ForbiddenException('绑定身份不可用');
+    if (normalizedDomainDN(snapshot.domain) !== normalizedDomainDN(link.domain) || !snapshot.users.some((u: any) => u.id === link.adObjectId && !u.disabled)) throw new ForbiddenException('绑定身份不可用');
     return this.submit(user, p.data.requestId, 'user.change_password', { id: link.adObjectId, old_password: p.data.old_password, password: p.data.password });
   }
 }

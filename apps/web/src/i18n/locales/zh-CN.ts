@@ -62,6 +62,11 @@ const zhCN: Resource = {
 
   nav: {
     companyAccounts: '公司账号与文件共享',
+    fileManagement: '文件管理',
+    sharedFiles: '共享文件',
+    fileAccess: '文件访问',
+    fileAdministration: '管理配置',
+    identityIntegration: '身份与访问',
     companyDirectory: '公司目录与文件',
     myFiles: '我的文件',
     administrationHome: '管理概览',
@@ -109,6 +114,13 @@ const zhCN: Resource = {
   },
 
   auth: {
+    directoryLocalHint: '已关联公司身份的员工请使用“公司账号”登录；本地入口用于独立的本地账号。',
+    directoryLogin: '公司账号',
+    localLogin: '本地账号',
+    directoryUsername: '公司账号',
+    directoryHint: '使用公司账号登录，即可访问业务模块和获授权的文件。',
+    directoryUnavailable: '公司身份服务暂时不可用，请稍后重试。',
+
     oidcSignIn: "使用 {{provider}} 登录",
     oidcLocalAlternative: "或使用本地账号登录",
     oidcFailed: "企业登录未完成，请重试。同邮箱本地账号请先在个人设置中关联企业账号。",
@@ -158,6 +170,8 @@ const zhCN: Resource = {
   },
 
   stepUp: {
+    directoryPassword: '当前公司账号密码',
+    directoryHint: '请输入当前公司账号的密码。本次验证仅用于当前操作。',
     hint: '请输入当前登录 Assay 账号的密码。本次验证仅用于当前操作。',
     password: '当前 Assay 登录密码',
     code: '验证器的 6 位动态码',
@@ -421,6 +435,9 @@ const zhCN: Resource = {
   },
 
   users: {
+    setLocalPassword: '设置本地登录密码',
+    directoryRoles: 'AD 组授权',
+    directoryPassword: '密码由 AD 管理',
     title: '用户管理',
     emailPlaceholder: '邮箱',
     namePlaceholder: '姓名',

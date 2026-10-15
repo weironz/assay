@@ -29,13 +29,18 @@ export class UsersService {
         user.roles
           ?.map((ur: any) => ur.role.name)
           .filter(isSystemRoleName) ?? [],
+      directoryRoles: process.env.DIRECTORY_AUTH_ENABLED === 'true' ? user.directoryIdentity?.roleNames?.filter(isSystemRoleName) ?? [] : [],
+      directoryAccount: user.directoryIdentity?.accountName || null,
+      localPassword: user.accounts?.some((a: any) => a.providerId === 'credential') ?? true,
+      canSetLocalPassword: process.env.DIRECTORY_AUTH_ENABLED !== 'true',
+      directoryLogin: process.env.DIRECTORY_AUTH_ENABLED === 'true' && !!user.directoryIdentity,
       createdAt: user.createdAt,
     };
   }
 
   async list() {
     const users = await this.prisma.user.findMany({
-      include: { roles: { include: { role: true } } },
+      include: { roles: { include: { role: true } }, directoryIdentity: true, accounts: { select: { providerId: true } } },
       orderBy: { createdAt: 'desc' },
     });
     return users.map((u) => this.serialize(u));
@@ -79,7 +84,7 @@ export class UsersService {
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { roles: { include: { role: true } } },
+      include: { roles: { include: { role: true } }, directoryIdentity: true, accounts: { select: { providerId: true } } },
     });
     if (!user) throw new NotFoundException('用户不存在');
     return this.serialize(user);
@@ -127,6 +132,9 @@ export class UsersService {
     await assertSessionEpochMigration(this.prisma);
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('用户不存在');
+    const directoryIdentity = await this.prisma.directoryIdentity.findUnique({ where: { userId: id } });
+    if (process.env.DIRECTORY_AUTH_ENABLED === 'true' && directoryIdentity)
+      throw new BadRequestException('此员工使用公司账号登录，密码由 AD 管理');
     // 用 better-auth 内部哈希器，保证与登录校验一致
     const ctx = await auth.$context;
     const hashed = await ctx.password.hash(newPassword);
@@ -151,6 +159,11 @@ export class UsersService {
             password: hashed,
           },
         });
+        if (directoryIdentity) {
+          const requester = await tx.role.findUnique({ where: { name: 'requester' } });
+          if (!requester) throw new BadRequestException('系统角色尚未初始化');
+          await tx.userRole.createMany({ data: [{ userId: id, roleId: requester.id }], skipDuplicates: true });
+        }
       }
     });
     // Catch sessions created during the credential update. Better Auth's

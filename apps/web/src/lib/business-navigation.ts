@@ -16,21 +16,6 @@ export interface BusinessModule {
 
 export const BUSINESS_MODULES: BusinessModule[] = [
   {
-    id: 'directory', labelKey: 'nav.companyDirectory', areas: ['/samba'],
-    items: [
-      { to: '/samba/overview', labelKey: 'nav.administrationHome', permission: 'samba:read', feature: 'directory' },
-      { to: '/samba/users', labelKey: 'nav.directoryEmployees', permission: 'samba:read', feature: 'directory' },
-      { to: '/samba/groups', labelKey: 'nav.directoryGroups', permission: 'samba:read', feature: 'directory' },
-      { to: '/samba/shares', labelKey: 'nav.sharedDirectories', permission: 'samba:read', feature: 'directory' },
-      { to: '/samba/bindings', labelKey: 'nav.accountLinks', permission: 'samba:read', feature: 'directory' },
-      { to: '/samba/history', labelKey: 'nav.directoryOperations', permission: 'samba:read', feature: 'directory', groupKey: 'nav.managementAudit' },
-    ],
-  },
-  {
-    id: 'files', labelKey: 'nav.myFiles', areas: ['/files'],
-    items: [{ to: '/files', labelKey: 'nav.myFiles', feature: 'files' }],
-  },
-  {
     id: 'tickets',
     labelKey: 'nav.ticketSystem',
     areas: ['/tickets', '/queues', '/sla'],
@@ -94,6 +79,18 @@ export const BUSINESS_MODULES: BusinessModule[] = [
       },
     ],
   },
+  {
+    id: 'files', labelKey: 'nav.fileManagement', areas: ['/files', '/samba'],
+    items: [
+      { to: '/files', labelKey: 'nav.sharedFiles', feature: 'files', groupKey: 'nav.fileAccess' },
+      { to: '/samba/overview', labelKey: 'nav.administrationHome', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+      { to: '/samba/users', labelKey: 'nav.directoryEmployees', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+      { to: '/samba/groups', labelKey: 'nav.directoryGroups', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+      { to: '/samba/shares', labelKey: 'nav.sharedDirectories', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+      { to: '/samba/bindings', labelKey: 'nav.accountLinks', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+      { to: '/samba/history', labelKey: 'nav.directoryOperations', permission: 'samba:read', feature: 'directory', groupKey: 'nav.fileAdministration' },
+    ],
+  },
 ];
 
 export const PLATFORM_PERMISSIONS = [
@@ -103,13 +100,14 @@ export const PLATFORM_PERMISSIONS = [
 export const PLATFORM_MODULE: BusinessModule = {
   id: 'platform',
   labelKey: 'nav.platformManagement',
-  areas: ['/platform', '/organization', '/users'],
+  areas: ['/platform', '/organization', '/users', '/directory-settings'],
   items: [
     {
       to: '/platform',
       labelKey: 'nav.administrationHome',
       anyPermissions: PLATFORM_PERMISSIONS,
     },
+    { to: '/directory-settings', labelKey: 'nav.identityIntegration', permission: 'user:manage', groupKey: 'nav.platformAccess' },
     {
       to: '/organization',
       labelKey: 'cop.organization',

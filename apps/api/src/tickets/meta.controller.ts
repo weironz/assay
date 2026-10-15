@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequirePermissions } from '../auth/decorators';
+import { directoryRoleUserIds } from '../auth/directory-policy';
 
 class CategoryDto {
   @IsString()
@@ -140,10 +141,14 @@ export class MetaController {
   /** 可指派的处理人（handler/admin 角色），供指派下拉使用（登录可见） */
   @Get('assignees')
   async assignees() {
+    const directoryHandlers = await directoryRoleUserIds(this.prisma, ['handler', 'admin']);
     const users = await this.prisma.user.findMany({
       where: {
         status: 'ACTIVE',
-        roles: { some: { role: { name: { in: ['handler', 'admin'] } } } },
+        OR: [
+          { roles: { some: { role: { name: { in: ['handler', 'admin'] } } } }, ...(process.env.DIRECTORY_AUTH_ENABLED === 'true' ? { directoryIdentity: null } : {}) },
+          { id: { in: directoryHandlers } },
+        ],
       },
       select: { id: true, name: true },
       orderBy: { name: 'asc' },

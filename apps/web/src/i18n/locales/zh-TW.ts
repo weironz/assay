@@ -62,6 +62,11 @@ const zhTW: Resource = {
 
   nav: {
     companyAccounts: '公司帳號與檔案共享',
+    fileManagement: '檔案管理',
+    sharedFiles: '共用檔案',
+    fileAccess: '檔案存取',
+    fileAdministration: '管理設定',
+    identityIntegration: '身分與存取',
     companyDirectory: '公司目錄與檔案',
     myFiles: '我的檔案',
     administrationHome: '管理概覽',
@@ -109,6 +114,13 @@ const zhTW: Resource = {
   },
 
   auth: {
+    directoryLocalHint: '已關聯公司身分的員工請使用「公司帳號」登入；本機入口用於獨立的本機帳號。',
+    directoryLogin: '公司帳號',
+    localLogin: '本機帳號',
+    directoryUsername: '公司帳號',
+    directoryHint: '使用公司帳號登入，即可存取業務模組及獲授權的檔案。',
+    directoryUnavailable: '公司身分服務暫時無法使用，請稍後重試。',
+
     oidcSignIn: "使用 {{provider}} 登入",
     oidcLocalAlternative: "或使用本機帳號登入",
     oidcFailed: "企業登入未完成，請重試。同信箱本機帳號請先在個人設定中關聯企業帳號。",
@@ -158,6 +170,8 @@ const zhTW: Resource = {
   },
 
   stepUp: {
+    directoryPassword: '目前公司帳號密碼',
+    directoryHint: '請輸入目前公司帳號的密碼。本次驗證僅用於目前操作。',
     hint: '請輸入目前登入 Assay 帳號的密碼。本次驗證僅用於目前操作。',
     password: '目前 Assay 登入密碼',
     code: '驗證器的 6 位動態碼',
@@ -421,6 +435,9 @@ const zhTW: Resource = {
   },
 
   users: {
+    setLocalPassword: '設定本機登入密碼',
+    directoryRoles: 'AD 群組授權',
+    directoryPassword: '密碼由 AD 管理',
     title: '使用者管理',
     emailPlaceholder: '電子郵件',
     namePlaceholder: '姓名',

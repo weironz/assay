@@ -135,7 +135,7 @@ export async function stampSessionEpoch(db: EpochDb, ctx: EpochContext | null, s
   if (!ctx?.context) throw denied();
   const current = await activeEpoch(db, session.userId);
   let snapshot: number;
-  if (ctx.path === '/sign-in/email' || ctx.path === '/oidc/callback') {
+  if (ctx.path === '/sign-in/email' || ctx.path === '/oidc/callback' || ctx.path === '/sign-in/directory') {
     const signIn = ctx.context.assaySignInEpoch;
     if (!signIn || signIn.userId !== session.userId) throw denied();
     snapshot = signIn.epoch;

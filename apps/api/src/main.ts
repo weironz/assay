@@ -5,7 +5,10 @@ import { fromNodeHeaders, toNodeHandler } from 'better-auth/node';
 import { AppModule } from './app.module';
 import { auth } from './auth/auth';
 import { FilesService } from './files/files.service';
-import { webSessionFingerprint } from './auth/web-session-scope';
+import { webSessionFingerprint, webSessionScopes } from './auth/web-session-scope';
+import { registerDirectoryFileConnector } from './auth/directory-runtime';
+import type { AuthUser } from './auth/auth.types';
+import type { Request } from 'express';
 
 async function bootstrap() {
   // 关闭全局 body parser：better-auth 处理器需要读取原始请求体
@@ -17,6 +20,11 @@ async function bootstrap() {
   });
 
   const expressApp = app.getHttpAdapter().getInstance();
+  registerDirectoryFileConnector(async (session, password, origin) => {
+    const req = { headers: { origin } } as Request;
+    webSessionScopes.set(req, { fingerprint: webSessionFingerprint(session.token), expiresAt: new Date(session.expiresAt).getTime() });
+    await app.get(FilesService).login(req, { id: session.userId, authType: 'session' } as AuthUser, { password });
+  });
 
   // better-auth 路由（登录/注册/登出/会话/邮箱验证/密码重置等）挂在 body parser 之前
   const authHandler = toNodeHandler(auth);

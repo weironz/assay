@@ -5,6 +5,8 @@ import { authClient, signIn } from '../lib/auth-client';
 import BrandMark from '../components/BrandMark';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { useAuth } from '../stores/auth';
+import { directoryProvider, directorySignIn, type DirectoryProvider } from '../lib/directory-auth';
+import { SecurityRequestError } from '../lib/security-step-up';
 import { type Msg, useMsg } from '../lib/messages';
 import { beginOidc, oidcProvider, type OidcProvider } from '../lib/oidc';
 
@@ -28,6 +30,9 @@ export default function LoginPage() {
   const [remember, setRemember] = useState(true);
   const [error, setError] = useState<Msg>(params.get('oidc_error') === '1' ? { key: 'auth.oidcFailed' } : null);
   const [provider, setProvider] = useState<OidcProvider | null>(null);
+  const [directory, setDirectory] = useState<DirectoryProvider | null>(null);
+  const [loginSource, setLoginSource] = useState<'local' | 'directory'>('local');
+  const [directoryMfa, setDirectoryMfa] = useState(false);
   const [info, setInfo] = useState<Msg>(
     params.get('verified') ? { key: 'auth.verifiedInfo' } : null,
   );
@@ -40,6 +45,7 @@ export default function LoginPage() {
   useEffect(() => {
     let active = true;
     void oidcProvider().then(value => { if (active) setProvider(value); }).catch(() => {});
+    void directoryProvider().then(value => { if (active) { setDirectory(value); if (value.enabled) setLoginSource('directory'); } }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -61,6 +67,15 @@ export default function LoginPage() {
     reset();
     setLoading(true);
     try {
+      if (loginSource === 'directory') {
+        const result = await directorySignIn(email, password, remember, directoryMfa ? factorCode.trim() : undefined);
+        if (result.twoFactorRequired) { setDirectoryMfa(true); return; }
+        setPassword(''); setFactorCode(''); setDirectoryMfa(false);
+        const me = await fetchMe();
+        if (me) navigate(result.destination === '/files' ? '/files' : '/dashboard', { replace: true });
+        else setError({ key: 'auth.errSessionFailed' });
+        return;
+      }
       const res = await signIn.email({ email, password, rememberMe: remember });
       if (res.error) {
         const code = (res.error as any).code;
@@ -85,6 +100,12 @@ export default function LoginPage() {
       if (me) navigate('/dashboard', { replace: true });
       else setError({ key: 'auth.errSessionFailed' });
     } catch (err: any) {
+      if (loginSource === 'directory') {
+        setPassword(''); setFactorCode('');
+        const status = err instanceof SecurityRequestError ? err.status : undefined;
+        setError({ key: status === 429 ? 'auth.errTooManyLogin' : status === 503 ? 'auth.directoryUnavailable' : directoryMfa ? 'auth.twoFactorInvalid' : 'auth.errInvalidCredentials' });
+        return;
+      }
       setError(
         err?.message ? { raw: err.message } : { key: 'auth.errLoginFailed' },
       );
@@ -222,6 +243,8 @@ export default function LoginPage() {
                 key={tabKey}
                 onClick={() => {
                   setTab(tabKey);
+                  if (tabKey === 'register') setLoginSource('local');
+                  setPassword(''); setEmail(''); setDirectoryMfa(false); setFactorCode('');
                   reset();
                 }}
                 className={`py-3 font-medium transition ${
@@ -239,6 +262,12 @@ export default function LoginPage() {
             onSubmit={tab === 'login' ? doLogin : doRegister}
             className="p-6 space-y-4"
           >
+            {tab === 'login' && directory?.enabled && <>
+              <div className="grid grid-cols-2 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-800">
+                {(['directory', 'local'] as const).map(source => <button key={source} type="button" aria-pressed={loginSource === source} onClick={() => { setLoginSource(source); setEmail(''); setPassword(''); setDirectoryMfa(false); setFactorCode(''); reset(); }} className={`min-h-10 rounded-md text-sm ${loginSource === source ? 'bg-white font-medium shadow-sm dark:bg-gray-700' : 'text-gray-500'}`}>{t(source === 'directory' ? 'auth.directoryLogin' : 'auth.localLogin')}</button>)}
+              </div>
+              <p className="text-sm text-gray-500">{t(loginSource === 'directory' ? 'auth.directoryHint' : 'auth.directoryLocalHint')}</p>
+            </>}
             {tab === 'login' && provider?.enabled && <>
               <button type="button" onClick={doOidcLogin} disabled={loading} className="min-h-11 w-full rounded-md border border-brand-600 px-3 py-2 text-sm font-medium text-brand-700 disabled:opacity-60 dark:text-brand-400">
                 {t('auth.oidcSignIn', { provider: provider.name })}
@@ -247,14 +276,14 @@ export default function LoginPage() {
             </>}
             <div>
               <label className="block text-sm text-gray-600 dark:text-gray-400 mb-1">
-                {t('auth.email')}
+                {t(tab === 'login' && loginSource === 'directory' ? 'auth.directoryUsername' : 'auth.email')}
               </label>
               <input
-                type="email"
+                type={tab === 'login' && loginSource === 'directory' ? 'text' : 'email'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                autoComplete="email"
+                autoComplete={loginSource === 'directory' ? 'username' : 'email'}
                 className={inputCls}
               />
             </div>
@@ -305,6 +334,7 @@ export default function LoginPage() {
               </div>
             )}
 
+            {tab === 'login' && loginSource === 'directory' && directoryMfa && <div className="space-y-2"><label className="block text-sm">{t(backupMode ? 'auth.twoFactorBackupCode' : 'auth.twoFactorCode')}<input autoFocus required inputMode={backupMode ? 'text' : 'numeric'} autoComplete="one-time-code" pattern={backupMode ? '[A-Za-z0-9]{5}-[A-Za-z0-9]{5}' : '[0-9]{6}'} maxLength={backupMode ? 11 : 6} value={factorCode} onChange={e => setFactorCode(e.target.value)} className={inputCls} /></label><button type="button" className="text-sm text-brand-700 hover:underline" onClick={() => { setBackupMode(!backupMode); setFactorCode(''); }}>{t(backupMode ? 'auth.twoFactorUseApp' : 'auth.twoFactorUseBackup')}</button></div>}
             {tab === 'login' && (
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2 text-gray-600 dark:text-gray-400">
@@ -315,12 +345,12 @@ export default function LoginPage() {
                   />
                   {t('auth.rememberMe')}
                 </label>
-                <Link
+                {loginSource === 'local' && <Link
                   to="/forgot-password"
                   className="text-brand-700 hover:underline"
                 >
                   {t('auth.forgotPassword')}
-                </Link>
+                </Link>}
               </div>
             )}
 

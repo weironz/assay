@@ -18,10 +18,36 @@ require.cache[authPath] = {
 const { UsersService } = require('../dist/users/users.service');
 const { assertCanLoseActiveAdmin } = require('../dist/auth/last-admin');
 
+test('pure AD users cannot gain local credentials while AD is enabled; explicit local recovery preserves their business ID after disabling AD', async () => {
+  const previous = process.env.DIRECTORY_AUTH_ENABLED;
+  const created = [];
+  const tx = {
+    account: { findFirst: async () => null, create: async ({ data }) => { created.push(data); } },
+    role: { findUnique: async () => ({ id: 'requester-role' }) },
+    userRole: { createMany: async ({ data }) => { created.push(...data); } },
+  };
+  const service = new UsersService({
+    $queryRawUnsafe: async () => [{ ready: true }],
+    user: { findUnique: async () => ({ id: 'existing-ad-user' }) },
+    directoryIdentity: { findUnique: async () => ({ userId: 'existing-ad-user' }) },
+    account: tx.account, $transaction: async work => work(tx),
+  });
+  try {
+    process.env.DIRECTORY_AUTH_ENABLED = 'true';
+    await assert.rejects(() => service.resetPassword('existing-ad-user', 'local-recovery'), e => e.getStatus() === 400);
+    assert.equal(created.length, 0);
+    process.env.DIRECTORY_AUTH_ENABLED = 'false';
+    await service.resetPassword('existing-ad-user', 'local-recovery');
+    assert.equal(created[0].userId, 'existing-ad-user'); assert.equal(created[0].providerId, 'credential');
+    assert.deepEqual(created[1], { userId: 'existing-ad-user', roleId: 'requester-role' });
+  } finally { if (previous === undefined) delete process.env.DIRECTORY_AUTH_ENABLED; else process.env.DIRECTORY_AUTH_ENABLED = previous; }
+});
+
 test('administrator password reset revokes Better Auth sessions before and after credential change', async () => {
   events.length = 0;
   const prisma = {
     $queryRawUnsafe: async () => [{ ready: true }],
+    directoryIdentity: { findUnique: async () => null },
     user: { findUnique: async () => ({ id: 'target' }) },
     $transaction: async (work) => work({ account: {
       findFirst: async () => ({ id: 'account' }),
@@ -41,6 +67,7 @@ test('session revocation failure prevents password replacement', async () => {
   try {
     const service = new UsersService({
       $queryRawUnsafe: async () => [{ ready: true }],
+      directoryIdentity: { findUnique: async () => null },
       user: { findUnique: async () => ({ id: 'target' }) },
       $transaction: async (work) => work({ account: { findFirst: async () => ({ id: 'account' }), update: async () => { changed = true; } } }),
     });

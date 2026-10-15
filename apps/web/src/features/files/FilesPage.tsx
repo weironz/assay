@@ -93,13 +93,13 @@ export default function FilesPage() {
   };
   return <div className="mx-auto max-w-[1500px] space-y-6">
     <div className="flex flex-wrap items-start justify-between gap-4">
-      <div><h1 className="text-2xl font-semibold">我的文件</h1><p className="mt-2 text-sm text-gray-500">使用本人的公司 AD 账号访问文件，由 Samba 校验共享权限和文件权限。</p></div>
+      <div><h1 className="text-2xl font-semibold">共享文件</h1><p className="mt-2 text-sm text-gray-500">使用本人的公司 AD 账号访问文件，由 Samba 校验共享权限和文件权限。</p></div>
       {status?.identity && <div className="flex flex-wrap items-center gap-3"><Badge>{displayDomain(status.identity.domain)} / {status.identity.accountName}</Badge>{status.connected && <button className={button} onClick={disconnect} disabled={busy}>断开文件会话</button>}</div>}
     </div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">{error}</p>}
     {notice && <p role="status" className="text-sm text-green-700 dark:text-green-300">{notice}</p>}
     {!status ? <p className="text-sm text-gray-500">{error ? '文件模块暂不可用。' : '正在检查文件会话…'}</p> : !status.identity ?
-      <section className={card + ' p-6'}><h2 className="font-semibold">尚未关联公司账号</h2><p className="mt-2 text-sm text-gray-500">请联系管理员，在“公司目录与文件 → 登录账号关联”中关联你的 AD 员工账号。</p></section> : !status.connected ?
+      <section className={card + ' p-6'}><h2 className="font-semibold">尚未关联公司账号</h2><p className="mt-2 text-sm text-gray-500">请联系管理员，在“文件管理 → 登录账号关联”中关联你的 AD 员工账号。</p></section> : !status.connected ?
       <form onSubmit={verify} className={card + ' max-w-lg space-y-4 p-6'}><h2 className="font-semibold">验证自己的 AD 密码</h2><p className="text-sm text-gray-500">首次访问、会话到期或连接失效后需要重新验证。AD 密码不写入 Assay 数据库或日志。</p>
         <label className="block space-y-2 text-sm"><span>AD 密码</span><input className={input} type="password" autoComplete="current-password" value={password} maxLength={512} onChange={e => setPassword(e.target.value)} required disabled={busy}/></label>
         <button className={primary} disabled={busy}>{busy ? '正在验证…' : '验证并打开文件'}</button>

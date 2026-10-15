@@ -1,6 +1,7 @@
 import SambaPage from './features/samba/SambaPage';
 import AdministrationPage from './pages/AdministrationPage';
 import FilesPage from './features/files/FilesPage';
+import DirectorySettingsPage from './pages/DirectorySettingsPage';
 import { PLATFORM_PERMISSIONS } from './lib/business-navigation';
 import AssetsPage, { AssetDetailPage } from './features/cop/AssetsPage';
 import PartsPage, { PartDetailPage } from './features/cop/PartsPage';
@@ -48,6 +49,7 @@ export const router = createBrowserRouter([
         ),
       },
       { path: 'settings', element: <ProfilePage /> },
+      { path: 'directory-settings', element: <ProtectedRoute permission="user:manage"><DirectorySettingsPage /></ProtectedRoute> },
       { path: 'profile', element: <Navigate to="/settings" replace /> },
       {
         path: 'assets',

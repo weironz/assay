@@ -17,6 +17,7 @@ export interface AuthUser {
   /** Token 模式下的有效权限范围；用于审计和诊断，不包含原始密钥。 */
   tokenId?: string;
   tokenScopes?: string[];
+  passwordSource?: 'local' | 'directory';
   roles: string[]; // 角色名，如 ['admin']
   permissions: string[]; // 权限码集合，如 ['ticket:create', ...]
 }

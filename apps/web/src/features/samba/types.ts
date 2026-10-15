@@ -36,7 +36,7 @@ export type Snapshot = {
   users: Employee[];
   groups: Group[];
   shares: Share[];
-  bindings: { userId: string; adObjectId: string; accountName: string }[];
+  bindings: { userId: string; adObjectId: string; accountName: string; directoryManaged?: boolean }[];
   assayUsers: { id: string; name: string; email: string }[];
 };
 export type Acl = {

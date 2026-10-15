@@ -7,20 +7,29 @@ test('platform navigation respects each permission and does not expose a landing
   expect(directory).toEqual([]);
   expect(directory).not.toContain('/users');
   expect(directory).not.toContain('/organization');
-  expect(allowedItems(PLATFORM_MODULE.items, p => p === 'user:manage').map(i => i.to)).toEqual(['/platform', '/users']);
+  expect(allowedItems(PLATFORM_MODULE.items, p => p === 'user:manage').map(i => i.to)).toEqual(['/platform', '/directory-settings', '/users']);
 });
-test('directory deep links retain their independent module sidebar', () => {
-  const directory = BUSINESS_MODULES.find(m => m.id === 'directory')!;
+test('directory deep links share the file management sidebar', () => {
+  const directory = BUSINESS_MODULES.find(m => m.id === 'files')!;
   for (const path of ['/samba/users/abc', '/samba/groups/def', '/samba/shares/finance']) {
-    expect(moduleForPath(path)?.id).toBe('directory');
+    expect(moduleForPath(path)?.id).toBe('files');
     expect(activeMenuItem(directory.items, path, new URLSearchParams())).toBe(path.split('/').slice(0, 3).join('/'));
   }
 });
 test('optional file module is independent of management permissions and disabled by default', () => {
   const files = BUSINESS_MODULES.find(m => m.id === 'files')!;
-  const directory = BUSINESS_MODULES.find(m => m.id === 'directory')!;
+  const directory = BUSINESS_MODULES.find(m => m.id === 'files')!;
   expect(allowedItems(files.items, () => true)).toHaveLength(0);
   expect(allowedItems(files.items, () => false, { files: true })).toHaveLength(1);
   expect(allowedItems(directory.items, () => false, { directory: true })).toHaveLength(0);
   expect(allowedItems(directory.items, p => p === 'samba:read', { directory: true }).length).toBeGreaterThan(0);
+});
+
+test('file management follows the other business modules and supports both file and management routes', () => {
+  expect(BUSINESS_MODULES.map(m => m.id)).toEqual(['tickets', 'assets', 'spares', 'files']);
+  expect(moduleForPath('/files')?.id).toBe('files');
+  expect(moduleForPath('/directory-settings')?.id).toBe('platform');
+  const items = BUSINESS_MODULES.at(-1)!.items;
+  expect(allowedItems(items, () => false, { files: true, directory: true }).map(i => i.to)).toEqual(['/files']);
+  expect(allowedItems(items, () => true, { directory: true }).some(i => i.to === '/files')).toBe(false);
 });

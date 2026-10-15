@@ -4,7 +4,8 @@ import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { auth } from './auth';
 import { AuthUser } from './auth.types';
-import { isSystemRoleName } from './role-policy';
+import { isSystemRoleName, SYSTEM_ROLE_PERMISSIONS } from './role-policy';
+import { directorySettings, refreshDirectoryIdentity, validatedDirectorySession } from './directory-runtime';
 import { ApiTokensService } from '../api-tokens/api-tokens.service';
 import { assertSessionEpoch } from './session-epoch';
 import { webSessionFingerprint, webSessionScopes } from './web-session-scope';
@@ -22,7 +23,13 @@ export class AuthService {
     if (authorization?.startsWith('Bearer ')) {
       const record = await this.apiTokens.findActiveBySecret(authorization.slice(7).trim());
       if (!record) return null;
-      return this.toAuthUser(record.user, { id: record.id, scopes: record.scopes });
+      const identity = directorySettings && await this.prisma.directoryIdentity.findUnique({ where: { userId: record.user.id } });
+      let directoryRoles: string[] = [];
+      if (identity) {
+        try { directoryRoles = (await refreshDirectoryIdentity(this.prisma, record.user.id)).roleNames; }
+        catch { return null; }
+      }
+      return this.toAuthUser(record.user, { id: record.id, scopes: record.scopes }, directoryRoles);
     }
 
     const session = await auth.api.getSession({
@@ -44,9 +51,16 @@ export class AuthService {
       },
     });
     if (!user) return null;
+    let directoryRoles: string[] = [];
+    let directorySession = false;
+    try {
+      const state = await validatedDirectorySession(this.prisma, session.session.token, user.id);
+      directorySession = !!state; directoryRoles = state?.roleNames || [];
+    }
+    catch { return null; }
     if (process.env.FILES_ENABLED === 'true')
       webSessionScopes.set(req, { fingerprint: webSessionFingerprint(session.session.token), expiresAt: new Date(session.session.expiresAt).getTime() });
-    return this.toAuthUser(user, null);
+    return { ...this.toAuthUser(user, null, directoryRoles), passwordSource: directorySession ? 'directory' : 'local' };
   }
 
   private toAuthUser(
@@ -56,16 +70,17 @@ export class AuthService {
       roles: { role: { name: string; permissions: { permission: { code: string } }[] } }[];
     },
     token: { id: string; scopes: string[] } | null,
+    directoryRoles: string[] = [],
   ): AuthUser {
 
     // 只承认代码定义的岗位角色，遗留或手工插入的角色不应扩大权限。
     const systemRoles = user.roles.filter((ur) => isSystemRoleName(ur.role.name));
-    const roles = systemRoles.map((ur) => ur.role.name);
+    const roles = [...new Set([...systemRoles.map((ur) => ur.role.name), ...directoryRoles.filter(isSystemRoleName)])];
     const rolePermissions = Array.from(
       new Set(
         systemRoles.flatMap((ur) =>
           ur.role.permissions.map((rp) => rp.permission.code),
-        ),
+        ).concat(directoryRoles.filter(isSystemRoleName).flatMap(r => SYSTEM_ROLE_PERMISSIONS[r])),
       ),
     );
 

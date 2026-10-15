@@ -1,0 +1,15 @@
+# Optional AD login integration for the isolated test stack. No production domain changes.
+# Prepare a dedicated read-only directory account and its private password file first.
+services:
+  api:
+    environment:
+      DIRECTORY_AUTH_ENABLED: "true"
+      DIRECTORY_LDAP_URL: ldaps://ad:636
+      DIRECTORY_DOMAIN: assay.test
+      DIRECTORY_BASE_DN: DC=assay,DC=test
+      DIRECTORY_BIND_PASSWORD_FILE: /secrets/directory-password
+      DIRECTORY_CA_FILE: /tls/directory-ca.crt
+    volumes:
+      - ./secrets/directory-password:/secrets/directory-password:ro
+      - ./tls/ca.crt:/tls/directory-ca.crt:ro
+    networks: [management, directory]

@@ -13,6 +13,11 @@ interface UserRow {
   username: string | null;
   status: string;
   roles: string[];
+  directoryRoles?: string[];
+  directoryAccount?: string | null;
+  localPassword?: boolean;
+  canSetLocalPassword?: boolean;
+  directoryLogin?: boolean;
 }
 interface Role {
   id: string;
@@ -188,9 +193,9 @@ export default function UsersPage() {
                 key={u.id}
                 className="border-t border-gray-100 dark:border-gray-800"
               >
-                <td className="px-4 py-2">{u.name}</td>
+                <td className="px-4 py-2">{u.name}{u.directoryAccount && <p className="mt-1 text-xs text-gray-500">AD · {u.directoryAccount}</p>}</td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
-                <td className="px-4 py-2">{u.roles.map(roleLabel).join(', ')}</td>
+                <td className="px-4 py-2">{u.roles.map(roleLabel).join(', ')}{!!u.directoryRoles?.length && <p className="mt-1 text-xs text-gray-500">{t('users.directoryRoles')}：{u.directoryRoles.map(roleLabel).join(', ')}</p>}</td>
                 <td className="px-4 py-2">
                   <span
                     className={
@@ -219,9 +224,11 @@ export default function UsersPage() {
                   </button>
                   <button
                     onClick={() => resetPwd(u)}
+                    disabled={u.directoryLogin || (u.localPassword === false && !u.canSetLocalPassword)}
+                    title={u.directoryLogin || (u.localPassword === false && !u.canSetLocalPassword) ? t('users.directoryPassword') : undefined}
                     className="inline-flex min-h-11 items-center text-amber-700 hover:underline focus-visible:ring-2 focus-visible:ring-amber-500 dark:text-amber-400"
                   >
-                    {t('users.resetPassword')}
+                    {t(u.localPassword === false && u.canSetLocalPassword ? 'users.setLocalPassword' : 'users.resetPassword')}
                   </button>
                   <button
                     onClick={() => { if (!window.confirm(t('users.deleteConfirm', { name: u.name }))) return; setChallenge({ title: t('users.deleteConfirm', { name: u.name }), run: async (token) => { await guardedApi('DELETE', `/users/${u.id}`, token); refreshUsers(); } }); }}
@@ -256,6 +263,7 @@ export default function UsersPage() {
             <h2 id="edit-roles-title" className="text-lg font-semibold">
               {t('users.editRolesTitle', { name: editing.name })}
             </h2>
+            {!!editing.directoryRoles?.length && <p className="text-sm text-gray-500">{t('users.directoryRoles')}：{editing.directoryRoles.map(roleLabel).join(', ')}</p>}
             <div className="space-y-2">
               {roles?.map((r) => (
                 <label key={r.id} className="flex min-h-11 items-center gap-2 text-sm">

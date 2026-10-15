@@ -62,6 +62,11 @@ const th: Resource = {
 
   nav: {
     companyAccounts: 'บัญชีบริษัทและไฟล์ที่แชร์',
+    fileManagement: 'การจัดการไฟล์',
+    sharedFiles: 'ไฟล์ที่แชร์',
+    fileAccess: 'การเข้าถึงไฟล์',
+    fileAdministration: 'การตั้งค่าการจัดการ',
+    identityIntegration: 'ตัวตนและการเข้าถึง',
     companyDirectory: 'ไดเรกทอรีและไฟล์บริษัท',
     myFiles: 'ไฟล์ของฉัน',
     administrationHome: 'ภาพรวมการจัดการ',
@@ -109,6 +114,13 @@ const th: Resource = {
   },
 
   auth: {
+    directoryLocalHint: 'พนักงานที่ผูกบัญชีบริษัทแล้วให้เข้าสู่ระบบด้วยบัญชีบริษัท ช่องทางนี้สำหรับบัญชีภายในแยกต่างหาก',
+    directoryLogin: 'บัญชีบริษัท',
+    localLogin: 'บัญชีภายใน',
+    directoryUsername: 'ชื่อบัญชีบริษัท',
+    directoryHint: 'เข้าสู่ระบบด้วยบัญชีบริษัทเพื่อใช้งานระบบและไฟล์ที่ได้รับอนุญาต',
+    directoryUnavailable: 'บริการบัญชีบริษัทไม่พร้อมใช้งานชั่วคราว',
+
     oidcSignIn: "เข้าสู่ระบบด้วย {{provider}}",
     oidcLocalAlternative: "หรือเข้าสู่ระบบด้วยบัญชีภายใน",
     oidcFailed: "เข้าสู่ระบบองค์กรไม่สำเร็จ โปรดลองอีกครั้ง หากมีบัญชีภายในที่ใช้อีเมลนี้ ให้เชื่อมโยงบัญชีในหน้าตั้งค่าส่วนตัวก่อน",
@@ -158,6 +170,8 @@ const th: Resource = {
   },
 
   stepUp: {
+    directoryPassword: 'รหัสผ่านบัญชีบริษัทปัจจุบัน',
+    directoryHint: 'ป้อนรหัสผ่านบัญชีบริษัทปัจจุบันเพื่อยืนยันการดำเนินการนี้',
     hint: 'ป้อนรหัสผ่านของบัญชี Assay ที่เข้าสู่ระบบอยู่ การยืนยันนี้ใช้ได้กับการดำเนินการครั้งเดียว',
     password: 'รหัสผ่านเข้าสู่ระบบ Assay ปัจจุบัน',
     code: 'รหัส 6 หลักจากแอปยืนยันตัวตน',
@@ -421,6 +435,9 @@ const th: Resource = {
   },
 
   users: {
+    setLocalPassword: 'ตั้งรหัสผ่านบัญชีภายใน',
+    directoryRoles: 'สิทธิ์จากกลุ่ม AD',
+    directoryPassword: 'รหัสผ่านจัดการโดย AD',
     title: 'จัดการผู้ใช้',
     emailPlaceholder: 'อีเมล',
     namePlaceholder: 'ชื่อ-นามสกุล',

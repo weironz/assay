@@ -21,7 +21,7 @@ export default function AdministrationPage({ directoryMode = false }: { director
   }, [readDirectory]);
   const sections = [
     {
-      title: '公司目录与文件',
+      title: '文件管理',
       description: '管理公司 AD 员工资料、用户组和文件访问权限。',
       items: [
         {
@@ -51,6 +51,7 @@ export default function AdministrationPage({ directoryMode = false }: { director
       title: directoryMode ? '登录账号关联' : '平台组织与访问',
       description: directoryMode ? '明确员工的 Assay 登录身份与 AD 文件访问身份。' : '管理 Assay 业务组织、系统账号和业务角色。',
       items: [
+        { to: '/directory-settings', title: '身份与访问', description: '可选公司登录、AD 用户组与业务角色映射', permission: 'user:manage', count: undefined },
         {
           to: '/organization',
           title: '组织架构',
@@ -91,10 +92,10 @@ export default function AdministrationPage({ directoryMode = false }: { director
   return (
     <div className="mx-auto max-w-[1500px] space-y-8">
       <div>
-        <p className="mb-2 text-sm text-gray-500">{directoryMode ? '公司目录与文件' : '平台管理'}</p>
+        <p className="mb-2 text-sm text-gray-500">{directoryMode ? '文件管理' : '平台管理'}</p>
         <h1 className="text-2xl font-semibold tracking-tight">管理概览</h1>
         <p className="mt-2 text-sm text-gray-500">
-          {directoryMode ? '管理员工资料、用户组、账号关联及文件访问权限。员工文件入口在“我的文件”模块。' : '管理 Assay 的组织架构、系统账号和业务角色。'}
+          {directoryMode ? '管理员工资料、用户组、账号关联及文件访问权限。员工可从同一模块的“共享文件”访问获授权的目录。' : '管理 Assay 的组织架构、系统账号和业务角色。'}
         </p>
       </div>
       {error && (

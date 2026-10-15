@@ -11,6 +11,7 @@ import { resolveOidcIdentity, type OidcLink } from './oidc-identity';
 import { assertSessionEpoch } from './session-epoch';
 import { consumeStepUp } from './step-up-store';
 import { authRedis } from './auth-redis';
+import { directorySessionForUser } from './directory-runtime';
 
 export function oidcPlugin(settings: OidcSettings | null, db: PrismaClient): BetterAuthPlugin {
   const client = settings && new OidcClient(settings);
@@ -94,6 +95,8 @@ export function oidcPlugin(settings: OidcSettings | null, db: PrismaClient): Bet
           } else {
             // Stamp only after the IdP identity is fully verified, preserving durable local revocation.
             Object.assign(ctx.context, { assaySignInEpoch: { userId: user.id, epoch: user.sessionEpoch } });
+            const directorySession = await directorySessionForUser(db, user.id);
+            if (directorySession) Object.assign(ctx.context, { assayDirectorySession: directorySession });
             phase = 'session';
             if (user.twoFactorEnabled) {
               deleteSessionCookie(ctx, true);

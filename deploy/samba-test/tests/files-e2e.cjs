@@ -13,7 +13,7 @@ let browser;
 function pass(name) { results.push(name); console.log('PASS ' + name); }
 async function login(page, email, password) {
   await page.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
-  await page.goto(origin + '/login'); await page.locator('form input').first().fill(email);
+  await page.goto(origin + '/login'); if ((await (await page.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await page.getByRole('button', { name: '本地账号', exact: true }).click(); await page.locator('form input').first().fill(email);
   await page.locator('input[type=password]').fill(password); await page.locator('form button[type=submit]').click(); await page.waitForURL('**/dashboard');
 }
 function endpoint(path, share, file = '') { return origin + '/api/files/' + path + '?' + new URLSearchParams({ share, path: file }); }
@@ -36,11 +36,14 @@ async function adminCommand(page, action, args) {
   const ac = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } }); const admin = await ac.newPage();
   await checked(await admin.request.get(origin + '/api/files/status'), 401); pass('Anonymous file access is denied');
   await login(admin, 'admin@assay.test', adminPassword);
-  assert.equal((await (await admin.request.get(origin + '/api/files/status')).json()).identity, null);
+  const adminFiles = await (await admin.request.get(origin + '/api/files/status')).json();
+  assert.equal(adminFiles.connected, false);
+  assert.deepEqual(adminFiles.identity, (await (await admin.request.get(origin + '/api/samba/me')).json()).identity);
   await admin.goto(origin + '/platform'); await admin.getByRole('heading', { name: '管理概览', exact: true }).waitFor();
   assert.equal(await admin.locator('main').getByRole('link', { name: /员工账号/ }).count(), 0);
-  await admin.locator('header').getByRole('link', { name: '公司目录与文件', exact: true }).first().click();
-  await admin.getByRole('heading', { name: '管理概览', exact: true }).waitFor(); pass('Company directory is a top-level module; platform management contains only Assay access settings');
+  await admin.locator('header').getByRole('link', { name: '文件管理', exact: true }).first().click();
+  await admin.getByRole('link', { name: '管理概览', exact: true }).click();
+  await admin.getByRole('heading', { name: '管理概览', exact: true }).waitFor(); pass('File management combines browsing and administration; platform management contains only Assay access settings');
   const suffix = Date.now().toString().slice(-7); const readonly = 'portal_ro_' + suffix; const denied = 'portal_no_' + suffix;
   const deniedGroup = 'portal_group_' + suffix;
   await adminCommand(admin, 'group.create', { name: deniedGroup, description: '员工文件拒绝测试组' });
@@ -49,9 +52,9 @@ async function adminCommand(page, action, args) {
   await adminCommand(admin, 'share.save', { name: denied, comment: '员工文件拒绝测试', groups: [deniedGroupId], read_only: false });
   const ec = await browser.newContext({ ignoreHTTPSErrors: true, viewport: { width: 1440, height: 1000 } }); const employee = await ec.newPage();
   await login(employee, fixture.assay_email, fixture.assay_password);
-  await employee.locator('header').getByRole('link', { name: '我的文件', exact: true }).first().click();
+  await employee.locator('header').getByRole('link', { name: '文件管理', exact: true }).first().click();
   await employee.getByRole('heading', { name: '验证自己的 AD 密码', exact: true }).waitFor();
-  assert.equal(await employee.locator('header').getByRole('link', { name: '公司目录与文件', exact: true }).count(), 0);
+  assert.equal(await employee.getByRole('link', { name: '员工账号', exact: true }).count(), 0);
   await checked(await employee.request.get(origin + '/api/samba/snapshot'), 403); pass('Employee sees optional file entry without receiving directory management permissions');
   const initial = await (await checked(await employee.request.get(origin + '/api/files/status'), 200)).json();
   assert.equal(initial.connected, false); assert.equal(initial.identity.accountName, fixture.ad_name);

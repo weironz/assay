@@ -11,6 +11,7 @@ export interface AuthUser {
   emailVerified: boolean;
   twoFactorEnabled: boolean;
   status: string;
+  passwordSource?: 'local' | 'directory';
   /** 上次勾选「设为默认」存下的联系方式，建单时预填 */
   defaultContact: TicketContact | null;
   roles: string[];

@@ -9,7 +9,7 @@ const cache = (path, exports) => {
   const id = require.resolve(path);
   require.cache[id] = { id, filename: id, loaded: true, exports };
 };
-cache('../dist/auth/auth-redis', { authRedis: {} });
+cache('../dist/auth/auth-redis', { authRedis: { get: async () => null } });
 cache('../dist/auth/session-epoch', { assertSessionEpoch: async () => {} });
 cache('../dist/auth/auth', { auth: { api: {
   getSession: async ({ headers }) => headers.get('cookie') === 'test-session'
@@ -42,6 +42,8 @@ test('REST Token creation scope allows ticket creation and draft upload without 
   let writes = 0;
   const prisma = {
     user: { findUnique: async () => user },
+    account: { findFirst: async () => ({ id: 'local-credential' }) },
+    directoryIdentity: { findUnique: async () => null },
     apiToken: {
       create: async ({ data }) => { const row = { id: `token-${rows.length}`, revokedAt: null, ...data }; rows.push(row); return { ...row }; },
       findUnique: async ({ where }) => { const row = rows.find(r => r.tokenHash === where.tokenHash); return row ? { ...row, user } : null; },

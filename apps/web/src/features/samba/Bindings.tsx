@@ -31,9 +31,7 @@ export function Bindings({
           </div>
         </div>
         <p className="mt-4 border-t border-gray-100 pt-4 text-sm text-gray-500 dark:border-gray-800">
-          当前两者独立，关联不会同步密码、自动创建账号或修改角色。员工关联后可在“个人设置
-          → 安全”自助修改 AD 密码；启用“我的文件”后，也可验证本人 AD 密码访问文件。以后若启用由 AD 提供身份的 OIDC
-          登录，可使用公司身份登录 Assay；Assay 业务权限仍由业务角色控制。
+          本地登录和公司 AD 登录均可选。启用 AD 登录后，员工首次登录可自动建立业务账号并关联文件身份；已有业务账号应由管理员在此明确关联，以保留工单和库存历史。关联本身不会同步密码。业务角色可在“平台管理 → 身份与访问”映射 AD 用户组。
         </p>
       </section>
       <DataTable
@@ -109,7 +107,8 @@ export function Bindings({
             render: (b) => (
               <button
                 className={button}
-                disabled={!canWrite}
+                disabled={!canWrite || b.directoryManaged}
+                title={b.directoryManaged ? '此关联用于 AD 统一登录，不能直接解除' : undefined}
                 onClick={() => unlink(b.userId)}
               >
                 解除关联

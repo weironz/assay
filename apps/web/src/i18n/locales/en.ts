@@ -66,6 +66,11 @@ const en = {
 
   nav: {
     companyAccounts: 'Company accounts & file shares',
+    fileManagement: 'File management',
+    sharedFiles: 'Shared files',
+    fileAccess: 'File access',
+    fileAdministration: 'Administration',
+    identityIntegration: 'Identity & access',
     companyDirectory: 'Company directory & files',
     myFiles: 'My files',
     administrationHome: 'Administration overview',
@@ -113,6 +118,13 @@ const en = {
   },
 
   auth: {
+    directoryLocalHint: 'Employees linked to the company directory use company sign-in. This entry is for independent local accounts.',
+    directoryLogin: 'Company account',
+    localLogin: 'Local account',
+    directoryUsername: 'Company username',
+    directoryHint: 'Sign in with your company account to access business modules and authorized files.',
+    directoryUnavailable: 'Company sign-in is temporarily unavailable.',
+
     oidcSignIn: "Sign in with {{provider}}",
     oidcLocalAlternative: "Or sign in with a local account",
     oidcFailed: "Enterprise sign-in could not be completed. Try again. If a local account uses this email, link it in personal settings first.",
@@ -165,6 +177,8 @@ const en = {
   },
 
   stepUp: {
+    directoryPassword: 'Current company password',
+    directoryHint: 'Enter your current company account password. Verification is used only for this operation.',
     hint: 'Enter the password for your current Assay sign-in account. This verification is used for one action only.',
     password: 'Current Assay sign-in password',
     code: '6-digit authenticator code',
@@ -432,6 +446,9 @@ const en = {
   },
 
   users: {
+    setLocalPassword: 'Set local password',
+    directoryRoles: 'AD group roles',
+    directoryPassword: 'Password managed by AD',
     title: 'Users',
     emailPlaceholder: 'Email',
     namePlaceholder: 'Full name',

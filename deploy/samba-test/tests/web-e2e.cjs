@@ -20,7 +20,7 @@ let browser, page;
 function pass(name) { results.push(name); console.log('PASS ' + name); }
 async function login(p, email, password) {
  await p.addInitScript(() => localStorage.setItem('i18nextLng', 'zh-CN'));
- await p.goto(origin + '/login'); await p.locator('form input').first().fill(email);
+ await p.goto(origin + '/login'); if ((await (await p.request.get(origin + '/api/auth/directory/provider')).json()).enabled) await p.getByRole('button', { name: '本地账号', exact: true }).click(); await p.locator('form input').first().fill(email);
  await p.locator('input[type=password]').fill(password); await p.locator('form button[type=submit]').click(); await p.waitForURL('**/dashboard');
 }
 async function verify(p = page, password = adminPassword, endpoint = '/api/samba/commands', expected = 201) {
