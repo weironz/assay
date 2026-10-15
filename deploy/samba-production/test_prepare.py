@@ -60,6 +60,19 @@ hide unreadable = yes
             with self.assertRaises(ValueError):
                 prepare.allow_directory_client(source, address)
 
+    def test_include_bridge_keeps_the_existing_root_startup_parser_compatible(self):
+        original = '/etc/samba/company.conf'
+        managed = '/etc/samba/assay/custom-shares.conf'
+        wrapper = '/etc/samba/assay/custom-include.conf'
+        main = '[global]\nrealm = AD.EXAMPLE.COM\ninclude = ' + original + '\n[sysvol]\npath = /sysvol\n'
+        modified, bridge = prepare.share_include_bridge(main, original, managed, wrapper)
+        parsed = prepare.parse_samba(modified)
+        self.assertEqual(parsed['global']['realm'], 'AD.EXAMPLE.COM')
+        self.assertEqual(parsed['global']['include'], wrapper)
+        self.assertEqual(modified.count('[global]'), 1)
+        self.assertIn('include = ' + original, bridge)
+        self.assertIn('include = ' + managed, bridge)
+
 
 if __name__ == '__main__':
     unittest.main()

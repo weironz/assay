@@ -24,6 +24,7 @@
   "primary_gid": 31000,
   "managed_subdirectory": "assay",
   "managed_config_name": "shares.conf",
+  "managed_include_name": "include.conf",
   "managed_registry_name": "shares.json",
   "management_subnet": "172.29.224.0/24",
   "application_subnet": "172.29.225.0/24",

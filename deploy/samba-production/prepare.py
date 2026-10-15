@@ -108,6 +108,16 @@ def allow_directory_client(text, address):
     return text[:match.end(2)] + ' ' + address + text[match.end(2):]
 
 
+def share_include_bridge(main, original, managed, wrapper):
+    if main.count('include = ' + original) != 1:
+        raise ValueError('Expected one explicit company share include')
+    modified = main.replace('include = ' + original, 'include = ' + wrapper)
+    # Existing entrypoints may parse the root file using strict configparser.
+    parser = configparser.ConfigParser(interpolation=None, delimiters=('=',))
+    parser.read_string(modified)
+    return modified, 'include = ' + original + '\n[global]\ninclude = ' + managed + '\n'
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', required=True, type=Path)
@@ -129,9 +139,11 @@ def main():
     for name in ['management_account', 'directory_account', 'project', 'managed_subdirectory']:
         if not NAME.fullmatch(c[name]):
             raise ValueError('Invalid account, project or managed directory name')
-    for name in ['smb_config_name', 'share_config_name', 'managed_config_name', 'managed_registry_name']:
+    for name in ['smb_config_name', 'share_config_name', 'managed_config_name', 'managed_registry_name', 'managed_include_name']:
         if not FILE.fullmatch(c[name]) or c[name] in ['.', '..']:
             raise ValueError('Invalid configuration filename')
+    if len({c['managed_config_name'], c['managed_registry_name'], c['managed_include_name']}) != 3:
+        raise ValueError('Managed configuration, registry and include filenames must differ')
     for name in ['lan_ip', 'vpn_ip', 'api_directory_ip', 'agent_directory_ip', 'agent_bind_ip']:
         ipaddress.ip_address(c[name])
     subnet = ipaddress.ip_network(c['management_subnet'])
@@ -170,6 +182,10 @@ def main():
         raise ValueError('Expected one explicit company share include; review nonstandard configuration manually')
     modified_source = admit_management(source.read_text(), netbios + '\\' + c['management_account'])
     inventory(modified_source, c['samba_shares_root'], netbios, c['management_account'])
+    include = '/etc/samba/' + c['managed_subdirectory'] + '/' + c['managed_config_name']
+    wrapper = '/etc/samba/' + c['managed_subdirectory'] + '/' + c['managed_include_name']
+    modified_main, bridge = share_include_bridge(main_text, original_include, include, wrapper)
+    modified_main = allow_directory_client(modified_main, c['api_directory_source_ip'])
     if not args.apply:
         print(json.dumps({'ready': True, 'domain': domain, 'shares': len(shares['shares']),
                           'destination': str(root), 'fresh_database': True}))
@@ -211,6 +227,7 @@ def main():
     if any(managed.iterdir()):
         raise ValueError('Managed configuration directory must be empty')
     private(managed / c['managed_config_name'], header)
+    private(managed / c['managed_include_name'], bridge)
     agent = dict(listen=f'{c["agent_bind_ip"]}:{c["agent_port"]}', token_file='/secrets/agent-token',
                  ldap_url='ldaps://' + c['directory_host'] + ':636', ldap_ca_file='/tls/directory-ca.crt',
                  ldap_bind_dn='CN=' + c['management_account'] + ',' + c['services_dn'],
@@ -239,10 +256,6 @@ def main():
     shutil.copyfile(Path(__file__).with_name('compose.yaml'), root / 'compose.yaml')
     shutil.copyfile(Path(__file__).with_name('nginx.conf'), root / 'nginx.conf')
     run('docker', 'compose', '--project-directory', str(root), 'config', '--quiet')
-    include = '/etc/samba/' + c['managed_subdirectory'] + '/' + c['managed_config_name']
-    modified_main = main_text.replace('include = ' + original_include,
-                                     'include = ' + original_include + '\n\n[global]\ninclude = ' + include)
-    modified_main = allow_directory_client(modified_main, c['api_directory_source_ip'])
     candidate = root / 'rollback' / 'candidate-etc'
     shutil.copytree(etc, candidate)
     (candidate / c['smb_config_name']).write_text(modified_main)

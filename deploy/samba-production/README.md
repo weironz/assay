@@ -55,6 +55,8 @@ sudo docker compose up -d postgres redis agent api
 
 新共享由单独受管配置文件发布；原公司共享继续保留实际路径和现有配置语义，Web 可管理组成员、子目录及 ACL，禁止把原共享定义覆盖成简化模板。原配置有改动时，须重新生成带 SHA256 的外部登记清单后再重建 Agent 挂载；禁止忽略漂移告警。隐藏共享不出现在员工根目录中。
 
+`managed_include_name` 指定静态 include 桥接文件：先加载原公司共享，再加载 Agent 生成的配置。主 `smb.conf` 保持单个 `[global]`，兼容现有严格 INI 启动检查。切换前除了 `testparm`，还应在隔离副本验证原容器启动入口；仅热重载不能证明下次启动成功。
+
 Agent 为兼容仅允许宿主机/公司 LAN 来源的既有 Samba，使用 host 网络连接本机 SMB，但 HTTP 仅绑定独立管理桥的网关地址，不绑定 LAN/VPN 或 `0.0.0.0`。API 通过该桥调用，Agent 两类接口分别验证密钥。Agent 与现有 AD 容器共享 PID namespace，`reload_via_proc=true` 只在找到唯一 smbd 主进程时重载，不使用 host PID 或 Docker socket。LDAPS 始终验证 CA 与 DNS 名。
 
 `application_subnet` 与 `api_directory_source_ip` 固定 API 访问 AD 的来源。Samba 的 `hosts allow` 也会影响 LDAP 接入，因此准备步骤只追加这一个 API IP，保留原白名单；不放行整个 Docker 网段。API 出站优先使用此网络，重建容器后地址保持。两个配置子网必须互不重叠，也须在部署前与宿主机、VPN 及既有 Docker 网络核对。
