@@ -86,7 +86,7 @@ test('an explicit login identity association reuses the original business user w
   const { db, calls, user } = dbFixture({ bound: true });
   assert.equal((await runtime.resolveDirectoryIdentity(db, directoryProfile(entry()), { userId: user.id, actorId: 'administrator', actorName: 'Administrator' })).id, user.id);
   assert.equal(calls.creates, 0); assert.equal(calls.credentialWrites, 0);
-  assert.equal(calls.identity.userId, user.id); assert.deepEqual(calls.identity.roleNames, ['requester']);
+  assert.equal(calls.identity.userId, user.id); assert.deepEqual(calls.identity.roleNames, []);
 });
 test('platform administrators can explicitly link an existing business user without enabling Samba', async () => {
   const previous = process.env.SAMBA_ENABLED; process.env.SAMBA_ENABLED = 'false';
@@ -101,7 +101,7 @@ test('platform administrators can explicitly link an existing business user with
 test('first AD login provisions a principal without a second password; email collisions never claim existing accounts', async () => {
   const { db, calls } = dbFixture();
   await runtime.resolveDirectoryIdentity(db, directoryProfile(entry()));
-  assert.equal(calls.creates, 1); assert.equal(calls.credentialWrites, 0);
+  assert.equal(calls.creates, 1); assert.equal(calls.credentialWrites, 0); assert.deepEqual(calls.identity.roleNames, []);
   for (const options of [{ collision: true }, { bound: true, disabled: true }, { bound: true, mismatchedDomain: true }]) {
     const { db, calls } = dbFixture(options);
     await assert.rejects(() => runtime.resolveDirectoryIdentity(db, directoryProfile(entry())));
@@ -109,8 +109,8 @@ test('first AD login provisions a principal without a second password; email col
   }
 });
 test('directory grants are separate from manual roles and group revocation takes effect without changing the business ID', async () => {
-  let mappings = [{ roleName: 'handler' }, { roleName: 'inventory_manager' }, { roleName: 'admin' }];
   const profile = directoryProfile(entry());
+  let mappings = ['handler', 'inventory_manager', 'admin'].map(roleName => ({ groupSid: profile.groupSids[0], roleName }));
   const db = {
     directoryGroupRole: { findMany: async () => mappings },
     directoryIdentity: { findUnique: async () => ({ userId: 'u', providerId: 'ad:example.test', objectId: profile.id, accountName: profile.accountName, groupSids: profile.groupSids, roleNames: [] }), update: async () => {} },
@@ -119,14 +119,14 @@ test('directory grants are separate from manual roles and group revocation takes
   runtime.directoryClient.profile = async () => profile;
   try {
     await runtime.stampDirectorySession({ context: { assayDirectorySession: { userId: 'u', providerId: 'ad:example.test', objectId: profile.id, securityStamp: profile.securityStamp } } }, { userId: 'u', token: 'session-a', expiresAt: new Date(Date.now() + 60000) });
-    assert.deepEqual((await runtime.validatedDirectorySession(db, 'session-a', 'u')).roleNames, ['requester', 'handler', 'inventory_manager']);
+    assert.deepEqual((await runtime.validatedDirectorySession(db, 'session-a', 'u')).roleNames, ['handler', 'inventory_manager']);
     mappings = [];
-    assert.deepEqual((await runtime.validatedDirectorySession(db, 'session-a', 'u')).roleNames, ['requester']);
+    assert.deepEqual((await runtime.validatedDirectorySession(db, 'session-a', 'u')).roleNames, []);
     await assert.rejects(() => runtime.validatedDirectorySession(db, 'local-session', 'u'));
     assert.equal(await runtime.validatedDirectorySession({ directoryIdentity: { findUnique: async () => null } }, 'local-session', 'independent-local'), null);
     await assert.rejects(() => runtime.validatedDirectorySession(db, 'session-a', 'other-user'));
     await runtime.stampDirectorySession({ context: { session: { session: { token: 'session-a' } } } }, { userId: 'u', token: 'rotated-session', expiresAt: new Date(Date.now() + 60000) });
-    assert.deepEqual((await runtime.validatedDirectorySession(db, 'rotated-session', 'u')).roleNames, ['requester']);
+    assert.deepEqual((await runtime.validatedDirectorySession(db, 'rotated-session', 'u')).roleNames, []);
   } finally { runtime.directoryClient.profile = original; redisValues.clear(); }
 });
 test('staff selectors revalidate directory-derived roles rather than trusting a stale stored grant', async () => {
@@ -135,7 +135,7 @@ test('staff selectors revalidate directory-derived roles rather than trusting a 
   let enabled = true;
   runtime.directoryClient.profile = async () => { if (!enabled) throw Error('disabled'); return profile; };
   const db = {
-    directoryGroupRole: { findMany: async () => [{ roleName: 'handler' }] },
+    directoryGroupRole: { findMany: async () => [{ groupSid: profile.groupSids[0], roleName: 'handler' }] },
     directoryIdentity: {
       findMany: async () => [{ userId: 'staff', user: { roles: [{ roleId: 'manually-granted-handler' }] } }],
       findUnique: async () => ({ userId: 'staff', providerId: 'ad:example.test', objectId: profile.id, accountName: profile.accountName, groupSids: profile.groupSids, roleNames: ['handler'] }),
@@ -147,4 +147,44 @@ test('staff selectors revalidate directory-derived roles rather than trusting a 
     enabled = false; redisValues.clear();
     assert.deepEqual(await directoryRoleUserIds(db, ['handler']), []);
   } finally { runtime.directoryClient.profile = original; redisValues.clear(); }
+});
+
+test('AD group roles are explicit, include opt-in requester, and cannot grant admin or unmatched group permissions', async () => {
+  const { directoryRolesForGroups, DIRECTORY_MAPPABLE_ROLES } = require('../dist/auth/directory-role-policy');
+  assert(DIRECTORY_MAPPABLE_ROLES.includes('requester'));
+  assert(!DIRECTORY_MAPPABLE_ROLES.includes('admin'));
+  assert.deepEqual(directoryRolesForGroups([], ['employee']), []);
+  assert.deepEqual(directoryRolesForGroups([{ groupSid: 'other', roleName: 'requester' }], ['employee']), []);
+  const mappings = ['requester', 'requester', 'admin', 'unknown-role'].map(roleName => ({ groupSid: 'employee', roleName }));
+  assert.deepEqual(directoryRolesForGroups(mappings, ['employee']), ['requester']);
+  assert.deepEqual(directoryRolesForGroups(mappings, []), []);
+});
+
+test('updating AD mappings clears the cached implicit role and keeps manual roles separate', async () => {
+  const { DirectoryController } = require('../dist/auth/directory.controller');
+  let mappings = [], cachedRoles = ['requester'];
+  const db = {
+    directoryGroupRole: {
+      findMany: async () => mappings,
+      upsert: async ({ create }) => { mappings.push(create); },
+      deleteMany: async () => { mappings = []; },
+    },
+    directoryIdentity: {
+      findMany: async () => [{ userId: 'employee', groupSids: ['S-1-5-21-1-2-3-1001'], roleNames: cachedRoles }],
+      update: async ({ data }) => { cachedRoles = data.roleNames; },
+    },
+    sambaOperation: { create: async () => {} },
+  };
+  db.$transaction = fn => fn(db);
+  const controller = new DirectoryController(db, { consume: async () => {} });
+  const groups = runtime.directoryClient.groups;
+  runtime.directoryClient.groups = async () => [{ sid: 'S-1-5-21-1-2-3-1001', name: 'ticket-requesters' }];
+  try {
+    const body = { groupSid: 'S-1-5-21-1-2-3-1001', roleName: 'requester' };
+    await controller.create({}, { id: 'admin', name: 'Admin' }, body);
+    assert.deepEqual(cachedRoles, ['requester']);
+    await controller.remove({}, { id: 'admin', name: 'Admin' }, body);
+    assert.deepEqual(cachedRoles, []);
+    await assert.rejects(() => controller.create({}, {}, { ...body, roleName: 'admin' }));
+  } finally { runtime.directoryClient.groups = groups; }
 });

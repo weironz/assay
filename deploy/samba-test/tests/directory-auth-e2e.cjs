@@ -99,7 +99,7 @@ function totp(uri) {
   await page.locator('form input').first().fill(name); await page.locator('input[type=password]').fill(password);
   signIns.push(Date.now()); await page.locator('button[type=submit]').click(); await page.waitForURL('**/files');
   const employeeMe = await api(page, 'GET', '/me');
-  assert.equal(employeeMe.passwordSource, 'directory'); assert.deepEqual(employeeMe.roles, ['requester']);
+  assert.equal(employeeMe.passwordSource, 'directory'); assert.deepEqual(employeeMe.roles, []);
   const files = await api(page, 'GET', '/files/status'); assert(files.connected && files.shares.includes(share));
   assert.equal(fileChallenges, 0); assert.equal(await page.locator('input[type=password]').count(), 0);
   assert.equal(await page.getByRole('link', { name: '员工账号', exact: true }).count(), 0);

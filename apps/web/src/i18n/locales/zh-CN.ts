@@ -460,7 +460,7 @@ const zhCN: Resource = {
     errResetFailed: '重置失败',
     errSaveFailed: '保存失败',
     editRolesTitle: '编辑角色 · {{name}}',
-    atLeastOneRole: '至少选择一个角色',
+    noBusinessRoles: '未分配业务角色，仅保留无需业务角色的入口。',
     fixedRolesHint: '系统角色为固定岗位定义。工单观察员可查看全部工单，但不能编辑、回复或管理用户。',
   },
 

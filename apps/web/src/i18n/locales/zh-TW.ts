@@ -460,7 +460,7 @@ const zhTW: Resource = {
     errResetFailed: '重設失敗',
     errSaveFailed: '儲存失敗',
     editRolesTitle: '編輯角色 · {{name}}',
-    atLeastOneRole: '請至少選擇一個角色',
+    noBusinessRoles: '未分配業務角色，僅保留無需業務角色的入口。',
     fixedRolesHint: '系統角色是固定的崗位定義。工單觀察員可查看全部工單，但不能編輯、回覆或管理使用者。',
   },
 

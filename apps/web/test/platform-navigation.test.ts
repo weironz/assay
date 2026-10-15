@@ -33,3 +33,11 @@ test('file management follows the other business modules and supports both file 
   expect(allowedItems(items, () => false, { files: true, directory: true }).map(i => i.to)).toEqual(['/files']);
   expect(allowedItems(items, () => true, { directory: true }).some(i => i.to === '/files')).toBe(false);
 });
+
+test('a file-only employee has no ticket, asset or inventory navigation until explicitly authorized', () => {
+  const modules = (permissions: string[]) => BUSINESS_MODULES.filter(module => allowedItems(module.items, p => permissions.includes(p), { files: true, directory: true }).length).map(module => module.id);
+  expect(modules([])).toEqual(['files']);
+  expect(modules(['ticket:create', 'ticket:read'])).toEqual(['tickets', 'files']);
+  expect(modules(['inventory:read'])).toEqual(['spares', 'files']);
+  expect(modules([])).toEqual(['files']);
+});

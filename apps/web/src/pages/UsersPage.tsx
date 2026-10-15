@@ -279,7 +279,7 @@ export default function UsersPage() {
             </div>
             {editRoles.length === 0 && (
               <p className="text-xs text-amber-600">
-                {t('users.atLeastOneRole')}
+                {t('users.noBusinessRoles')}
               </p>
             )}
             <div className="flex gap-2 justify-end pt-1">
@@ -292,7 +292,7 @@ export default function UsersPage() {
               <button
                 ref={roleSaveButton}
                 onClick={() => { if (!editing) return; const id = editing.id; const roleNames = [...editRoles]; setChallenge({ title: t('users.editRolesTitle', { name: editing.name }), run: async (token) => { await guardedApi('PATCH', `/users/${id}`, token, { roleNames }); refreshUsers(); setEditing(null); } }); }}
-                disabled={!!challenge || editRoles.length === 0}
+                disabled={!!challenge}
                 className="min-h-11 rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500"
               >
                 {t('common.save')}

@@ -471,7 +471,7 @@ const en = {
     errResetFailed: 'Could not reset the password.',
     errSaveFailed: 'Could not save.',
     editRolesTitle: 'Edit roles · {{name}}',
-    atLeastOneRole: 'Select at least one role.',
+    noBusinessRoles: 'No business roles assigned. Only features that do not require a business role remain available.',
     fixedRolesHint: 'Roles are fixed by the system. “Ticket observer” can view all tickets but cannot edit, comment, or manage users.',
   },
 

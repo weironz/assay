@@ -118,7 +118,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      { path: 'tickets', element: <TicketsPage /> },
+      { path: 'tickets', element: <ProtectedRoute permission="ticket:read"><TicketsPage /></ProtectedRoute> },
       {
         path: 'tickets/dashboard',
         element: (
@@ -127,8 +127,8 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      { path: 'tickets/new', element: <NewTicketPage /> },
-      { path: 'tickets/:id', element: <TicketDetailPage /> },
+      { path: 'tickets/new', element: <ProtectedRoute permission="ticket:create"><NewTicketPage /></ProtectedRoute> },
+      { path: 'tickets/:id', element: <ProtectedRoute permission="ticket:read"><TicketDetailPage /></ProtectedRoute> },
       {
         path: 'users',
         element: (

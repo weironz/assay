@@ -57,7 +57,6 @@ export class UpdateUserDto {
 
   @IsOptional()
   @IsArray()
-  @ArrayNotEmpty()
   @IsString({ each: true })
   @IsIn(SYSTEM_ROLE_NAMES, { each: true })
   roleNames?: string[];

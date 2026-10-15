@@ -12,7 +12,7 @@ export default function DirectorySettingsPage() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [groups, setGroups] = useState<{ sid: string; name: string }[]>([]);
   const [groupSid, setGroupSid] = useState('');
-  const [roleName, setRoleName] = useState('handler');
+  const [roleName, setRoleName] = useState('requester');
   const [userId, setUserId] = useState('');
   const [username, setUsername] = useState('');
   const [identityChallenge, setIdentityChallenge] = useState<{ userId: string; username: string } | null>(null);
@@ -46,13 +46,13 @@ export default function DirectorySettingsPage() {
       <p className="text-xs text-gray-500">不会按相同邮箱或姓名自动合并。关联后旧会话失效，员工改用公司账号登录；已关联的身份不能在此直接替换。</p>
     </section>}
     {settings?.enabled && <section className={card + ' space-y-5 p-5'}>
-      <div><h2 className="font-semibold">AD 用户组与业务角色</h2><p className="mt-2 text-sm text-gray-500">员工默认获得提单人角色。以下授权随 AD 组成员关系生效，手工授予的角色独立保留。平台超级管理员需显式授权。</p></div>
+      <div><h2 className="font-semibold">AD 用户组与业务角色</h2><p className="mt-2 text-sm text-gray-500">公司登录仅确认身份，不默认授予工单、资产或库存角色。需要使用工单时，请明确授予提单人等业务角色。以下授权随 AD 组成员关系生效，手工授予的角色独立保留；平台超级管理员需手工授权。</p></div>
       {has('role:manage') && <form onSubmit={submit} className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
         <label className="grid gap-1 text-sm">AD 用户组<select aria-label="AD 用户组" className={input} required value={groupSid} onChange={e => setGroupSid(e.target.value)}><option value="">请选择用户组</option>{groups.map(g => <option key={g.sid} value={g.sid}>{g.name}</option>)}</select></label>
         <label className="grid gap-1 text-sm">Assay 业务角色<select aria-label="Assay 业务角色" className={input} value={roleName} onChange={e => setRoleName(e.target.value)}>{settings.roles.map(r => <option key={r.name} value={r.name}>{r.label}</option>)}</select></label>
         <button className={primary} disabled={!groupSid}>添加映射</button>
       </form>}
-      <div className="divide-y divide-gray-100 dark:divide-gray-800">{settings.mappings.length ? settings.mappings.map(m => <div key={m.groupSid + m.roleName} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="text-sm font-medium">{m.groupName} → {settings.roles.find(r => r.name === m.roleName)?.label || m.roleName}</p><p className="mt-1 break-all text-xs text-gray-500">{m.groupSid}</p></div>{has('role:manage') && <button className={button} onClick={() => setChallenge({ remove: true, mapping: { groupSid: m.groupSid, roleName: m.roleName } })}>移除映射</button>}</div>) : <p className="py-4 text-sm text-gray-500">尚未配置额外业务角色映射。</p>}</div>
+      <div className="divide-y divide-gray-100 dark:divide-gray-800">{settings.mappings.length ? settings.mappings.map(m => <div key={m.groupSid + m.roleName} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="text-sm font-medium">{m.groupName} → {settings.roles.find(r => r.name === m.roleName)?.label || m.roleName}</p><p className="mt-1 break-all text-xs text-gray-500">{m.groupSid}</p></div>{has('role:manage') && <button className={button} onClick={() => setChallenge({ remove: true, mapping: { groupSid: m.groupSid, roleName: m.roleName } })}>移除映射</button>}</div>) : <p className="py-4 text-sm text-gray-500">尚未配置业务角色映射。</p>}</div>
       <p className="text-xs text-gray-500">目录状态最多缓存 30 秒。文件访问仍由 Samba 的共享权限及文件 ACL 校验。</p>
     </section>}
     {challenge && <StepUpDialog title={challenge.remove ? '移除 AD 角色映射' : '添加 AD 角色映射'} purpose="roles" onCancel={() => setChallenge(null)} onAuthorized={async token => { await guardedApi(challenge.remove ? 'DELETE' : 'POST', '/directory/mappings', token, challenge.mapping); await load(); }} />}

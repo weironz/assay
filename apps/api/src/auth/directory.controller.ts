@@ -6,9 +6,10 @@ import { CurrentUser, RequirePermissions } from './decorators';
 import type { AuthUser } from './auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { StepUpService } from './step-up.service';
-import { DIRECTORY_MAPPABLE_ROLES, directoryClient, directorySettings, resolveDirectoryIdentity } from './directory-runtime';
+import { directoryClient, directorySettings, resolveDirectoryIdentity } from './directory-runtime';
 import { DirectoryUnavailable } from './directory-client';
 import { SYSTEM_ROLE_DESCRIPTIONS } from './role-policy';
+import { DIRECTORY_MAPPABLE_ROLES, directoryRolesForGroups } from './directory-role-policy';
 
 const mappingSchema = z.object({ groupSid: z.string().regex(/^S-1-\d+(?:-\d+){1,15}$/).max(200), roleName: z.enum(DIRECTORY_MAPPABLE_ROLES) }).strict();
 @Controller('directory')
@@ -70,7 +71,7 @@ export class DirectoryController {
       const identities = await tx.directoryIdentity.findMany({ where: { providerId: key.providerId } });
       const mappings = await tx.directoryGroupRole.findMany({ where: { providerId: key.providerId } });
       for (const identity of identities) {
-        const roleNames = [...new Set(['requester', ...mappings.filter(m => identity.groupSids.includes(m.groupSid)).map(m => m.roleName)])];
+        const roleNames = directoryRolesForGroups(mappings, identity.groupSids);
         await tx.directoryIdentity.update({ where: { userId: identity.userId }, data: { roleNames } });
       }
       await tx.sambaOperation.create({ data: { id: randomUUID(), actorId: actor.id, actorName: actor.name, action: remove ? 'directory.role.unmap' : 'directory.role.map', requestHash: '-', metadata: key, state: 'succeeded' } });

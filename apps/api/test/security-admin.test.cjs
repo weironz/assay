@@ -161,5 +161,24 @@ test('last active admin cannot be disabled or deleted', async () => {
   });
   count = 1;
   await assert.rejects(service.update('admin', { status: 'DISABLED' }), { status: 409 });
+  await assert.rejects(service.update('admin', { roleNames: [] }), { status: 409 });
   await assert.rejects(service.remove('admin'), { status: 409 });
+});
+
+test('administrators can remove all manual business roles without deleting the employee or credentials', async () => {
+  const { validate } = require('class-validator');
+  const { UpdateUserDto, CreateUserDto } = require('../dist/users/dto');
+  assert.equal((await validate(Object.assign(new UpdateUserDto(), { roleNames: [] }))).length, 0);
+  assert((await validate(Object.assign(new CreateUserDto(), { roleNames: [] }))).some(error => error.property === 'roleNames'));
+  const removed = [];
+  const tx = {
+    user: { update: async () => {} },
+    role: { findMany: async () => [] },
+    userRole: { findMany: async () => [{ roleId: 'requester-role' }], deleteMany: async ({ where }) => { removed.push(where); } },
+  };
+  const db = { user: { findUnique: async () => ({ id: 'employee', status: 'ACTIVE', roles: [{ role: { name: 'requester' } }] }) }, $transaction: fn => fn(tx) };
+  const service = new UsersService(db);
+  service.findOne = async id => ({ id, roles: [] });
+  assert.deepEqual(await service.update('employee', { roleNames: [] }), { id: 'employee', roles: [] });
+  assert.deepEqual(removed, [{ userId: 'employee', roleId: { in: ['requester-role'] } }]);
 });

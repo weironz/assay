@@ -4,11 +4,11 @@ import type { PrismaClient } from '@prisma/client';
 import { DirectoryClient, DirectoryRejected, DirectoryUnavailable, type DirectoryProfile } from './directory-client';
 import { adDomainDN, normalizedDomainDN, readDirectorySettings } from './directory-config';
 import { authRedis } from './auth-redis';
-import { isSystemRoleName, type SystemRoleName } from './role-policy';
+import type { SystemRoleName } from './role-policy';
+import { directoryRolesForGroups } from './directory-role-policy';
 
 export const directorySettings = readDirectorySettings();
 export const directoryClient = directorySettings ? new DirectoryClient(directorySettings) : null;
-export const DIRECTORY_MAPPABLE_ROLES = ['handler', 'supervisor', 'ticket_viewer_all', 'asset_manager', 'inventory_manager', 'cop_viewer', 'samba_manager'] as const;
 export class DirectoryLinkRequired extends Error {}
 export type DirectorySession = { userId: string; providerId: string; objectId: string; securityStamp: string };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
@@ -22,7 +22,7 @@ export function directoryError(error: unknown): never {
 export async function mappedDirectoryRoles(db: PrismaClient, groupSids: string[]): Promise<SystemRoleName[]> {
   if (!directorySettings) return [];
   const rows = await db.directoryGroupRole.findMany({ where: { providerId: directorySettings.providerId, groupSid: { in: groupSids } } });
-  return [...new Set(['requester', ...rows.map(r => r.roleName).filter(r => (DIRECTORY_MAPPABLE_ROLES as readonly string[]).includes(r))])].filter(isSystemRoleName);
+  return directoryRolesForGroups(rows, groupSids);
 }
 export async function resolveDirectoryIdentity(db: PrismaClient, profile: DirectoryProfile, link?: { userId: string; actorId: string; actorName: string }) {
   const settings = directorySettings;
