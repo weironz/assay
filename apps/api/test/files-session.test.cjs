@@ -125,3 +125,27 @@ test('in-flight file reads cannot restore signed-out, disconnected or replaced c
     values.clear(); ttls.clear(); for (const [i, name] of ['FILES_ENABLED', 'SAMBA_ENABLED'].entries()) { if (previous[i] === undefined) delete process.env[name]; else process.env[name] = previous[i]; }
   }
 });
+
+test('the unified agent file route uses its own service key and preserves the path prefix', async () => {
+  const fs = require('node:fs'); const os = require('node:os'); const path = require('node:path');
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'assay-unified-files-'));
+  const file = path.join(root, 'token'); fs.writeFileSync(file, 'e'.repeat(48), { mode: 0o600 });
+  const previous = [process.env.FILES_GATEWAY_URL, process.env.FILES_GATEWAY_TOKEN_FILE], originalFetch = global.fetch;
+  process.env.FILES_GATEWAY_TOKEN_FILE = file;
+  const service = new FilesService({}, {}); let request;
+  global.fetch = async (url, init) => { request = { url, init }; return new Response('{}'); };
+  try {
+    process.env.FILES_GATEWAY_URL = 'http://agent:8080/files';
+    await service.gateway('/v1/list?share=qa&path=', 'owner', { token: 'employee-capability' });
+    assert.equal(request.url, 'http://agent:8080/files/v1/list?share=qa&path=');
+    assert.equal(request.init.headers.Authorization, 'Bearer ' + 'e'.repeat(48));
+    assert.equal(request.init.headers['X-File-Session'], 'employee-capability');
+    for (const url of ['http://outside.example/files', 'http://agent.attacker.example/files', 'file:///private/token', 'http://user:pass@agent:8080/files']) {
+      process.env.FILES_GATEWAY_URL = url;
+      await assert.rejects(() => service.gateway('/v1/session', 'owner', null), error => error.getStatus() === 503);
+    }
+  } finally {
+    global.fetch = originalFetch; fs.rmSync(root, { recursive: true, force: true });
+    for (const [i, name] of ['FILES_GATEWAY_URL', 'FILES_GATEWAY_TOKEN_FILE'].entries()) { if (previous[i] === undefined) delete process.env[name]; else process.env[name] = previous[i]; }
+  }
+});

@@ -22,7 +22,11 @@ pub struct Config {
     pub config_dir: PathBuf,
     pub state_dir: PathBuf,
     pub primary_gid: u32,
-    pub helper_socket: PathBuf,
+    // Present only for compatibility with deployments that still run a helper.
+    #[serde(default)]
+    pub helper_socket: Option<PathBuf>,
+    #[serde(default)]
+    pub files: Option<crate::portal::Config>,
     pub smb_pid_file: PathBuf,
     #[serde(default)]
     pub read_only: bool,

@@ -11,7 +11,7 @@ root = pathlib.Path(args.directory).resolve()
 if root != pathlib.Path('/data/assay-samba-test'): raise SystemExit('Only /data/assay-samba-test is allowed; never point this bootstrap at an existing AD.')
 root.mkdir(mode=0o750, exist_ok=True)
 if (root/'api.env').exists(): raise SystemExit('Deployment already initialized. Existing secrets and AD are preserved; use docker compose up.')
-for name in ['ad-etc','ad-state','ad-run','shares','managed','agent-state','helper-run','tls','secrets']:
+for name in ['ad-etc','ad-state','ad-run','shares','managed','agent-state','tls','secrets']:
     (root/name).mkdir(mode=0o755,exist_ok=True)
 os.chmod(root/'secrets',0o700)
 os.chown(root/'agent-state',10001,10001)
@@ -37,9 +37,9 @@ REQUIRE_EMAIL_VERIFICATION=false
 PRIVILEGED_MFA_MODE=optional''')
 (root/'.env').write_text(f'TEST_LAN_IP={args.lan_ip}\nTEST_VPN_IP={args.vpn_ip}\n')
 (root/'.env').chmod(0o600)
-config = dict(listen='0.0.0.0:8080',token_file='/secrets/agent-token',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',ldap_bind_dn='CN=Administrator,CN=Users,DC=assay,DC=test',ldap_password_file='/secrets/ad-password',base_dn='DC=assay,DC=test',users_dn='OU=Employees,DC=assay,DC=test',groups_dn='OU=Groups,DC=assay,DC=test',smb_server='172.30.225.10',smb_username='ASSAY\\Administrator',shares_root='/shares',config_dir='/managed',state_dir='/state',primary_gid=20000,helper_socket='/helper-run/helper.sock',smb_pid_file='/samba-run/smbd.pid',read_only=False)
+config = dict(listen='0.0.0.0:8080',token_file='/secrets/agent-token',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',ldap_bind_dn='CN=Administrator,CN=Users,DC=assay,DC=test',ldap_password_file='/secrets/ad-password',base_dn='DC=assay,DC=test',users_dn='OU=Employees,DC=assay,DC=test',groups_dn='OU=Groups,DC=assay,DC=test',smb_server='172.30.225.10',smb_username='ASSAY\\Administrator',shares_root='/shares',config_dir='/managed',state_dir='/state',primary_gid=20000,smb_pid_file='/samba-run/smbd.pid',read_only=False)
+config['files'] = dict(token_file='/secrets/files-token',smb_server='172.30.225.10',domain='ASSAY',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',users_dn='OU=Employees,DC=assay,DC=test')
 (root/'agent.json').write_text(json.dumps(config,indent=2))
-(root/'files.json').write_text(json.dumps(dict(listen='0.0.0.0:8081',token_file='/secrets/files-token',smb_server='172.30.225.10',domain='ASSAY',ldap_url='ldaps://172.30.225.10:636',ldap_ca_file='/tls/ca.crt',users_dn='OU=Employees,DC=assay,DC=test'),indent=2))
 for name in ['compose.yaml','nginx.conf']:
     src=pathlib.Path(__file__).parent/name
     if src.resolve()!=(root/name).resolve(): shutil.copyfile(src,root/name)

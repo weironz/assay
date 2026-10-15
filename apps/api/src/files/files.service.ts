@@ -50,7 +50,7 @@ export class FilesService {
   private gatewayConfig() {
     try {
       const url = new URL(process.env.FILES_GATEWAY_URL || '');
-      if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['file-gateway', 'localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error();
+      if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['agent', 'file-gateway', 'localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error();
       const token = readFileSync(process.env.FILES_GATEWAY_TOKEN_FILE || '', 'utf8').trim();
       if (token.length < 32) throw new Error();
       return { address: url.toString().replace(/\/$/, ''), token };

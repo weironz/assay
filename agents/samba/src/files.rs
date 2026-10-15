@@ -201,7 +201,24 @@ fn execute(c: &Config, cmd: Local) -> Result<Value> {
     }
 }
 pub async fn call(c: &Config, cmd: Local) -> Result<Value> {
-    let mut stream = UnixStream::connect(&c.helper_socket).await?;
+    let Some(socket) = &c.helper_socket else {
+        // Preserve the old helper's serialized execution without another process.
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        ensure!(
+            !c.read_only || matches!(cmd, Local::List | Local::Directories { .. }),
+            "agent is read-only"
+        );
+        let c = c.clone();
+        return tokio::task::spawn_blocking(move || {
+            // Keep the lock inside the blocking task even if its caller disconnects.
+            let _guard = LOCK
+                .lock()
+                .map_err(|_| anyhow::anyhow!("local operation lock poisoned"))?;
+            execute(&c, cmd)
+        })
+        .await?;
+    };
+    let mut stream = UnixStream::connect(socket).await?;
     stream.write_all(&serde_json::to_vec(&cmd)?).await?;
     stream.write_all(b"\n").await?;
     let mut line = String::new();
@@ -215,11 +232,15 @@ pub async fn call(c: &Config, cmd: Local) -> Result<Value> {
     Ok(v["result"].clone())
 }
 pub async fn helper(c: Config) -> Result<()> {
-    if c.helper_socket.exists() {
-        fs::remove_file(&c.helper_socket)?;
+    let socket = c
+        .helper_socket
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("legacy helper socket required"))?;
+    if socket.exists() {
+        fs::remove_file(socket)?;
     }
-    let listener = UnixListener::bind(&c.helper_socket)?;
-    fs::set_permissions(&c.helper_socket, fs::Permissions::from_mode(0o666))?;
+    let listener = UnixListener::bind(socket)?;
+    fs::set_permissions(socket, fs::Permissions::from_mode(0o666))?;
     loop {
         let (stream, _) = listener.accept().await?;
         if stream.peer_cred()?.uid() != 10001 {

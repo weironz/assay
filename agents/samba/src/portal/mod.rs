@@ -33,9 +33,10 @@ use subtle::ConstantTimeEq;
 use tokio::sync::{Mutex, OwnedMutexGuard};
 use zeroize::Zeroizing;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
     listen: String,
     token_file: String,
     smb_server: String,
@@ -549,12 +550,17 @@ async fn logout(State(app): State<Arc<App>>, h: HeaderMap) -> Result<Json<Value>
     }
     Ok(Json(json!({"ok":true})))
 }
-pub async fn run() -> Result<()> {
-    let c: Config = serde_json::from_slice(&std::fs::read(
-        std::env::args()
-            .nth(1)
-            .unwrap_or("/config/files.json".into()),
-    )?)?;
+pub async fn run(path: &str) -> Result<()> {
+    let c: Config = serde_json::from_slice(&std::fs::read(path)?)?;
+    ensure!(!c.listen.is_empty(), "file-only listener required");
+    let listener = tokio::net::TcpListener::bind(&c.listen).await?;
+    axum::serve(listener, router(c, "")?)
+        .with_graceful_shutdown(crate::shutdown())
+        .await?;
+    Ok(())
+}
+
+pub fn router(c: Config, management_token: &str) -> Result<Router> {
     ensure!(
         c.ldap_url.starts_with("ldaps://") && !c.users_dn.is_empty(),
         "LDAPS and employee scope required"
@@ -571,7 +577,10 @@ pub async fn run() -> Result<()> {
     );
     let token = std::fs::read_to_string(&c.token_file)?;
     ensure!(token.trim().len() >= 32, "service token required");
-    let listen = c.listen.clone();
+    ensure!(
+        token.trim() != management_token,
+        "management and employee service tokens must differ"
+    );
     let app = Arc::new(App {
         config: c,
         token_hash: Sha256::digest(token.trim().as_bytes()).to_vec(),
@@ -635,9 +644,7 @@ pub async fn run() -> Result<()> {
         )
         .layer(DefaultBodyLimit::disable())
         .with_state(app);
-    let listener = tokio::net::TcpListener::bind(listen).await?;
-    axum::serve(listener, router).await?;
-    Ok(())
+    Ok(router)
 }
 
 #[cfg(test)]

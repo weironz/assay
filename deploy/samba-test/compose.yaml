@@ -31,45 +31,30 @@ services:
     networks:
       directory:
         ipv4_address: 172.30.225.10
-  helper:
+  agent:
     image: ${SAMBA_AGENT_IMAGE:-assay-samba-agent:test}
-    command: [/config/agent.json, --helper]
+    # One process performs local share management and employee SMB transport.
     user: "0:0"
-    network_mode: none
+    command: [/config/agent.json]
     pid: service:ad
     restart: unless-stopped
     read_only: true
     cap_drop: [ALL]
-    cap_add: [KILL]
-    security_opt: [no-new-privileges:true]
-    volumes:
-      - ./agent.json:/config/agent.json:ro
-      - ./shares:/shares
-      - ./managed:/managed
-      - ./agent-state:/state
-      - ./helper-run:/helper-run
-      - ./ad-run:/samba-run:ro
-    depends_on:
-      ad:
-        condition: service_healthy
-  agent:
-    image: ${SAMBA_AGENT_IMAGE:-assay-samba-agent:test}
-    user: "10001:10001"
-    command: [/config/agent.json]
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
+    cap_add: [KILL, DAC_OVERRIDE]
     security_opt: [no-new-privileges:true]
     volumes:
       - ./agent.json:/config/agent.json:ro
       - ./secrets/agent-token:/secrets/agent-token:ro
       - ./secrets/ad-password:/secrets/ad-password:ro
+      - ./secrets/files-token:/secrets/files-token:ro
       - ./tls/ca.crt:/tls/ca.crt:ro
-      - ./shares:/shares:ro
-      - ./managed:/managed:ro
+      - ./shares:/shares
+      - ./managed:/managed
       - ./agent-state:/state
-      - ./helper-run:/helper-run:ro
-    depends_on: [helper]
+      - ./ad-run:/samba-run:ro
+    depends_on:
+      ad:
+        condition: service_healthy
     networks: [directory, management]
   postgres:
     image: postgres:16-alpine
@@ -82,19 +67,6 @@ services:
       timeout: 5s
       retries: 20
     networks: [management]
-  file-gateway:
-    profiles: [files]
-    image: ${ASSAY_FILE_GATEWAY_IMAGE:-assay-file-gateway:test}
-    user: "10001:10001"
-    restart: unless-stopped
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    volumes:
-      - ./files.json:/config/files.json:ro
-      - ./secrets/files-token:/secrets/files-token:ro
-      - ./tls/ca.crt:/tls/ca.crt:ro
-    networks: [directory, management]
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -114,7 +86,7 @@ services:
       SAMBA_AGENT_URL: http://agent:8080
       SAMBA_AGENT_TOKEN_FILE: /secrets/agent-token
       FILES_ENABLED: ${FILES_ENABLED:-false}
-      FILES_GATEWAY_URL: http://file-gateway:8081
+      FILES_GATEWAY_URL: http://agent:8080/files
       FILES_GATEWAY_TOKEN_FILE: /secrets/files-token
       NODE_ENV: production
       REDIS_HOST: redis

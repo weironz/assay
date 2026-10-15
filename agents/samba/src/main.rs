@@ -3,6 +3,7 @@ mod ad;
 mod config;
 mod files;
 mod inheritance;
+mod portal;
 use anyhow::{Result, ensure};
 use axum::{
     Json, Router,
@@ -475,6 +476,14 @@ async fn main() -> Result<()> {
         .install_default()
         .ok();
     let args = std::env::args().collect::<Vec<_>>();
+    if args.get(1).map(String::as_str) == Some("--files-only") {
+        return portal::run(
+            args.get(2)
+                .map(String::as_str)
+                .unwrap_or("/config/files.json"),
+        )
+        .await;
+    }
     let c = Config::load(
         args.get(1)
             .map(String::as_str)
@@ -483,9 +492,32 @@ async fn main() -> Result<()> {
     if args.iter().any(|a| a == "--helper") {
         return files::helper(c).await;
     }
+    let address = c.listen.clone();
+    let router = router(c)?;
+    let listener = tokio::net::TcpListener::bind(address).await?;
+    axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown())
+        .await?;
+    Ok(())
+}
+
+async fn shutdown() {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("install termination handler");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {},
+        _ = terminate.recv() => {},
+    }
+}
+
+fn router(c: Config) -> Result<Router> {
     let token = config::secret(&c.token_file)?;
     ensure!(token.len() >= 32, "machine token too short");
-    let address = c.listen.clone();
+    let employee = c
+        .files
+        .clone()
+        .map(|files| portal::router(files, &token))
+        .transpose()?;
     let a = App {
         c,
         token,
@@ -504,7 +536,7 @@ async fn main() -> Result<()> {
         .route("/v1/commands", post(command))
         .route("/v1/operations/{id}", get(operation))
         .route_layer(middleware::from_fn_with_state(a.clone(), auth));
-    let router = Router::new()
+    let mut router = Router::new()
         .route(
             "/health",
             get(|| async { Json(json!({"status":"ok","version":env!("CARGO_PKG_VERSION")})) }),
@@ -512,11 +544,139 @@ async fn main() -> Result<()> {
         .merge(private)
         .layer(DefaultBodyLimit::max(32768))
         .with_state(a);
-    let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, router)
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await?;
-    Ok(())
+    if let Some(employee) = employee {
+        router = router.nest("/files", employee);
+    }
+    Ok(router)
+}
+
+#[cfg(test)]
+mod unified_tests {
+    use super::*;
+    use std::{fs, path::PathBuf};
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    struct Fixture(PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            let root = std::env::temp_dir().join(format!("assay-unified-{}", uuid::Uuid::new_v4()));
+            fs::create_dir(&root).unwrap();
+            fs::write(root.join("management-token"), "m".repeat(48)).unwrap();
+            fs::write(root.join("employee-token"), "e".repeat(48)).unwrap();
+            Self(root)
+        }
+        fn config(&self, files: bool) -> Config {
+            let mut value = json!({
+                "listen":"127.0.0.1:0", "token_file":self.0.join("management-token"),
+                "ldap_url":"ldaps://ad:636", "ldap_ca_file":self.0.join("ca.crt"),
+                "ldap_bind_dn":"CN=service,DC=assay,DC=test", "ldap_password_file":self.0.join("password"),
+                "base_dn":"DC=assay,DC=test", "users_dn":"OU=Employees,DC=assay,DC=test",
+                "groups_dn":"OU=Groups,DC=assay,DC=test", "smb_server":"ad", "smb_username":"ASSAY\\service",
+                "shares_root":self.0.join("shares"), "config_dir":self.0.join("managed"),
+                "state_dir":self.0.join("state"), "primary_gid":20000, "smb_pid_file":self.0.join("smbd.pid"),
+                "read_only":true
+            });
+            if files {
+                value["files"] = json!({
+                    "token_file":self.0.join("employee-token"), "smb_server":"ad", "domain":"ASSAY",
+                    "ldap_url":"ldaps://ad:636", "ldap_ca_file":self.0.join("ca.crt"),
+                    "users_dn":"OU=Employees,DC=assay,DC=test"
+                });
+            }
+            fs::write(
+                self.0.join("agent.json"),
+                serde_json::to_vec(&value).unwrap(),
+            )
+            .unwrap();
+            Config::load(self.0.join("agent.json").to_str().unwrap()).unwrap()
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    async fn status(address: std::net::SocketAddr, path: &str, token: &str) -> u16 {
+        let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+        socket.write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+        let mut response = Vec::new();
+        tokio::time::timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .unwrap()
+            .unwrap();
+        String::from_utf8(response)
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn unified_listener_keeps_management_and_employee_authentication_separate() {
+        let fixture = Fixture::new();
+        let app = router(fixture.config(true)).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        assert_eq!(status(address, "/health", "").await, 200);
+        assert_eq!(status(address, "/files/health", "").await, 200);
+        assert_eq!(status(address, "/v1/snapshot", &"e".repeat(48)).await, 401);
+        assert_eq!(
+            status(address, "/files/v1/list?share=qa&path=", &"m".repeat(48)).await,
+            401
+        );
+        assert_eq!(status(address, "/v1/snapshot", "").await, 401);
+        // A file service key alone cannot access a user's files without their capability.
+        assert_eq!(
+            status(address, "/files/v1/list?share=qa&path=", &"e".repeat(48)).await,
+            410
+        );
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn optional_files_and_distinct_service_keys_are_enforced() {
+        let fixture = Fixture::new();
+        let app = router(fixture.config(false)).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        assert_eq!(status(address, "/files/health", "").await, 404);
+        fs::write(fixture.0.join("employee-token"), "m".repeat(48)).unwrap();
+        assert!(router(fixture.config(true)).is_err());
+        server.abort();
+    }
+
+    #[tokio::test]
+    async fn local_operations_need_no_helper_and_read_only_cannot_write() {
+        let fixture = Fixture::new();
+        let config = fixture.config(false);
+        assert!(config.helper_socket.is_none());
+        assert_eq!(
+            files::call(&config, files::Local::List).await.unwrap(),
+            json!([])
+        );
+        let result = files::call(
+            &config,
+            files::Local::Save(files::Share {
+                name: "qa_read_only".into(),
+                comment: "test".into(),
+                groups: vec![],
+                read_only: false,
+                ready: false,
+                active: true,
+            }),
+        )
+        .await;
+        assert!(result.is_err());
+        assert_eq!(fs::read_dir(&config.shares_root).unwrap().count(), 0);
+        assert_eq!(fs::read_dir(&config.config_dir).unwrap().count(), 0);
+    }
 }
