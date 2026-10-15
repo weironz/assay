@@ -60,7 +60,7 @@ export function DataTable<T>({
 }: {
   label: string;
   rows: T[];
-  columns: { label: ReactNode; render: (row: T) => ReactNode }[];
+  columns: { label: ReactNode; render: (row: T) => ReactNode; className?: string }[];
   rowKey: (row: T) => string;
   searchText?: (row: T) => string;
   actions?: ReactNode;
@@ -107,7 +107,7 @@ export function DataTable<T>({
                 <th
                   scope="col"
                   key={i}
-                  className="whitespace-nowrap px-4 py-3 font-medium"
+                  className={'whitespace-nowrap px-4 py-3 font-medium ' + (c.className || '')}
                 >
                   {c.label}
                 </th>
@@ -121,7 +121,7 @@ export function DataTable<T>({
                 className="border-t border-gray-100 hover:bg-gray-50/70 dark:border-gray-800 dark:hover:bg-gray-800/30"
               >
                 {columns.map((c, i) => (
-                  <td key={i} className="px-4 py-4 align-top">
+                  <td key={i} className={'px-4 py-4 align-top ' + (c.className || '')}>
                     {c.render(r)}
                   </td>
                 ))}

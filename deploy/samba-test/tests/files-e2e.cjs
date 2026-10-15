@@ -116,6 +116,8 @@ async function adminCommand(page, action, args) {
   await employee.getByLabel('共享目录', { exact: true }).selectOption(fixture.share);
   await employee.getByRole('table', { name: '文件', exact: true }).getByText(/probe.txt/).waitFor();
   assert.equal(await employee.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+  const shortName = await employee.getByRole('table', { name: '文件', exact: true }).getByRole('button').filter({ hasText: 'probe.txt' }).boundingBox();
+  assert(shortName && shortName.height <= 52, 'Short filenames remain readable on mobile');
   await employee.screenshot({ path: dir + '/employee-files-mobile.png', fullPage: true }); pass('File browser fits a 390px mobile viewport');
   await checked(await employee.request.delete(origin + '/api/files/session', { headers }), 200);
   await checked(await employee.request.get(endpoint('list', fixture.share)), 410);
