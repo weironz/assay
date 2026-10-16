@@ -337,3 +337,13 @@ test('self-password endpoint uses the existing old-password operation while mana
   await assert.rejects(controller.bind({ headers: {} }, user, {}));
   assert.equal(writes, 1);
 });
+
+
+test('a confirmed AD password change is still successful if rate-counter cleanup fails', async (t) => {
+  const { SambaController } = require('../dist/samba/samba.controller');
+  t.mock.method(store, 'releaseSuccessfulStepUpAttempt', async () => { throw Error('Redis temporarily unavailable'); });
+  const operation = { state: 'succeeded', id: crypto.randomUUID() };
+  const controller = new SambaController({ selfPassword: async () => operation }, { preparePasswordChange: async () => {} });
+  const result = await controller.password({ headers: {} }, { id: 'employee' }, { requestId: operation.id, old_password: 'OldTestOnly9!', password: 'NewTestOnly9!' });
+  assert.equal(result, operation);
+});

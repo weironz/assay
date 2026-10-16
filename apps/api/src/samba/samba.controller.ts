@@ -31,7 +31,8 @@ export class SambaController {
     if (legacy) await this.stepUp.consume(req, user, 'account');
     else await this.stepUp.preparePasswordChange(req, user, parsed.data.code);
     const operation = await this.samba.selfPassword(user, parsed.data);
-    if (!legacy && operation.state === 'succeeded') await releaseSuccessfulStepUpAttempt(user.id);
+    // Counter cleanup must not turn a confirmed AD password change into an error.
+    if (!legacy && operation.state === 'succeeded') await releaseSuccessfulStepUpAttempt(user.id).catch(() => {});
     return operation;
   }
 }
