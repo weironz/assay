@@ -20,6 +20,8 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 
 标准 Dockerfile 使用 Rust 1.99 / musl。云环境可用 BuildKit `proxy_ca` secret 提供构建 CA，不写入镜像。`BUILDER_IMAGE` 可指定同版本的本地编译缓存镜像；默认仍为官方 Rust 镜像。
 
+镜像会创建 Samba 默认的空运行目录供 `testparm` 完整逻辑校验；这些不是 AD 数据目录挂载，也不会初始化数据库。站点若使用自定义运行目录，可通过构建参数 `SAMBA_VALIDATION_DIRS` 指定空目录列表。共享的数据路径和挂载保持独立，不使用跳过逻辑校验的方式规避目录错误。
+
 员工文件访问现为同一程序的内部模块，挂载在 `/files/v1/...`；管理接口保持 `/v1/...`。在管理 JSON 中增加 `files` 对象开启，不配置则不注册文件路由；Assay API 的 `FILES_ENABLED` 仍独立控制员工入口。使用同一个 `agents/samba/Dockerfile` 构建，不再发布第二个文件网关镜像，详见 [员工文件模块](../../docs/samba/05-员工文件模块.md)。
 
 ## 配置

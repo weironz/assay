@@ -10,9 +10,11 @@ RUN --mount=type=secret,id=proxy_ca \
 
 # testparm is a fixed, one-shot configuration validator, not a management daemon.
 FROM alpine:3.23
+ARG SAMBA_VALIDATION_DIRS="/var/lib/samba/private /var/cache/samba /run/samba /run/samba-pids"
 RUN --mount=type=secret,id=proxy_ca \
     if [ -f /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    apk add --no-cache samba-common-tools
+    apk add --no-cache samba-common-tools \
+    && mkdir -p ${SAMBA_VALIDATION_DIRS}
 COPY --from=builder /source/target/release/assay-samba-agent /assay-samba-agent
 USER 10001:10001
 ENTRYPOINT ["/assay-samba-agent"]
