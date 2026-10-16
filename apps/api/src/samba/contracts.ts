@@ -29,7 +29,7 @@ export const actions = {
 };
 export const commandSchema = z.object({ requestId: z.uuid(), action: z.enum(Object.keys(actions) as [keyof typeof actions, ...(keyof typeof actions)[]]), args: z.record(z.string(), z.unknown()) }).strict();
 export const bindingSchema = z.object({ userId: z.string().min(1).max(128), adObjectId: id.nullable() }).strict();
-export const selfPasswordSchema = z.object({ requestId: z.uuid(), old_password: password, password }).strict();
+export const selfPasswordSchema = z.object({ requestId: z.uuid(), old_password: password, password, code: z.string().regex(/^\d{6}$/).optional() }).strict();
 export function metadata(args: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(args).filter(([key]) => !/password|token|secret/i.test(key)));
 }

@@ -72,3 +72,25 @@ test('employee polling cannot access another actor operation', async () => {
   const service = new SambaService({ sambaOperation: { findUnique: async () => ({ actorId: 'someone-else' }) } });
   await assert.rejects(() => service.ownOperation({ id: 'requester' }, 'job'), error => error.getStatus() === 403);
 });
+
+test('self-service password changes target only the caller binding and require the current password', async () => {
+  const link = { adObjectId: 'a'.repeat(32), domain: 'DC=example,DC=com' };
+  const lookups = [], submissions = [];
+  const service = new SambaService({ sambaIdentity: { findUnique: async query => { lookups.push(query); return link; } } });
+  service.agent = async () => ({ domain: link.domain, users: [{ id: link.adObjectId, disabled: false }] });
+  service.submit = async (...args) => { submissions.push(args); return { state: 'succeeded' }; };
+  const user = { id: 'caller' };
+  const body = { requestId: crypto.randomUUID(), old_password: 'OldTestOnly9!', password: 'NewTestOnly9!' };
+  await service.selfPassword(user, body);
+  assert.deepEqual(lookups, [{ where: { userId: 'caller' } }]);
+  assert.deepEqual(submissions[0], [user, body.requestId, 'user.change_password', { id: link.adObjectId, old_password: body.old_password, password: body.password }]);
+  for (const input of [{ ...body, old_password: undefined }, { ...body, id: 'b'.repeat(32) }, { ...body, userId: 'someone-else' }, { ...body, code: 'invalid' }]) {
+    await assert.rejects(service.selfPassword(user, input), e => e.getStatus() === 400);
+  }
+  assert.equal(submissions.length, 1);
+  service.submit = async () => { throw new (require('@nestjs/common').BadRequestException)({ code: 'AD_CURRENT_PASSWORD_INVALID' }); };
+  await assert.rejects(service.selfPassword(user, body), e => e.getResponse().code === 'AD_CURRENT_PASSWORD_INVALID');
+  link.domain = 'DC=other,DC=com';
+  service.agent = async () => ({ domain: 'DC=example,DC=com', users: [{ id: link.adObjectId, disabled: false }] });
+  await assert.rejects(service.selfPassword(user, body), e => e.getStatus() === 403);
+});

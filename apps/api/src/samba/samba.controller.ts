@@ -1,8 +1,10 @@
-import { Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
 import { StepUpService } from '../auth/step-up.service';
+import { releaseSuccessfulStepUpAttempt } from '../auth/step-up-store';
+import { selfPasswordSchema } from './contracts';
 import { SambaService } from './samba.service';
 
 @Controller('samba')
@@ -22,6 +24,14 @@ export class SambaController {
   @Get('me/operations/:id') ownOperation(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.samba.ownOperation(user, id); }
   @Get('me') identity(@CurrentUser() user: AuthUser) { return this.samba.identity(user); }
   @Post('me/password') async password(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
-    await this.stepUp.consume(req, user, 'account'); return this.samba.selfPassword(user, body);
+    const parsed = selfPasswordSchema.safeParse(body);
+    if (!parsed.success) throw new BadRequestException('密码参数无效');
+    // Retain compatibility with clients that already obtained a one-use proof.
+    const legacy = !!req.headers['x-step-up-token'];
+    if (legacy) await this.stepUp.consume(req, user, 'account');
+    else await this.stepUp.preparePasswordChange(req, user, parsed.data.code);
+    const operation = await this.samba.selfPassword(user, parsed.data);
+    if (!legacy && operation.state === 'succeeded') await releaseSuccessfulStepUpAttempt(user.id);
+    return operation;
   }
 }

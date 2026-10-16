@@ -54,6 +54,29 @@ export class StepUpService {
     } catch {
       throw new UnauthorizedException('安全验证失败');
     }
+    await this.verifySecondFactor(req, user, body.code);
+    await releaseSuccessfulStepUpAttempt(user.id);
+    return {
+      stepUpToken: await issueStepUp(user.id, session.token, body.purpose),
+      expiresInSeconds: STEP_UP_TTL_SECONDS,
+    };
+  }
+
+  // The AD self-change operation verifies the form's old password itself.
+  // Keep Web-session, origin, throttling and enrolled MFA checks without asking
+  // for the same password again (or for a separate local Assay password).
+  async preparePasswordChange(req: Request, user: AuthUser, code?: string) {
+    await this.session(req, user);
+    const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+    if (!req.headers.origin || !origins.includes(req.headers.origin)) {
+      throw new ForbiddenException('密码修改来源校验失败');
+    }
+    await checkStepUpRate(user.id);
+    await this.verifySecondFactor(req, user, code);
+  }
+
+  private async verifySecondFactor(req: Request, user: AuthUser, code?: string) {
+    const headers = fromNodeHeaders(req.headers);
     const actual = await this.prisma.user.findUnique({
       where: { id: user.id }, select: { twoFactorEnabled: true, status: true },
     });
@@ -62,21 +85,16 @@ export class StepUpService {
       throw new ForbiddenException('请先启用并验证 TOTP，之后才能执行敏感操作');
     }
     if (actual.twoFactorEnabled) {
-      if (!body.code || !/^\d{6}$/.test(body.code)) throw new UnauthorizedException('需要六位 TOTP 验证码');
+      if (!code || !/^\d{6}$/.test(code)) throw new UnauthorizedException('需要六位 TOTP 验证码');
       const factor = await this.prisma.twoFactor.findUnique({ where: { userId: user.id }, select: { verified: true } });
       if (!factor?.verified) throw new ForbiddenException('TOTP 状态异常，请联系管理员');
       try {
-        await auth.api.verifyTOTP({ headers, body: { code: body.code, trustDevice: false } });
+        await auth.api.verifyTOTP({ headers, body: { code: code, trustDevice: false } });
       } catch {
         throw new UnauthorizedException('安全验证失败');
       }
-      await reserveTotpCode(user.id, body.code);
+      await reserveTotpCode(user.id, code);
     }
-    await releaseSuccessfulStepUpAttempt(user.id);
-    return {
-      stepUpToken: await issueStepUp(user.id, session.token, body.purpose),
-      expiresInSeconds: STEP_UP_TTL_SECONDS,
-    };
   }
 
   async consume(req: Request, user: AuthUser, purpose: StepUpPurpose) {

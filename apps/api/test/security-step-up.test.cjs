@@ -288,3 +288,52 @@ test('COP administrators are protected by MFA enforcement and cannot disable enr
     else process.env.PRIVILEGED_MFA_MODE = previous;
   }
 });
+
+test('self-password authorization preserves session, origin and throttling without verifying a second password', async (t) => {
+  const user = { id: 'self-password-security', authType: 'session', roles: [], twoFactorEnabled: false };
+  const service = new StepUpService({ user: { findUnique: async () => ({ status: 'ACTIVE', twoFactorEnabled: false }) } });
+  t.mock.method(auth.api, 'getSession', async () => ({ user: { id: user.id }, session: { token: 'active' } }));
+  t.mock.method(auth.api, 'verifyPassword', async () => { throw Error('Must not ask for a local Assay password'); });
+  const origin = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim();
+  for (const headers of [{}, { origin: 'https://untrusted.example' }, { origin: 'null' }]) {
+    await assert.rejects(service.preparePasswordChange({ headers }, user), { status: 403 });
+  }
+  await assert.rejects(service.preparePasswordChange({ headers: { origin, authorization: 'Bearer ast_fake' } }, { ...user, authType: 'token' }), { status: 401 });
+  for (let n = 0; n < 5; n++) await service.preparePasswordChange({ headers: { origin } }, user);
+  await assert.rejects(service.preparePasswordChange({ headers: { origin } }, user), { status: 429 });
+});
+
+test('self-password authorization still requires enrolled TOTP even when the UI user data is stale', async (t) => {
+  const user = { id: 'self-password-mfa', authType: 'session', roles: [], twoFactorEnabled: false };
+  const service = new StepUpService({
+    user: { findUnique: async () => ({ status: 'ACTIVE', twoFactorEnabled: true }) },
+    twoFactor: { findUnique: async () => ({ verified: true }) },
+  });
+  t.mock.method(auth.api, 'getSession', async () => ({ user: { id: user.id }, session: { token: 'active' } }));
+  const verify = t.mock.method(auth.api, 'verifyTOTP', async () => ({}));
+  const req = { headers: { origin: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim() } };
+  await assert.rejects(service.preparePasswordChange(req, user), { status: 401 });
+  assert.equal(verify.mock.callCount(), 0);
+  await service.preparePasswordChange(req, user, '987654');
+  assert.equal(verify.mock.callCount(), 1);
+  await assert.rejects(service.preparePasswordChange(req, user, '987654'), { status: 403 });
+});
+
+test('self-password endpoint uses the existing old-password operation while management keeps its own proof', async () => {
+  const { SambaController } = require('../dist/samba/samba.controller');
+  let writes = 0, preparations = 0;
+  const user = { id: 'self-password-controller', authType: 'session' };
+  const body = { requestId: crypto.randomUUID(), old_password: 'OldTestOnly9!', password: 'NewTestOnly9!' };
+  const controller = new SambaController({ selfPassword: async (actor, input) => {
+    assert.equal(actor, user); assert.deepEqual(input, body); writes++; return { state: 'succeeded' };
+  } }, {
+    preparePasswordChange: async () => { preparations++; },
+    consume: async () => { throw Error('Management still requires its own proof'); },
+  });
+  await controller.password({ headers: {} }, user, body);
+  assert.equal(preparations, 1); assert.equal(writes, 1);
+  await assert.rejects(controller.password({ headers: {} }, user, { ...body, old_password: undefined }), { status: 400 });
+  await assert.rejects(controller.command({ headers: {} }, user, {}));
+  await assert.rejects(controller.bind({ headers: {} }, user, {}));
+  assert.equal(writes, 1);
+});
