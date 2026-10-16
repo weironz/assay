@@ -12,3 +12,10 @@ test('group validation rejects unsupported names without trimming, renaming or t
   expect(groupNameError('test', 'custom_', [])).toContain('custom_');
   expect(groupNameError('custom_test', 'custom_', [])).toBe('');
 });
+
+
+test('group creation rejects employee account names in the shared AD namespace', () => {
+  expect(groupNameError('test', '', [], ['test'])).toContain('员工账号占用');
+  expect(groupNameError('test', '', [], ['TEST'])).toContain('员工账号占用');
+  expect(groupNameError('test_group', '', [], ['test'])).toBe('');
+});

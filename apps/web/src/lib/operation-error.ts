@@ -1,6 +1,8 @@
 // Only fixed application messages are displayed. Protocol diagnostics never
 // become dialog content, including errors returned by an older/unknown agent.
 const messages: Record<string, string> = {
+  SAMBA_GROUP_ACCOUNT_NAME_EXISTS: '名称已被员工账号占用；AD 账号与用户组不能重名，请使用其他组名。',
+  AD_OBJECT_EXISTS: '名称或目录对象已在 AD 中被占用，请刷新核对并使用其他名称。',
   SAMBA_GROUP_NAME_PROTECTED: '该名称为系统保留名，请使用其他用户组名称。',
   SAMBA_GROUP_NAME_INVALID: '完整组名需为 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线。',
   SAMBA_GROUP_PREFIX_REQUIRED: '用户组名称不符合当前配置的前缀要求，请刷新页面确认最新命名规则后重新提交。',

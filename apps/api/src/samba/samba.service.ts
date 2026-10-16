@@ -76,8 +76,9 @@ export class SambaService {
     // Check deployment policy only for new writes; successful request IDs remain replayable.
     if (action === 'group.create') {
       const policy = await this.agent('/v1/snapshot');
-      if (typeof policy.groupPrefix !== 'string' || !Array.isArray(policy.groups)) throw new ServiceUnavailableException({ code: 'SAMBA_GROUP_POLICY_UNAVAILABLE', message: '无法读取用户组命名规则' });
+      if (typeof policy.groupPrefix !== 'string' || !Array.isArray(policy.groups) || !Array.isArray(policy.users)) throw new ServiceUnavailableException({ code: 'SAMBA_GROUP_POLICY_UNAVAILABLE', message: '无法读取用户组命名规则' });
       if (!(args.name as string).startsWith(policy.groupPrefix)) throw new BadRequestException({ code: 'SAMBA_GROUP_PREFIX_REQUIRED', message: '用户组名称不符合配置的前缀要求', groupPrefix: policy.groupPrefix });
+      if (policy.users.some((account: { name: string }) => account.name.toLowerCase() === (args.name as string).toLowerCase())) throw new ConflictException({ code: 'SAMBA_GROUP_ACCOUNT_NAME_EXISTS', message: '名称已被员工账号占用；AD 账号与用户组不能重名' });
       if (policy.groups.some((group: { name: string }) => group.name.toLowerCase() === (args.name as string).toLowerCase())) throw new ConflictException({ code: 'SAMBA_GROUP_NAME_EXISTS', message: '用户组名称已存在' });
     }
     try {

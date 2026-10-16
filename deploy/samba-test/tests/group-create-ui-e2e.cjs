@@ -16,7 +16,7 @@ let browser;
       if (path === '/api/me') data = { id: 'admin-fixture', name: 'Administrator', email: 'admin@example.test', roles: ['admin'], permissions: ['samba:read', 'samba:manage'], status: 'ACTIVE' };
       else if (path === '/api/modules') data = { directory: true, files: true };
       else if (path === '/api/notifications/unread-count') data = { count: 0 };
-      else if (path === '/api/samba/snapshot') data = { enabled: true, domain: 'DC=example,DC=test', groupPrefix: prefix, readOnly: false, users: [], groups, shares: [], bindings: [], assayUsers: [] };
+      else if (path === '/api/samba/snapshot') data = { enabled: true, domain: 'DC=example,DC=test', groupPrefix: prefix, readOnly: false, users: [{ id: 'b'.repeat(32), name: prefix + 'employee' }], groups, shares: [], bindings: [], assayUsers: [] };
       else if (path === '/api/me/security') data = { privileged: true, enrolled: false, privilegedMfaMode: 'optional', stepUpExemptPurposes: ['samba'] };
       else if (path === '/api/samba/commands') {
         const body = request.postDataJSON(); commands.push(body);
@@ -31,7 +31,7 @@ let browser;
     await page.goto(origin + '/samba/groups');
     const open = async () => { await page.getByRole('button', { name: '新增用户组', exact: true }).click(); const d = page.getByRole('dialog', { name: '新增用户组', exact: true }); await d.getByLabel('说明', { exact: true }).fill('Fixture group'); return d; };
     let dialog = await open();
-    for (const [name, error] of [['bad name', '2–48'], [prefix + 'existing', '已存在'], ['administrator', '保留名']]) {
+    for (const [name, error] of [['bad name', '2–48'], [prefix + 'existing', '已存在'], ['administrator', '保留名'], [prefix + 'employee', '员工账号占用']]) {
       await dialog.getByLabel('用户组名称', { exact: true }).fill(name); await dialog.getByRole('button', { name: '确认提交', exact: true }).click(); await dialog.getByRole('alert').filter({ hasText: error }).waitFor(); assert.equal(commands.length, 0);
     }
     if (prefix) {

@@ -157,7 +157,7 @@ export default function SambaPage() {
     if (editor.action === 'group.create') {
       const prefix = snapshot?.groupPrefix || '';
       const value = typeof args.name === 'string' ? args.name : '';
-      const message = groupNameError(value, prefix, snapshot?.groups.map(group => group.name) || []);
+      const message = groupNameError(value, prefix, snapshot?.groups.map(group => group.name) || [], snapshot?.users.map(user => user.name) || []);
       if (message) { setEditor({ ...editor, error: message }); return; }
     }
     if (['user.create', 'user.password'].includes(editor.action) &&

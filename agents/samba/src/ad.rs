@@ -421,6 +421,21 @@ impl Directory {
         name(n)?;
         ensure!(n.starts_with(&self.c.group_prefix), "invalid group prefix");
         text(description)?;
+        // sAMAccountName is shared by users, groups and computers across the
+        // domain, including objects outside the managed employee/group OUs.
+        let existing = self
+            .entries(
+                &self.c.base_dn.clone(),
+                &format!("(sAMAccountName={})", ldap3::ldap_escape(n)),
+            )
+            .await?;
+        if !existing.is_empty() {
+            return Err(AdError {
+                code: "AD_OBJECT_EXISTS",
+                ldap_code: 68,
+            }
+            .into());
+        }
         let dn = format!("CN={n},{}", self.c.groups_dn);
         check(
             self.ldap
@@ -608,6 +623,7 @@ fn check(r: ldap3::LdapResult) -> Result<()> {
             49 => "AD_AUTHENTICATION_FAILED",
             50 => "AD_PERMISSION_DENIED",
             51 | 52 => "AD_UNAVAILABLE",
+            68 => "AD_OBJECT_EXISTS",
             _ => "AD_OPERATION_REJECTED",
         };
         Err(AdError {
@@ -661,6 +677,14 @@ mod tests {
             assert!(!format!("{error:?}").contains("DoNotEcho9!"));
         }
         assert!(check_password(ldap_result(0, "")).is_ok());
+    }
+    #[test]
+    fn existing_directory_objects_are_distinct_from_permission_errors() {
+        for (rc, expected) in [(68, "AD_OBJECT_EXISTS"), (50, "AD_PERMISSION_DENIED")] {
+            let error = check(ldap_result(rc, "private directory diagnostics")).unwrap_err();
+            assert_eq!(error.downcast_ref::<AdError>().unwrap().code, expected);
+            assert!(!error.to_string().contains("private directory diagnostics"));
+        }
     }
     #[test]
     fn rejects_injection() {

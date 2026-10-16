@@ -36,6 +36,8 @@ test('unknown or legacy protocol failures cannot leak raw diagnostics into a dia
 });
 
 test('group naming policy failures remain specific without exposing Agent diagnostics', () => {
+  expect(new OperationError('SAMBA_GROUP_ACCOUNT_NAME_EXISTS').message).toContain('员工账号');
+  expect(new OperationError('AD_OBJECT_EXISTS').message).toContain('占用');
   expect(new OperationError('SAMBA_GROUP_PREFIX_REQUIRED').message).toContain('前缀');
   expect(new OperationError('SAMBA_GROUP_NAME_EXISTS').message).toContain('已存在');
   expect(new OperationError('SAMBA_GROUP_NAME_INVALID').message).toContain('2–48');

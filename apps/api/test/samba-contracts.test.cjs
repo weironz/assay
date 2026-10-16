@@ -99,7 +99,7 @@ test('new groups require the live Agent prefix and reject duplicate names before
   const previousSecret = process.env.AUTH_SECRET; process.env.AUTH_SECRET = 'test-only-group-request-hmac';
   try {
     const rows = new Map(), writes = [], reads = [];
-    const policy = { groupPrefix: 'dept_', groups: [{ name: 'dept_existing' }] };
+    const policy = { groupPrefix: 'dept_', groups: [{ name: 'dept_existing' }], users: [{ name: 'DEPT_EMPLOYEE' }] };
     const service = new SambaService({ sambaOperation: {
       findUnique: async ({ where }) => rows.get(where.id) || null,
       create: async ({ data }) => { rows.set(data.id, { ...data, state: 'pending' }); },
@@ -116,6 +116,7 @@ test('new groups require the live Agent prefix and reject duplicate names before
     assert.equal(reads.length, 0);
     await assert.rejects(service.command(user, command('test')), e => e.getStatus() === 400 && e.getResponse().code === 'SAMBA_GROUP_PREFIX_REQUIRED');
     await assert.rejects(service.command(user, command('dept_existing')), e => e.getStatus() === 409 && e.getResponse().code === 'SAMBA_GROUP_NAME_EXISTS');
+    await assert.rejects(service.command(user, command('dept_employee')), e => e.getStatus() === 409 && e.getResponse().code === 'SAMBA_GROUP_ACCOUNT_NAME_EXISTS');
     assert.equal(writes.length, 0); assert.equal(rows.size, 0);
     const request = command('dept_new');
     const result = await service.command(user, request); assert.equal(result.state, 'succeeded');
