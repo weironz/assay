@@ -63,14 +63,14 @@ async function api(context, path, method = 'GET', data, status = 200) {
     if (request.method() === 'POST' && path === '/api/auth/sign-in/unified') unified++;
     if (request.method() === 'POST' && ['/api/auth/sign-in/email', '/api/auth/sign-in/directory', '/api/files/session'].includes(path)) alternative++;
   });
-  await employeePage.goto(origin + '/login'); await login(employeePage, fixture.ad_name, fixture.ad_password, 'files');
+  await employeePage.goto(origin + '/login'); await login(employeePage, fixture.ad_name, fixture.ad_password, 'dashboard');
   const me = await api(employee, '/me'); assert.equal(me.id, fixture.assay_user_id); assert.equal(me.passwordSource, 'directory');
   assert.equal((await api(employee, '/files/status')).connected, true);
-  await employeePage.getByRole('region', { name: '共享目录浏览器', exact: true }).waitFor();
+  await employeePage.getByRole('region', { name: '我的共享目录', exact: true }).getByRole('link', { name: /^打开共享目录：/ }).first().waitFor();
   assert.equal(await employeePage.locator('input[type=password]').count(), 0); assert.equal(unified, 1); assert.equal(alternative, 0);
-  pass('Employee username sign-in sends one request and opens authorized SMB folders without a second password prompt');
+  pass('Employee username sign-in sends one request and opens authorized workspace folders without a second password prompt');
   await api(employee, '/auth/sign-out', 'POST', {});
-  await employeePage.goto(origin + '/login'); await login(employeePage, me.email.toUpperCase(), fixture.ad_password, 'files');
+  await employeePage.goto(origin + '/login'); await login(employeePage, me.email.toUpperCase(), fixture.ad_password, 'dashboard');
   assert.equal((await api(employee, '/me')).id, me.id); assert.equal(alternative, 0);
   pass('The same employee email alias resolves to the existing AD GUID and business user ID');
   await api(employee, '/auth/sign-out', 'POST', {});

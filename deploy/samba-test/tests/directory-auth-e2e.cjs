@@ -97,14 +97,15 @@ function totp(uri) {
   page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/api/files/session') fileChallenges++; });
   await page.goto(origin + '/login'); await page.getByLabel('账号', { exact: true }).waitFor();
   await page.locator('form input').first().fill(name); await page.locator('input[type=password]').fill(password);
-  signIns.push(Date.now()); await page.locator('button[type=submit]').click(); await page.waitForURL('**/files');
+  signIns.push(Date.now()); await page.locator('button[type=submit]').click(); await page.waitForURL('**/dashboard');
+  await page.getByRole('link', { name: '打开共享目录：' + share, exact: true }).waitFor();
   const employeeMe = await api(page, 'GET', '/me');
   assert.equal(employeeMe.passwordSource, 'directory'); assert.deepEqual(employeeMe.roles, []);
   const files = await api(page, 'GET', '/files/status'); assert(files.connected && files.shares.includes(share));
   assert.equal(fileChallenges, 0); assert.equal(await page.locator('input[type=password]').count(), 0);
   assert.equal(await page.getByRole('link', { name: '员工账号', exact: true }).count(), 0);
-  pass('First AD login automatically creates one employee identity and opens own SMB files without another password prompt');
-  await page.screenshot({ path: dir + '/directory-login-files.png', fullPage: true });
+  pass('First AD login automatically creates one employee identity and opens workspace folder shortcuts without another password prompt');
+  await page.screenshot({ path: dir + '/directory-login-workspace.png', fullPage: true });
   await api(page, 'POST', '/files/commands', { action: 'mkdir', share, path: 'from-company-login' }, {}, 201);
   const content = 'own AD SMB connection ' + randomUUID();
   await checked(await page.request.put(origin + '/api/files/content?' + new URLSearchParams({ share, path: 'from-company-login/proof.txt' }), { headers: { Origin: origin, 'Content-Type': 'application/octet-stream' }, data: Buffer.from(content) }));

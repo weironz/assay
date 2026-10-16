@@ -26,7 +26,12 @@ async function api(path, method = 'GET', data, expected = 200) {
   };
   const companySignIn = async (filesUnavailable = false) => {
     await page.locator('form input').first().fill(f.ad_name); await page.locator('input[type=password]').fill(f.ad_password);
-    await page.locator('form button[type=submit]').click(); await page.waitForURL('**/files');
+    await page.locator('form button[type=submit]').click();
+    await page.waitForURL(url => ['/dashboard', '/files'].includes(url.pathname));
+    if (new URL(page.url()).pathname === '/dashboard') {
+      await page.getByRole('link', { name: '打开文件管理器', exact: true }).click();
+      await page.waitForURL('**/files');
+    }
     if (filesUnavailable) await page.getByRole('heading', { name: '文件服务暂不可用', exact: true }).waitFor();
     else await page.getByRole('region', { name: '共享目录浏览器', exact: true }).waitFor();
     await noConnectionControls();
