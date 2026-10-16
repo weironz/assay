@@ -87,4 +87,8 @@ sudo systemctl status assay-company-startup.service
 
 启动器从实际 Compose 读取绑定地址和 AD 容器名，不复制密码或硬编码域、IP；默认通配监听无需等待任何宿主机地址，更不会等待 VPN。等待超时或启动失败时 systemd 每 15 秒重试；AD 必须有健康检查。先等待 API/数据库等依赖健康，再只重建无状态 Web 以修复失败的网络端点。不会重启既有 AD、删除卷或恢复数据库。该 unit 只负责开机启动，运行期间的容器退出继续由 Docker restart 策略处理；停止 unit 不停止容器。`--timeout` 可调整每轮等待秒数。
 
+2026-10-16 实机重启演练（Asia/Shanghai）：10:12 发起正常主机重启，10:14:34 开机服务完成 Assay 就绪，约 2 分半。新 boot ID 确认整机重启；11 个原运行容器自动恢复，全部既有健康检查通过、无失败 systemd 单元，镜像未变，未手动拉起容器。Agent 仍与 AD 共享 PID namespace，SQLite 完整性检查通过。LAN/VPN HTTPS 均为 200，管理员与员工登录、本人 SMB 自动会话、授权/拒绝及 128 KiB 上传下载删除通过，浏览器 8 项验收通过。Nextcloud 的状态接口与 `occ status` 正常，NetBird 管理和信令均已连接。
+
+本次持久化核验：43,687 个文件的数量、大小、元数据和 ACL 指纹与重启前一致，9 份配置 SHA256 一致；42 张 Assay 表中 41 张内容指纹一致，`users` 仅启动自举更新 `updatedAt`，账号及其他字段保留。私有配置快照、数据库 dump 和逐项证据保存在服务器 `/data/assay-operations/reboot-drill-20261016-100951/`。文件核验采用元数据/ACL 指纹，实际内容读写另以新建验证文件检查。
+
 失败时先保留日志，恢复旧 Web 和原 Assay 配置即可退回测试入口；如果撤销 AD 接入，还须恢复 `rollback` 中原 Samba 配置、核对并撤销本次服务账号委派。已有业务的正式实例不能用旧数据库快照直接覆盖，否则会丢失备份后的新写入。任何数据库恢复必须先停写、保存当前库并核对恢复点。
