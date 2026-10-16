@@ -1,3 +1,4 @@
+import { workbenchEn } from '../../features/workbench/strings';
 import { copEn } from '../../features/cop/strings';
 /**
  * English — the reference locale.
@@ -7,6 +8,7 @@ import { copEn } from '../../features/cop/strings';
  * demand it everywhere else.
  */
 const en = {
+  workbench: workbenchEn,
   cop: copEn,
   common: {
     loading: 'Loading…',

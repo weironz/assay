@@ -33,10 +33,12 @@ import FileBrowser, { fileSize, type FileEntry } from "./FileBrowser";
 import { Icon } from "./icons";
 import { signOut } from "../../lib/auth-client";
 import { useAuth } from "../../stores/auth";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { fileLocation } from "./locations";
 
 export default function FilesPage() {
   const navigateTo = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const clearLogin = useAuth((s) => s.clear);
   const directoryFilesReady = useAuth((s) => s.directoryFilesReady);
   const companyAccount = useAuth((s) => s.user?.passwordSource === "directory");
@@ -44,8 +46,10 @@ export default function FilesPage() {
   const [checkingStatus, setCheckingStatus] = useState(true);
   const [status, setStatus] = useState<Status | null>(null);
   const [password, setPassword] = useState("");
-  const [share, setShare] = useState("");
-  const [path, setPath] = useState("");
+  const { share, path } = fileLocation(
+    searchParams,
+    status?.connected ? status.shares || [] : [],
+  );
   const [entries, setEntries] = useState<FileEntry[]>([]);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -87,7 +91,6 @@ export default function FilesPage() {
       const data = await storage.status();
       setStatus(data);
       setError("");
-      setShare((s) => (data.shares?.includes(s) ? s : ""));
     } catch (e) {
       fail(e);
     } finally {
@@ -190,8 +193,7 @@ export default function FilesPage() {
     try {
       const data = await storage.connect(password);
       setStatus(data);
-      setShare("");
-      setPath("");
+      setSearchParams({}, { replace: true });
     } catch (e) {
       fail(e);
     } finally {
@@ -409,8 +411,11 @@ export default function FilesPage() {
     browseAbort.current?.abort();
     setEntries([]);
     setLoading(Boolean(nextShare));
-    setShare(nextShare);
-    setPath(nextPath);
+    setSearchParams(
+      nextShare
+        ? { share: nextShare, ...(nextPath ? { path: nextPath } : {}) }
+        : {},
+    );
     setError("");
     setNotice("");
   };

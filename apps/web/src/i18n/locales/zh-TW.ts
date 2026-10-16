@@ -1,8 +1,10 @@
+import { workbenchTw } from '../../features/workbench/strings';
 import { copZhTW } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 繁體中文（台港用語，非簡轉繁字元對映） */
 const zhTW: Resource = {
+  workbench: workbenchTw,
   cop: copZhTW,
   common: {
     loading: '載入中…',

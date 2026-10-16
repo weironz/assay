@@ -1,8 +1,10 @@
+import { workbenchCn } from '../../features/workbench/strings';
 import { copZhCN } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 简体中文 */
 const zhCN: Resource = {
+  workbench: workbenchCn,
   cop: copZhCN,
   common: {
     loading: '加载中…',

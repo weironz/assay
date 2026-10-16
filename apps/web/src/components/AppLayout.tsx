@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
-import { useTranslation } from 'react-i18next';
-import { useAuth } from '../stores/auth';
-import { useModules } from '../stores/modules';
-import { api } from '../lib/api';
-import { signOut } from '../lib/auth-client';
+import { useEffect, useState } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useAuth } from "../stores/auth";
+import { useModules } from "../stores/modules";
+import { api } from "../lib/api";
+import { signOut } from "../lib/auth-client";
 import {
   BUSINESS_MODULES,
   PLATFORM_MODULE,
@@ -13,14 +13,14 @@ import {
   activeMenuItem,
   menuHref,
   type MenuItem,
-} from '../lib/business-navigation';
-import AccountMenu from './AccountMenu';
-import BrandMark from './BrandMark';
-import NotificationBell from './NotificationBell';
-import ThemeToggle from './ThemeToggle';
-import LanguageSwitcher from './LanguageSwitcher';
+} from "../lib/business-navigation";
+import AccountMenu from "./AccountMenu";
+import BrandMark from "./BrandMark";
+import NotificationBell from "./NotificationBell";
+import ThemeToggle from "./ThemeToggle";
+import LanguageSwitcher from "./LanguageSwitcher";
 
-const DESKTOP = '(min-width: 1024px)';
+const DESKTOP = "(min-width: 1024px)";
 const MenuIcon = () => (
   <svg
     width="20"
@@ -40,7 +40,9 @@ export default function AppLayout() {
   const { t } = useTranslation();
   const { has, clear } = useAuth();
   const { features, load } = useModules();
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
   const navigate = useNavigate();
   const location = useLocation();
   const params = new URLSearchParams(location.search);
@@ -62,8 +64,8 @@ export default function AppLayout() {
   useEffect(() => {
     const mq = window.matchMedia(DESKTOP);
     const sync = (event: MediaQueryListEvent) => setOpen(event.matches);
-    mq.addEventListener('change', sync);
-    return () => mq.removeEventListener('change', sync);
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
   // Also close on route changes caused by notifications, browser history or deep links.
   useEffect(() => {
@@ -72,37 +74,54 @@ export default function AppLayout() {
   useEffect(() => {
     if (!open || window.matchMedia(DESKTOP).matches) return;
     const close = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === "Escape") setOpen(false);
     };
-    window.addEventListener('keydown', close);
-    return () => window.removeEventListener('keydown', close);
+    window.addEventListener("keydown", close);
+    return () => window.removeEventListener("keydown", close);
   }, [open]);
 
   const logout = async () => {
-    if (features.files) { try { await api.delete('/files/session'); } catch { /* Sign-out also revokes the server-side file session. */ } }
+    if (features.files) {
+      try {
+        await api.delete("/files/session");
+      } catch {
+        /* Sign-out also revokes the server-side file session. */
+      }
+    }
     await signOut();
     clear();
-    navigate('/login', { replace: true });
+    navigate("/login", { replace: true });
   };
   const closeOnMobile = () => {
     if (!window.matchMedia(DESKTOP).matches) setOpen(false);
   };
-  const moduleLinks = () =>
-    modules.map((module) => (
+  const moduleLinks = () => (
+    <>
       <Link
-        key={module.id}
-        to={allowedItems(module.items, has, features)[0].to}
+        to="/dashboard"
         onClick={closeOnMobile}
-        aria-current={currentModule?.id === module.id ? 'page' : undefined}
-        className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${
-          currentModule?.id === module.id
-            ? 'border-brand-500 text-brand-800 dark:text-brand-300'
-            : 'border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100'
-        }`}
+        aria-current={location.pathname === "/dashboard" ? "page" : undefined}
+        className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${location.pathname === "/dashboard" ? "border-brand-500 text-brand-800 dark:text-brand-300" : "border-transparent text-gray-600 hover:border-gray-300 dark:text-gray-400"}`}
       >
-        {t(module.labelKey)}
+        {t("workbench.title")}
       </Link>
-    ));
+      {modules.map((module) => (
+        <Link
+          key={module.id}
+          to={allowedItems(module.items, has, features)[0].to}
+          onClick={closeOnMobile}
+          aria-current={currentModule?.id === module.id ? "page" : undefined}
+          className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${
+            currentModule?.id === module.id
+              ? "border-brand-500 text-brand-800 dark:text-brand-300"
+              : "border-transparent text-gray-600 hover:border-gray-300 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-100"
+          }`}
+        >
+          {t(module.labelKey)}
+        </Link>
+      ))}
+    </>
+  );
   const sidebarLink = (item: MenuItem) => {
     const active = activeItem === item.to;
     return (
@@ -110,11 +129,11 @@ export default function AppLayout() {
         key={item.to}
         to={menuHref(item, location.pathname, params)}
         onClick={closeOnMobile}
-        aria-current={active ? 'page' : undefined}
+        aria-current={active ? "page" : undefined}
         className={`relative block rounded-md px-3 py-2.5 text-sm transition-colors ${
           active
-            ? 'bg-brand-50 font-medium text-brand-800 dark:bg-brand-950/60 dark:text-brand-300'
-            : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
+            ? "bg-brand-50 font-medium text-brand-800 dark:bg-brand-950/60 dark:text-brand-300"
+            : "text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800"
         }`}
       >
         {active && (
@@ -134,8 +153,8 @@ export default function AppLayout() {
               onClick={() => setOpen((value) => !value)}
               aria-expanded={open}
               aria-controls="workspace-sidebar"
-              aria-label={t('nav.toggleSidebar')}
-              title={t('nav.toggleSidebar')}
+              aria-label={t("nav.toggleSidebar")}
+              title={t("nav.toggleSidebar")}
               className="shrink-0 rounded-md p-2 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-100"
             >
               <MenuIcon />
@@ -150,7 +169,7 @@ export default function AppLayout() {
             <BrandMark variant="mark" />
           </div>
           <nav
-            aria-label={t('nav.businessModules')}
+            aria-label={t("nav.businessModules")}
             className="ml-3 hidden min-w-0 flex-1 items-center gap-1 overflow-x-auto lg:flex"
           >
             {moduleLinks()}
@@ -163,15 +182,15 @@ export default function AppLayout() {
               <Link
                 to={platformItems[0].to}
                 onClick={closeOnMobile}
-                aria-label={t('nav.platformManagement')}
-                title={t('nav.platformManagement')}
+                aria-label={t("nav.platformManagement")}
+                title={t("nav.platformManagement")}
                 aria-current={
-                  currentModule?.id === 'platform' ? 'page' : undefined
+                  currentModule?.id === "platform" ? "page" : undefined
                 }
                 className={`flex items-center gap-1.5 rounded-md p-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
-                  currentModule?.id === 'platform'
-                    ? 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300'
-                    : 'text-gray-500 hover:bg-gray-100 hover:text-brand-700 dark:hover:bg-gray-800 dark:hover:text-brand-400'
+                  currentModule?.id === "platform"
+                    ? "bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300"
+                    : "text-gray-500 hover:bg-gray-100 hover:text-brand-700 dark:hover:bg-gray-800 dark:hover:text-brand-400"
                 }`}
               >
                 <svg
@@ -189,7 +208,7 @@ export default function AppLayout() {
                   <circle cx="12" cy="12" r="3" />
                 </svg>
                 <span className="hidden xl:inline">
-                  {t('nav.platformManagement')}
+                  {t("nav.platformManagement")}
                 </span>
               </Link>
             )}
@@ -197,7 +216,7 @@ export default function AppLayout() {
           </div>
         </div>
         <nav
-          aria-label={t('nav.businessModules')}
+          aria-label={t("nav.businessModules")}
           className="flex h-14 items-stretch gap-1 overflow-x-auto px-3 lg:hidden"
         >
           {moduleLinks()}
@@ -214,8 +233,8 @@ export default function AppLayout() {
         {currentModule && (
           <aside
             id="workspace-sidebar"
-            aria-label={t('nav.moduleMenu')}
-            className={`fixed bottom-0 left-0 top-28 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white transition-transform duration-200 lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] lg:self-start lg:translate-x-0 dark:border-gray-800 dark:bg-gray-900 ${open ? 'translate-x-0' : '-translate-x-full lg:hidden'}`}
+            aria-label={t("nav.moduleMenu")}
+            className={`fixed bottom-0 left-0 top-28 z-40 flex w-60 shrink-0 flex-col border-r border-gray-200 bg-white transition-transform duration-200 lg:sticky lg:top-14 lg:h-[calc(100dvh-3.5rem)] lg:self-start lg:translate-x-0 dark:border-gray-800 dark:bg-gray-900 ${open ? "translate-x-0" : "-translate-x-full lg:hidden"}`}
           >
             <h2 className="border-b border-gray-100 px-5 py-4 text-sm font-semibold dark:border-gray-800">
               {t(currentModule.labelKey)}
@@ -227,7 +246,7 @@ export default function AppLayout() {
                     {item.groupKey &&
                       moduleItems[index - 1]?.groupKey !== item.groupKey && (
                         <h3
-                          className={`px-3 pb-2 text-xs font-medium tracking-wide text-gray-400 ${index ? 'pt-6' : 'pt-2'}`}
+                          className={`px-3 pb-2 text-xs font-medium tracking-wide text-gray-400 ${index ? "pt-6" : "pt-2"}`}
                         >
                           {t(item.groupKey)}
                         </h3>
@@ -242,8 +261,8 @@ export default function AppLayout() {
         <main className="min-w-0 flex-1 p-4 sm:p-6">
           <div
             className={
-              currentModule?.id === 'platform'
-                ? 'mx-auto max-w-[1500px]'
+              currentModule?.id === "platform"
+                ? "mx-auto max-w-[1500px]"
                 : undefined
             }
           >

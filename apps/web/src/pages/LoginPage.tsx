@@ -117,9 +117,7 @@ export default function LoginPage() {
         if (typeof result.filesConnected === "boolean")
           setDirectoryFilesReady(result.filesConnected);
         navigate(
-          returnToFiles || result.destination === "/files"
-            ? "/files"
-            : "/dashboard",
+          returnToFiles ? "/files" : "/dashboard",
           { replace: true },
         );
       } else setError({ key: "auth.errSessionFailed" });

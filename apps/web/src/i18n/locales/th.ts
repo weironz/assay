@@ -1,8 +1,10 @@
+import { workbenchTh } from '../../features/workbench/strings';
 import { copTh } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** ไทย (Thai) */
 const th: Resource = {
+  workbench: workbenchTh,
   cop: copTh,
   common: {
     loading: 'กำลังโหลด…',
