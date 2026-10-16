@@ -31,6 +31,19 @@ def private(path, value):
     path.chmod(0o600)
 
 
+def web_origins(config):
+    origins = []
+    # VPN is only an optional trusted browser origin, never a listening/startup dependency.
+    for key in ['lan_ip', 'vpn_ip']:
+        if config.get(key):
+            address = ipaddress.ip_address(config[key])
+            host = f'[{address}]' if address.version == 6 else str(address)
+            origin = f'https://{host}:{config["https_port"]}'
+            if origin not in origins:
+                origins.append(origin)
+    return origins
+
+
 def parse_samba(text):
     parser = configparser.ConfigParser(interpolation=None, delimiters=('=',), strict=True)
     parser.read_string(text)
@@ -144,8 +157,11 @@ def main():
             raise ValueError('Invalid configuration filename')
     if len({c['managed_config_name'], c['managed_registry_name'], c['managed_include_name']}) != 3:
         raise ValueError('Managed configuration, registry and include filenames must differ')
-    for name in ['lan_ip', 'vpn_ip', 'api_directory_ip', 'agent_directory_ip', 'agent_bind_ip']:
+    for name in ['lan_ip', 'api_directory_ip', 'agent_directory_ip', 'agent_bind_ip']:
         ipaddress.ip_address(c[name])
+    ipaddress.ip_address(c.get('web_bind_ip', '0.0.0.0'))
+    if c.get('vpn_ip'):
+        ipaddress.ip_address(c['vpn_ip'])
     subnet = ipaddress.ip_network(c['management_subnet'])
     if ipaddress.ip_address(c['agent_bind_ip']) not in subnet or not subnet.is_private:
         raise ValueError('Agent must bind to the configured private management bridge gateway')
@@ -208,7 +224,7 @@ def main():
     if any('\n' in value or '\r' in value for value in [password, c['admin_email'], c['admin_name']]):
         raise ValueError('Invalid local administrator configuration')
     db_password = secrets.token_hex(32)
-    origins = [f'https://{c[name]}:{c["https_port"]}' for name in ['lan_ip', 'vpn_ip']]
+    origins = web_origins(c)
     private(root / 'database.env', f'POSTGRES_USER=assay\nPOSTGRES_DB=assay\nPOSTGRES_PASSWORD={db_password}\n')
     private(root / 'api.env', '\n'.join([
         f'DATABASE_URL=postgresql://assay:{db_password}@postgres:5432/assay?schema=public',
@@ -245,9 +261,9 @@ def main():
     private(root / 'agent.json', json.dumps(agent, indent=2))
     env = dict(ASSAY_PROJECT=c['project'], SAMBA_CONTAINER=c['ad_container'], DIRECTORY_HOST=c['directory_host'],
                AGENT_DIRECTORY_IP=c['agent_directory_ip'], API_DIRECTORY_IP=c['api_directory_ip'],
-               AGENT_BIND_IP=c['agent_bind_ip'], AGENT_PORT=c['agent_port'], WEB_LAN_IP=c['lan_ip'],
+               AGENT_BIND_IP=c['agent_bind_ip'], AGENT_PORT=c['agent_port'], WEB_BIND_IP=c.get('web_bind_ip', '0.0.0.0'),
                APPLICATION_SUBNET=c['application_subnet'], API_DIRECTORY_SOURCE_IP=c['api_directory_source_ip'],
-               WEB_VPN_IP=c['vpn_ip'], WEB_HTTPS_PORT=c['https_port'], MANAGEMENT_SUBNET=c['management_subnet'],
+               WEB_HTTPS_PORT=c['https_port'], MANAGEMENT_SUBNET=c['management_subnet'],
                SAMBA_ETC_DIR=str(etc), SAMBA_SHARES_DIR=str(ad / c['shares_relative']), MANAGED_CONFIG_DIR=str(managed),
                ASSAY_API_IMAGE=c['images']['api'], ASSAY_WEB_IMAGE=c['images']['web'], ASSAY_AGENT_IMAGE=c['images']['agent'])
     if any('\n' in str(value) or '$' in str(value) or '#' in str(value) for value in env.values()):

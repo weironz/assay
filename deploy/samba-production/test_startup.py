@@ -1,6 +1,10 @@
 import importlib.util
 import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -36,6 +40,36 @@ class StartupTests(unittest.TestCase):
                                 ({'Running': True, 'Health': {'Status': 'healthy'}}, True)]:
             with self.subTest(state=state), patch.object(startup, 'run', side_effect=[interfaces, json.dumps(state)]):
                 self.assertEqual(startup.ready({'192.0.2.10'}, 'existing-ad'), expected)
+
+    def test_wildcard_listener_needs_no_assigned_address_or_vpn(self):
+        self.config['services']['web']['ports'] = [{'host_ip': '0.0.0.0'}]
+        addresses, samba = startup.prerequisites(self.config)
+        self.assertEqual(addresses, set())
+        state = json.dumps({'Running': True, 'Health': {'Status': 'healthy'}})
+        with patch.object(startup, 'run', return_value=state) as run:
+            self.assertTrue(startup.ready(addresses, samba))
+        self.assertEqual(run.call_args.args[:2], ('docker', 'inspect'))
+        self.assertEqual(run.call_count, 1)
+
+    @unittest.skipUnless(shutil.which('docker'), 'Docker Compose required for template contract')
+    def test_actual_compose_renders_without_any_vpn_parameters(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            project = Path(temporary)
+            shutil.copyfile(Path(__file__).with_name('compose.yaml'), project / 'compose.yaml')
+            for name in ['.env', 'database.env', 'api.env']:
+                (project / name).touch()
+            env = {'PATH': os.environ['PATH'], 'ASSAY_PROJECT': 'assay-startup-test',
+                   'ASSAY_AGENT_IMAGE': 'alpine', 'ASSAY_API_IMAGE': 'alpine', 'ASSAY_WEB_IMAGE': 'alpine',
+                   'SAMBA_CONTAINER': 'existing-ad', 'DIRECTORY_HOST': 'dc.example.com',
+                   'SAMBA_ETC_DIR': '/tmp/etc', 'SAMBA_SHARES_DIR': '/tmp/shares',
+                   'MANAGED_CONFIG_DIR': '/tmp/managed', 'AGENT_BIND_IP': '172.29.224.1',
+                   'API_DIRECTORY_IP': '192.0.2.10', 'API_DIRECTORY_SOURCE_IP': '172.29.225.10',
+                   'MANAGEMENT_SUBNET': '172.29.224.0/24', 'APPLICATION_SUBNET': '172.29.225.0/24'}
+            result = subprocess.run([*startup.compose(project), 'config', '--format', 'json'],
+                                    env=env, capture_output=True, text=True, check=True)
+            config = json.loads(result.stdout)
+            self.assertEqual(len(config['services']['web']['ports']), 1)
+            self.assertEqual(startup.prerequisites(config), (set(), 'existing-ad'))
 
     def test_failed_readiness_does_not_start_or_recreate_services(self):
         with patch.object(startup, 'run', return_value=json.dumps(self.config)) as run, \

@@ -85,8 +85,11 @@ services:
     image: ${ASSAY_WEB_IMAGE:?set an immutable Web image}
     restart: unless-stopped
     ports:
-      - "${WEB_LAN_IP:?set WEB_LAN_IP}:${WEB_HTTPS_PORT:-8446}:443"
-      - "${WEB_VPN_IP:?set WEB_VPN_IP}:${WEB_HTTPS_PORT:-8446}:443"
+      # One listener: an optional VPN must never gate LAN startup.
+      - target: 443
+        published: "${WEB_HTTPS_PORT:-8446}"
+        host_ip: "${WEB_BIND_IP:-0.0.0.0}"
+        protocol: tcp
     volumes:
       - ${NGINX_CONFIG_FILE:-./nginx.conf}:/etc/nginx/conf.d/default.conf:ro
       - ${WEB_CERT_FILE:-./tls/web.crt}:/tls/web.crt:ro

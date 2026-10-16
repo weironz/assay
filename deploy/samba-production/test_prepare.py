@@ -8,6 +8,14 @@ spec.loader.exec_module(prepare)
 
 
 class ExistingShareTests(unittest.TestCase):
+    def test_vpn_is_optional_and_only_adds_a_trusted_browser_origin(self):
+        config = {'lan_ip': '192.0.2.10', 'https_port': 8446}
+        self.assertEqual(prepare.web_origins(config), ['https://192.0.2.10:8446'])
+        config['vpn_ip'] = '100.64.1.2'
+        self.assertEqual(prepare.web_origins(config), ['https://192.0.2.10:8446', 'https://100.64.1.2:8446'])
+        config['vpn_ip'] = config['lan_ip']
+        self.assertEqual(prepare.web_origins(config), ['https://192.0.2.10:8446'])
+
     def setUp(self):
         self.text = '''# Keep the administrator's comments and unrelated options.
 [scan]

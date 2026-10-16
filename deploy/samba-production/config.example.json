@@ -32,7 +32,7 @@
   "agent_bind_ip": "172.29.224.1",
   "agent_port": 18080,
   "lan_ip": "192.0.2.10",
-  "vpn_ip": "100.64.0.10",
+  "web_bind_ip": "0.0.0.0",
   "https_port": 8446,
   "web_cert_source": "/private/company-web.crt",
   "web_key_source": "/private/company-web.key",

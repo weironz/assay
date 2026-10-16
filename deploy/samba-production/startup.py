@@ -32,11 +32,13 @@ def prerequisites(config):
 
 
 def ready(addresses, samba):
-    interfaces = json.loads(run('ip', '-json', 'address', 'show'))
-    assigned = {a['local'] for interface in interfaces for a in interface.get('addr_info', [])
-                if a.get('local') and not a.get('tentative') and not a.get('dadfailed')}
-    if not addresses <= assigned:
-        return False
+    # Wildcard publication (the default) requires no interface, VPN or IP assignment.
+    if addresses:
+        interfaces = json.loads(run('ip', '-json', 'address', 'show'))
+        assigned = {a['local'] for interface in interfaces for a in interface.get('addr_info', [])
+                    if a.get('local') and not a.get('tentative') and not a.get('dadfailed')}
+        if not addresses <= assigned:
+            return False
     try:
         state = json.loads(run('docker', 'inspect', '--format', '{{json .State}}', samba))
     except subprocess.CalledProcessError:
