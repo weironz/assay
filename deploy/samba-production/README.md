@@ -61,6 +61,10 @@ Agent 为兼容仅允许宿主机/公司 LAN 来源的既有 Samba，使用 host
 
 `application_subnet` 与 `api_directory_source_ip` 固定 API 访问 AD 的来源。Samba 的 `hosts allow` 也会影响 LDAP 接入，因此准备步骤只追加这一个 API IP，保留原白名单；不放行整个 Docker 网段。API 出站优先使用此网络，重建容器后地址保持。两个配置子网必须互不重叠，也须在部署前与宿主机、VPN 及既有 Docker 网络核对。
 
+可选 `samba_allowed_networks` 显式指定公司 LAN 和远程员工 VPN 的来源 CIDR；设置后替换原 `hosts allow`（包括原先的 `ALL`），自动保留 `LOCAL`、回环网段和固定 API 地址。不设置时沿用原白名单，仅追加 API IP。示例中的公司网段须替换为实际值。2026-10-16 公司确认的生产策略为 `192.168.10.0/24` 与 `100.70.0.0/16`；私有部署配置保存在服务器，不提交凭据或完整站点配置。
+
+来源白名单与监听地址、账号验证、文件 ACL 相互独立：客户端通过 VPN 访问 LAN 地址时，服务端可能看到 `100.70.x.x` 源地址，而非 LAN 地址。TCP 445 连通后仍可能在认证前被拒绝；先核对 Samba 日志中的 `Denied connection`。只调整全局 `hosts allow` 不会改变公司共享定义清单的摘要。已有部署须备份 `smb.conf`、用 `testparm` 检查候选、原子替换并执行 `smbcontrol all reload-config`，随后从实际客户端重新建立 SMB 连接验证；不要为更新网络白名单重跑新部署的 `prepare.py --apply`。LDAP 工作进程的热更新限制见下文。
+
 部分 Samba AD 版本不会对 LDAP 工作进程热更新来源规则。若 `testparm` 已显示新地址，而 LDAP 仍记录拒绝该来源，须安排一次原 AD 容器的正常重启：先核对 `smbstatus --json` 没有活动会话或打开文件，确认备份恢复验证通过、原启动入口在隔离副本可启动；保留原容器、镜像和数据卷。重启后重建 Agent，使其加入新的 AD PID namespace，再用实际 LDAPS 查询和登录验证就绪，不能只依赖进程 ping。
 
 先检查 API/Agent 健康、LDAPS、目录只读快照、管理员登录、员工登录后自动建立本人 SMB 会话和共享准入。通过后才停旧 Web，启动新 Web 接管相同 HTTPS 端口。浏览器确认原员工没有多余业务角色，文件显示正确，再停用测试栈；保留其配置、镜像、卷用于回退。禁止对公司 AD 运行 `deploy/samba-test/setup.py`。

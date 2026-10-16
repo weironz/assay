@@ -121,6 +121,30 @@ def allow_directory_client(text, address):
     return text[:match.end(2)] + ' ' + address + text[match.end(2):]
 
 
+def configure_allowed_sources(text, networks, directory_address):
+    """Replace the source policy only when the operator explicitly supplies CIDRs."""
+    if not isinstance(networks, list) or not networks:
+        raise ValueError('samba_allowed_networks must be a nonempty list of IPv4 CIDRs')
+    allowed = ['LOCAL', '127.0.0.0/8']
+    for value in networks:
+        if not isinstance(value, str) or '/' not in value:
+            raise ValueError('Samba allowed networks must be explicit IPv4 CIDRs')
+        network = ipaddress.IPv4Network(value, strict=True)
+        if network.prefixlen == 0:
+            raise ValueError('Use explicit company/VPN networks instead of all sources')
+        if str(network) not in allowed:
+            allowed.append(str(network))
+    address = str(ipaddress.IPv4Address(directory_address))
+    if not any(ipaddress.IPv4Address(address) in ipaddress.IPv4Network(value)
+               for value in allowed if value != 'LOCAL'):
+        allowed.append(address)
+    matches = list(re.finditer(r'^(\s*hosts allow\s*=\s*)([^\r\n]*)$', text, re.M | re.I))
+    if len(matches) != 1:
+        raise ValueError('Expected one explicit Samba hosts allow directive')
+    match = matches[0]
+    return text[:match.start(2)] + ' '.join(allowed) + text[match.end(2):]
+
+
 def share_include_bridge(main, original, managed, wrapper):
     if main.count('include = ' + original) != 1:
         raise ValueError('Expected one explicit company share include')
@@ -202,6 +226,8 @@ def main():
     wrapper = '/etc/samba/' + c['managed_subdirectory'] + '/' + c['managed_include_name']
     modified_main, bridge = share_include_bridge(main_text, original_include, include, wrapper)
     modified_main = allow_directory_client(modified_main, c['api_directory_source_ip'])
+    if 'samba_allowed_networks' in c:
+        modified_main = configure_allowed_sources(modified_main, c['samba_allowed_networks'], c['api_directory_source_ip'])
     if not args.apply:
         print(json.dumps({'ready': True, 'domain': domain, 'shares': len(shares['shares']),
                           'destination': str(root), 'fresh_database': True}))

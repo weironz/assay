@@ -29,6 +29,7 @@
   "management_subnet": "172.29.224.0/24",
   "application_subnet": "172.29.225.0/24",
   "api_directory_source_ip": "172.29.225.10",
+  "samba_allowed_networks": ["192.0.2.0/24", "100.70.0.0/16"],
   "agent_bind_ip": "172.29.224.1",
   "agent_port": 18080,
   "lan_ip": "192.0.2.10",

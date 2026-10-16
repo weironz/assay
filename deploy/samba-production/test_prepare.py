@@ -81,6 +81,19 @@ hide unreadable = yes
         self.assertIn('include = ' + original, bridge)
         self.assertIn('include = ' + managed, bridge)
 
+    def test_explicit_source_policy_replaces_all_and_keeps_local_and_api_access(self):
+        original = '[global]\n# Keep the rest\nhosts allow = ALL\nserver signing = mandatory\n'
+        result = prepare.configure_allowed_sources(original, ['192.0.2.0/24', '100.70.0.0/16'], '172.29.225.10')
+        expected = 'LOCAL 127.0.0.0/8 192.0.2.0/24 100.70.0.0/16 172.29.225.10'
+        self.assertEqual(result, original.replace('hosts allow = ALL', 'hosts allow = ' + expected))
+        self.assertEqual(prepare.configure_allowed_sources(result, ['192.0.2.0/24', '100.70.0.0/16'], '172.29.225.10'), result)
+
+    def test_source_policy_rejects_ambiguous_or_injected_networks(self):
+        source = '[global]\nhosts allow = ALL\n'
+        for networks in [[], 'ALL', ['ALL'], ['0.0.0.0/0'], ['192.0.2.1/24'], ['192.0.2.0/24\ninclude = /bad']]:
+            with self.subTest(networks=networks), self.assertRaises(ValueError):
+                prepare.configure_allowed_sources(source, networks, '172.29.225.10')
+
 
 if __name__ == '__main__':
     unittest.main()
