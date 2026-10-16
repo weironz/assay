@@ -8,6 +8,8 @@ parser.add_argument('--vpn-ip', required=True)
 parser.add_argument('--directory-ip',default='172.30.225.10')
 parser.add_argument('--directory-subnet',default='172.30.225.0/24')
 args = parser.parse_args()
+image=os.environ.get('SAMBA_TEST_IMAGE','quay.io/samba.org/samba-ad-server@sha256:d43a6af4b4253c79a1a143c1021936b025e88cf3f68da1b9aab1720f3d810f24')
+if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._:/@-]*',image): raise SystemExit('SAMBA_TEST_IMAGE must be a single container image reference')
 for ip in (args.lan_ip, args.vpn_ip): ipaddress.ip_address(ip)
 root = pathlib.Path(args.directory).resolve()
 network=ipaddress.IPv4Network(args.directory_subnet,strict=True)
@@ -40,7 +42,7 @@ ADMIN_PASSWORD={admin_password}
 ADMIN_NAME=测试管理员
 REQUIRE_EMAIL_VERIFICATION=false
 PRIVILEGED_MFA_MODE=optional''')
-(root/'.env').write_text(f'TEST_LAN_IP={args.lan_ip}\nTEST_VPN_IP={args.vpn_ip}\nSAMBA_TEST_DIRECTORY_IP={args.directory_ip}\nSAMBA_TEST_DIRECTORY_SUBNET={args.directory_subnet}\n')
+(root/'.env').write_text(f'TEST_LAN_IP={args.lan_ip}\nTEST_VPN_IP={args.vpn_ip}\nSAMBA_TEST_DIRECTORY_IP={args.directory_ip}\nSAMBA_TEST_DIRECTORY_SUBNET={args.directory_subnet}\nSAMBA_TEST_IMAGE={image}\n')
 (root/'.env').chmod(0o600)
 config = dict(listen='0.0.0.0:8080',token_file='/secrets/agent-token',ldap_url=f'ldaps://{args.directory_ip}:636',ldap_ca_file='/tls/ca.crt',ldap_bind_dn='CN=Administrator,CN=Users,DC=assay,DC=test',ldap_password_file='/secrets/ad-password',base_dn='DC=assay,DC=test',users_dn='OU=Employees,DC=assay,DC=test',groups_dn='OU=Groups,DC=assay,DC=test',smb_server=args.directory_ip,smb_username='ASSAY\\Administrator',shares_root='/shares',config_dir='/managed',state_dir='/state',primary_gid=20000,smb_pid_file='/samba-run/smbd.pid',read_only=False)
 config['files'] = dict(token_file='/secrets/files-token',smb_server=args.directory_ip,domain='ASSAY',ldap_url=f'ldaps://{args.directory_ip}:636',ldap_ca_file='/tls/ca.crt',users_dn='OU=Employees,DC=assay,DC=test')
@@ -62,7 +64,6 @@ for name,san in [('web',f'IP:{args.lan_ip},IP:{args.vpn_ip}'),('ad',f'IP:{args.d
     ext=tls/f'{name}.ext';ext.write_text(f'subjectAltName={san}\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\n')
     run(['openssl','x509','-req','-in',str(tls/f'{name}.csr'),'-CA',str(tls/'ca.crt'),'-CAkey',str(tls/'ca.key'),'-CAcreateserial','-days','365','-extfile',str(ext),'-out',str(tls/f'{name}.crt')])
 for p in tls.glob('*.key'): p.chmod(0o600)
-image=os.environ.get('SAMBA_TEST_IMAGE','quay.io/samba.org/samba-ad-server:default-fedora-amd64')
 # Official one-time domain provisioning is for a NEW disposable test domain only.
 provision_args=['domain','provision','--realm=ASSAY.TEST','--domain=ASSAY','--server-role=dc','--dns-backend=SAMBA_INTERNAL','--use-rfc2307',f'--host-ip={args.directory_ip}',f'--adminpass={ad_password}']
 # The official command dispatcher consumes private JSON on stdin. The password

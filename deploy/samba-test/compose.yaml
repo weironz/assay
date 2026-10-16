@@ -1,7 +1,8 @@
 name: assay-samba-test
 services:
   ad:
-    image: ${SAMBA_TEST_IMAGE:-quay.io/samba.org/samba-ad-server:default-fedora-amd64}
+    # Verified Samba 4.24.7, linux/amd64. Explicit overrides should also use a digest.
+    image: ${SAMBA_TEST_IMAGE:-quay.io/samba.org/samba-ad-server@sha256:d43a6af4b4253c79a1a143c1021936b025e88cf3f68da1b9aab1720f3d810f24}
     pull_policy: never
     hostname: ad
     domainname: assay.test
