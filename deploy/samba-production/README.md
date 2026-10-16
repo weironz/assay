@@ -67,4 +67,18 @@ Agent 为兼容仅允许宿主机/公司 LAN 来源的既有 Samba，使用 host
 
 隔离测试脚本必须显式设置 `SAMBA_E2E_ORIGIN`，不再默认指向某台远程服务器；同一地址可能已由测试切换为生产。现有测试域校验仍保留，禁止用旧 QA 脚本对正式员工执行密码、组或 ACL 测试。
 
+## 宿主机重启与网络就绪
+
+Web 显式绑定 LAN/VPN 地址时，`restart: unless-stopped` 不足以处理开机竞争：Docker 可能先于 VPN 分配地址，端口绑定失败后不再重试，甚至留下运行中却没有网络端点的容器。保留指定地址绑定，通过 systemd 等待 Compose 中配置的全部 Web 地址及既有 Samba 健康后再启动 Assay。无需改成监听所有地址，也不修改公司 Samba 的启动方式。
+
+将 `startup.py` 保存到稳定的 root 管理目录，安装并立即验证（路径和 unit 名按实际部署填写）：
+
+```bash
+sudo python3 /data/assay-operations/startup.py --project-directory /data/assay-company --install --unit-name assay-company-startup.service
+sudo systemctl start assay-company-startup.service
+sudo systemctl status assay-company-startup.service
+```
+
+启动器从实际 Compose 读取绑定地址和 AD 容器名，不复制密码或硬编码域、IP。等待超时或启动失败时 systemd 每 15 秒重试；AD 必须有健康检查。先等待 API/数据库等依赖健康，再只重建无状态 Web 以修复失败的网络端点。不会重启既有 AD、删除卷或恢复数据库。该 unit 只负责开机启动，运行期间的容器退出继续由 Docker restart 策略处理；停止 unit 不停止容器。`--timeout` 可调整每轮等待秒数。
+
 失败时先保留日志，恢复旧 Web 和原 Assay 配置即可退回测试入口；如果撤销 AD 接入，还须恢复 `rollback` 中原 Samba 配置、核对并撤销本次服务账号委派。已有业务的正式实例不能用旧数据库快照直接覆盖，否则会丢失备份后的新写入。任何数据库恢复必须先停写、保存当前库并核对恢复点。
