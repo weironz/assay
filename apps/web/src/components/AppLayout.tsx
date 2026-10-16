@@ -12,6 +12,7 @@ import {
   moduleForPath,
   activeMenuItem,
   menuHref,
+  moduleHome,
   type MenuItem,
 } from "../lib/business-navigation";
 import AccountMenu from "./AccountMenu";
@@ -108,7 +109,7 @@ export default function AppLayout() {
       {modules.map((module) => (
         <Link
           key={module.id}
-          to={allowedItems(module.items, has, features)[0].to}
+          to={moduleHome(module, has, features)}
           onClick={closeOnMobile}
           aria-current={currentModule?.id === module.id ? "page" : undefined}
           className={`flex min-h-12 shrink-0 items-center whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors xl:px-4 ${

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { BUSINESS_MODULES, PLATFORM_MODULE, activeMenuItem, allowedItems, moduleForPath } from '../src/lib/business-navigation';
+import { BUSINESS_MODULES, PLATFORM_MODULE, activeMenuItem, allowedItems, moduleForPath, moduleHome } from '../src/lib/business-navigation';
 
 test('platform navigation respects each permission and does not expose a landing page to ordinary requesters', () => {
   expect(allowedItems(PLATFORM_MODULE.items, () => false)).toHaveLength(0);
@@ -40,4 +40,16 @@ test('a file-only employee has no ticket, asset or inventory navigation until ex
   expect(modules(['ticket:create', 'ticket:read'])).toEqual(['tickets', 'files']);
   expect(modules(['inventory:read'])).toEqual(['spares', 'files']);
   expect(modules([])).toEqual(['files']);
+});
+
+
+test('file management landing respects both permissions and optional module switches', () => {
+  const module = BUSINESS_MODULES.find(m => m.id === 'files')!;
+  const manager = (permission: string) => permission === 'samba:read';
+  expect(moduleHome(module, manager, { files: true, directory: true })).toBe('/samba/overview');
+  expect(moduleHome(module, () => false, { files: true, directory: true })).toBe('/files');
+  expect(moduleHome(module, manager, { files: true, directory: false })).toBe('/files');
+  expect(moduleHome(module, manager, { files: false, directory: true })).toBe('/samba/overview');
+  expect(moduleHome(module, () => false, { files: false, directory: true })).toBe('/dashboard');
+  expect(moduleHome(module, manager)).toBe('/dashboard');
 });

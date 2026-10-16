@@ -136,6 +136,18 @@ export function allowedItems(
   );
 }
 
+// Management-capable users enter the directory overview; employees enter files.
+// Resolve from visible items so a disabled module never becomes a destination.
+export function moduleHome(
+  module: BusinessModule,
+  has: (permission: string) => boolean,
+  features: Partial<Record<'directory' | 'files', boolean>> = {},
+) {
+  const items = allowedItems(module.items, has, features);
+  return (module.id === 'files' ? items.find(item => item.to === '/samba/overview') : undefined)?.to
+    || items[0]?.to || '/dashboard';
+}
+
 export function moduleForPath(pathname: string) {
   return [...BUSINESS_MODULES, PLATFORM_MODULE].find((module) =>
     module.areas.some(

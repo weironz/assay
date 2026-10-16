@@ -33,11 +33,20 @@ import FileBrowser, { fileSize, type FileEntry } from "./FileBrowser";
 import { Icon } from "./icons";
 import { signOut } from "../../lib/auth-client";
 import { useAuth } from "../../stores/auth";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { useTranslation } from "react-i18next";
+import { useModules } from "../../stores/modules";
 import { fileLocation } from "./locations";
 
 export default function FilesPage() {
   const navigateTo = useNavigate();
+  const { t } = useTranslation();
+  const has = useAuth(s => s.has);
+  const administrator = useAuth(s => s.user?.roles.includes("admin") === true);
+  const directoryEnabled = useModules(s => s.features.directory);
+  const fileAdministrator = administrator || has("samba:read");
+  const canReadDirectory = directoryEnabled && has("samba:read");
+  const canLinkIdentity = canReadDirectory && has("samba:manage");
   const [searchParams, setSearchParams] = useSearchParams();
   const clearLogin = useAuth((s) => s.clear);
   const directoryFilesReady = useAuth((s) => s.directoryFilesReady);
@@ -529,10 +538,14 @@ export default function FilesPage() {
         )
       ) : !status.identity ? (
         <section className={card + " p-6"}>
-          <h2 className="font-semibold">尚未关联公司账号</h2>
-          <p className="mt-2 text-sm text-gray-500">
-            请联系管理员，在“文件管理 → 登录账号关联”中关联你的 AD 员工账号。
+          <h2 className="font-semibold">{fileAdministrator ? t("workbench.adminFilesUnlinkedTitle") : "尚未关联公司账号"}</h2>
+          <p className="mt-2 text-sm leading-6 text-gray-500">
+            {fileAdministrator ? t("workbench.adminFilesUnlinkedHint") : "请联系管理员关联你的 AD 员工账号，以访问获授权的共享文件。"}
           </p>
+          {fileAdministrator && canReadDirectory && <div className="mt-5 flex flex-wrap gap-3">
+            {canReadDirectory && <Link to="/samba/overview" className={primary}>{t("workbench.manageFiles")}</Link>}
+            {canLinkIdentity && <Link to="/samba/bindings" className={button}>{t("workbench.linkPersonalFiles")}</Link>}
+          </div>}
         </section>
       ) : !status.connected ? (
         companyMode ? (

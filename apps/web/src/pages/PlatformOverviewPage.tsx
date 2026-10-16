@@ -7,6 +7,7 @@ import {
   BUSINESS_MODULES,
   PLATFORM_MODULE,
   allowedItems,
+  moduleHome,
 } from "../lib/business-navigation";
 import { useAuth } from "../stores/auth";
 import { useModules } from "../stores/modules";
@@ -68,6 +69,10 @@ export default function PlatformOverviewPage() {
     has("user:manage") ||
     has("organization:manage") ||
     has("samba:read");
+  const filesModule = BUSINESS_MODULES.find(module => module.id === "files")!;
+  const fileHome = moduleHome(filesModule, has, features);
+  const managesFiles = fileHome === "/samba/overview";
+  const adminWithoutIdentity = !files.data?.identity && (!!user?.roles.includes("admin") || has("samba:read"));
   const directories = files.data?.connected ? files.data.shares || [] : [];
   const filtered = directories.filter((name) =>
     name.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
@@ -78,7 +83,7 @@ export default function PlatformOverviewPage() {
   const services = modules.map((module) => ({
     id: module.id,
     label: t(module.labelKey),
-    to: module.items[0].to,
+    to: moduleHome(module, has, features),
     description: t("workbench.service." + module.id),
   }));
   if (has("ticket:create"))
@@ -131,10 +136,10 @@ export default function PlatformOverviewPage() {
             <div className="mt-6 flex flex-wrap gap-3">
               {features.files && (
                 <Link
-                  to="/files"
+                  to={fileHome}
                   className="inline-flex min-h-11 items-center gap-3 rounded-xl bg-brand-700 px-5 text-sm font-medium text-white transition hover:bg-brand-800"
                 >
-                  {t("workbench.openFiles")}
+                  {t(managesFiles ? "workbench.manageFiles" : "workbench.openFiles")}
                   <Icon name="chevron" />
                 </Link>
               )}
@@ -224,14 +229,16 @@ export default function PlatformOverviewPage() {
                         ? "workbench.filesUnavailable"
                         : files.data?.identity
                           ? "workbench.filesDisconnected"
-                          : "workbench.filesUnlinked",
+                          : adminWithoutIdentity
+                            ? "workbench.adminFilesUnlinkedHint"
+                            : "workbench.filesUnlinked",
                     )}
                   </p>
                   <Link
-                    to="/files"
+                    to={adminWithoutIdentity ? (managesFiles ? fileHome : "/settings") : "/files"}
                     className="mt-3 inline-flex items-center gap-1 text-sm font-medium text-brand-800 dark:text-brand-300"
                   >
-                    {t("workbench.openFiles")}
+                    {t(adminWithoutIdentity ? (managesFiles ? "workbench.manageFiles" : "nav.personalSettings") : "workbench.openFiles")}
                     <Icon name="chevron" />
                   </Link>
                 </div>
