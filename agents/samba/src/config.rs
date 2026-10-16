@@ -42,6 +42,9 @@ pub struct Config {
     // For an existing AD container without a mounted PID directory. Requires its PID namespace.
     #[serde(default)]
     pub reload_via_proc: bool,
+    // Explicit deployment opt-in: fixed validator and read-only Samba config view.
+    #[serde(default)]
+    pub rename: Option<crate::rename::Settings>,
     #[serde(default)]
     pub read_only: bool,
 }

@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -11,6 +11,7 @@ import { SambaService } from './samba.service';
 export class SambaController {
   constructor(private readonly samba: SambaService, private readonly stepUp: StepUpService) {}
   @Get('snapshot') @RequirePermissions('samba:read') snapshot() { return this.samba.snapshot(); }
+  @Post('rename-preview') @HttpCode(200) @RequirePermissions('samba:manage') preview(@Body() body:unknown) { return this.samba.renamePreview(body); }
   @Get('directories') @RequirePermissions('samba:read') directories(@Query() q: unknown) { return this.samba.directories(q); }
   @Get('acl') @RequirePermissions('samba:read') acl(@Query() q: unknown) { return this.samba.directories(q, true); }
   @Get('operations') @RequirePermissions('samba:read') history() { return this.samba.history(); }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Rename } from './Rename';
 import {
   Badge,
   DataTable,
@@ -22,6 +23,7 @@ export function Employees({
   snapshot,
   canWrite,
   open,
+  confirm,
   id,
 }: Workspace & { id?: string }) {
   const [status, setStatus] = useState('all');
@@ -172,6 +174,7 @@ export function Employees({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Rename kind="user" object={employee} disabled={!editable||!snapshot.renameEnabled} confirm={confirm}/>
           <Badge muted={employee.disabled}>
             {employee.disabled ? '已停用' : '已启用'}
           </Badge>

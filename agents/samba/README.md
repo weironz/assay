@@ -1,6 +1,6 @@
 # Assay Samba Agent
 
-原生 Rust 统一服务，独立于 Assay API 部署。一个镜像、一个容器、一个 Rust 进程提供管理接口和可选员工文件接口。LDAP、SMB、Windows 安全描述符、任务执行与本地共享操作均由 Rust 实现，运行时不调用 Python、Shell、`samba-tool` 或旧管理脚本。镜像为静态二进制，不包含操作系统工具。
+原生 Rust 统一服务，独立于 Assay API 部署。一个镜像、一个容器、一个常驻 Rust 进程提供管理接口和可选员工文件接口。LDAP、SMB、Windows 安全描述符、任务执行与本地共享操作均由 Rust 实现，运行时不调用 Python、Shell、`samba-tool` 或旧管理脚本。Alpine 镜像包含静态 Rust 二进制及 Samba 配置校验工具；启用重命名时仅短暂运行固定的 `testparm` 校验配置，不启动额外后台服务。
 
 ## 连接与职责
 
@@ -23,6 +23,8 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 员工文件访问现为同一程序的内部模块，挂载在 `/files/v1/...`；管理接口保持 `/v1/...`。在管理 JSON 中增加 `files` 对象开启，不配置则不注册文件路由；Assay API 的 `FILES_ENABLED` 仍独立控制员工入口。使用同一个 `agents/samba/Dockerfile` 构建，不再发布第二个文件网关镜像，详见 [员工文件模块](../../docs/samba/05-员工文件模块.md)。
 
 ## 配置
+
+原对象重命名需显式启用 `rename` 配置，详见 [重命名操作、升级与回滚](../../docs/samba/07-原对象重命名与升级回滚.md)。共享 ID 与物理路径独立保存，重命名不移动数据、不重设密码或初始化 ACL。内部 CN/DN 作为稳定标识保留。
 
 挂载 `/config/agent.json`，字段见 `src/config.rs` 和隔离测试的 `deploy/samba-test/setup.py`。生产凭据自行以文件挂载，不提交版本控制。
 

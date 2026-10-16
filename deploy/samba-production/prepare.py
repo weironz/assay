@@ -281,6 +281,12 @@ def main():
                  shares_file_name=c['managed_registry_name'], samba_config_file_name=c['managed_config_name'],
                  samba_shares_root=c['samba_shares_root'], external_shares_file='/config/external-shares.json',
                  external_samba_config_file='/existing/' + c['share_config_name'])
+    agent['rename'] = dict(main_config='/existing/' + c['smb_config_name'],
+                           samba_config_root='/etc/samba',
+                           samba_managed_dir='/etc/samba/' + c['managed_subdirectory'],
+                           include_file_name=c['managed_include_name'],testparm='/usr/bin/testparm',
+                           client_address=c.get('smb_client_address',c['lan_ip']),
+                           storage_display_root=str(ad / c['shares_relative']))
     agent['files'] = dict(token_file='/secrets/files-token', smb_server=c['smb_server'], domain=netbios,
                           ldap_url=agent['ldap_url'], ldap_ca_file=agent['ldap_ca_file'], users_dn=c['users_dn'],
                           max_file_bytes=c.get('max_file_bytes', 200 * 1024 * 1024))

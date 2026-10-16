@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { Rename } from './Rename';
 import {
   Badge,
   DataTable,
@@ -31,7 +32,7 @@ export function Shares({
   refresh: number;
   onError: (message: string) => void;
 }) {
-  const share = snapshot.shares.find((s) => s.name === id);
+  const share = snapshot.shares.find((s) => s.id === id || s.name === id);
   const [path, setPath] = useState('');
   const [directories, setDirectories] = useState<string[]>([]);
   const [acl, setAcl] = useState<Acl | null>(null);
@@ -83,7 +84,7 @@ export function Shares({
     };
   }, [id, path, share?.active, refresh]);
   const removeDirectory = () => {
-    confirm('删除空目录', 'directory.delete', { share: id, path }, () =>
+    confirm('删除空目录', 'directory.delete', { share: share?.name, path }, () =>
       setPath(path.split('/').slice(0, -1).join('/')),
     );
   };
@@ -136,7 +137,7 @@ export function Shares({
         { name: 'inherit', label: '应用到子目录与文件', type: 'checkbox' },
       ],
       values: {
-        share: id,
+        share: share?.name,
         path,
         principal_id: (isGroup ? groupOptions : userOptions)[0]?.value,
         group: isGroup,
@@ -165,7 +166,7 @@ export function Shares({
           {
             label: '目录名称',
             render: (s) => (
-              <Link className={link} to={`/samba/shares/${s.name}`}>
+              <Link className={link} to={`/samba/shares/${s.id || s.name}`}>
                 {s.name}
               </Link>
             ),
@@ -188,7 +189,7 @@ export function Shares({
           {
             label: '操作',
             render: (s) => (
-              <Link className={link} to={`/samba/shares/${s.name}`}>
+              <Link className={link} to={`/samba/shares/${s.id || s.name}`}>
                 查看详情 →
               </Link>
             ),
@@ -205,6 +206,7 @@ export function Shares({
           <p className="mt-1 text-sm text-gray-500">{share.comment}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Rename kind="share" object={share} disabled={!canWrite||!share.active||!snapshot.renameEnabled} confirm={confirm}/>
           <button
             className={button}
             disabled={!canWrite || share.external}
@@ -229,7 +231,7 @@ export function Shares({
       </div>
       {share.external && (
         <p className="text-sm text-gray-500">
-          此共享沿用文件服务器现有配置。可管理组成员、子目录和文件权限；共享名称、路径与准入规则由服务器配置维护。
+          此共享沿用文件服务器现有配置。重命名共享不会移动原目录；路径和其他服务器配置继续受到保护。
         </p>
       )}
       <section className={card + ' p-5'}>
@@ -263,7 +265,7 @@ export function Shares({
           actions={
             <button
               className={button}
-              disabled={!canWrite}
+              disabled={!canWrite || share.external}
               onClick={() => edit(share)}
             >
               调整访问组
@@ -377,7 +379,7 @@ export function Shares({
                           maxLength: 1024,
                         },
                       ],
-                      values: { share: id, path: path ? path + '/' : '' },
+                      values: { share: share.name, path: path ? path + '/' : '' },
                     })
                   }
                 >

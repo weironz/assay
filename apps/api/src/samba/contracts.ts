@@ -1,6 +1,7 @@
 import { z } from 'zod';
 const id = z.string().regex(/^[a-fA-F0-9]{32}$/);
 const name = z.string().regex(/^[a-z][a-z0-9_-]{1,47}$/);
+const shareName=name.refine(v=>!['global','homes','printers','ipc$','print$','sysvol','netlogon'].includes(v));
 const display = z.string().min(1).max(128).refine(v => !/[\x00-\x1f\x7f]/.test(v));
 const password = z.string().min(8).max(512).refine(v => !v.includes('\0'));
 const optionalText = (max: number) => z.string().max(max).refine(v => !/[\x00-\x1f\x7f]/.test(v)).optional();
@@ -11,8 +12,12 @@ export const employeeProfile = z.object({
   phone: optionalText(64), company: optionalText(64), office: optionalText(128),
 }).strict();
 const path = z.string().max(1024).refine(v => v === '' || (!v.startsWith('/') && !/[\\\x00:]/.test(v) && v.split('/').every(p => p && p !== '.' && p !== '..')));
-export const directoryPath = z.object({ share: name, path }).strict();
+export const directoryPath = z.object({ share: shareName, path }).strict();
+export const renameSchema = z.object({ kind: z.enum(['user','group','share']), id:id.transform(v=>v.toLowerCase()), name, revision:z.string().regex(/^[a-f0-9]{64}$/), acknowledge_connections:z.boolean().default(false) }).strict();
 export const actions = {
+  'user.rename': renameSchema.refine(v=>v.kind==='user'),
+  'group.rename': renameSchema.refine(v=>v.kind==='group'),
+  'share.rename': renameSchema.refine(v=>v.kind==='share'),
   'user.create': z.object({ name, display_name: display, password, profile: employeeProfile.optional() }).strict(),
   'user.update': z.object({ id, display_name: display, disabled: z.boolean(), profile: employeeProfile.optional() }).strict(),
   'user.password': z.object({ id, password }).strict(),
@@ -21,7 +26,7 @@ export const actions = {
   'group.delete': z.object({ id }).strict(),
   'group.member': z.object({ group_id: id, user_id: id, add: z.boolean() }).strict(),
   'group.members': z.object({ group_id: id, user_ids: z.array(id).min(1).max(100).refine(v => new Set(v).size === v.length), add: z.boolean() }).strict(),
-  'share.save': z.object({ name, comment: display, groups: z.array(id).max(100), read_only: z.boolean() }).strict(),
+  'share.save': z.object({ name:shareName, comment: display, groups: z.array(id).max(100), read_only: z.boolean() }).strict(),
   'share.remove': z.object({ name }).strict(),
   'directory.create': directoryPath.refine(v => v.path.length > 0),
   'directory.delete': directoryPath.refine(v => v.path.length > 0),

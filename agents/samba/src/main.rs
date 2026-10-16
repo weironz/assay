@@ -4,6 +4,7 @@ mod config;
 mod files;
 mod inheritance;
 mod portal;
+mod rename;
 use anyhow::{Result, ensure};
 use axum::{
     Json, Router,
@@ -154,6 +155,7 @@ async fn snapshot(State(a): State<App>) -> Response {
         v["shares"] = files::call(&a.c, files::Local::List).await?;
         v["readOnly"] = json!(a.c.read_only);
         v["domain"] = json!(a.c.base_dn);
+        v["renameEnabled"] = json!(a.c.rename.is_some());
         Ok::<_, anyhow::Error>(v)
     }
     .await;
@@ -174,8 +176,24 @@ async fn directories(State(a): State<App>, Query(q): Query<DirectoryPath>) -> Re
 async fn permissions(State(a): State<App>, Query(q): Query<DirectoryPath>) -> Response {
     reply(acl::access(&a.c, &q.share, &q.path, None).await)
 }
+async fn rename_preview(State(a): State<App>, Json(input): Json<rename::Request>) -> Response {
+    let _guard = a.lock.lock().await;
+    reply(rename::preview(&a.c, &input).await)
+}
 async fn execute(a: &App, cmd: &Command) -> Result<Value> {
     ensure!(!a.c.read_only, "agent is read-only");
+    rename::idle(&a.c)?;
+    if matches!(
+        cmd.action.as_str(),
+        "user.rename" | "group.rename" | "share.rename"
+    ) {
+        let x: rename::Request = parse(cmd.args.clone())?;
+        ensure!(
+            cmd.action == format!("{}.rename", x.kind),
+            "rename kind does not match action"
+        );
+        return rename::execute(&a.c, &cmd.request_id, &x).await;
+    }
     let mut d = ad::Directory::connect(&a.c).await?;
     match cmd.action.as_str() {
         "user.create" => {
@@ -257,6 +275,8 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
                 files::call(
                     &a.c,
                     files::Local::Save(files::Share {
+                        id: String::new(),
+                        revision: String::new(),
                         name: x.name.clone(),
                         comment: x.comment.clone(),
                         groups: vec![],
@@ -275,6 +295,8 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
             files::call(
                 &a.c,
                 files::Local::Save(files::Share {
+                    id: String::new(),
+                    revision: String::new(),
                     name: x.name,
                     comment: x.comment,
                     groups: names,
@@ -376,7 +398,7 @@ async fn command(State(a): State<App>, Json(cmd): Json<Command>) -> Response {
                             json!({"request_id":cmd.request_id,"state":"succeeded","result":v})
                         }
                         Ok(Err(e)) => {
-                            json!({"request_id":cmd.request_id,"state":if e.is::<inheritance::PartialAclUpdate>() {"uncertain"} else {"failed"},"error":safe_error(&e),"error_code":error_code(&e)})
+                            json!({"request_id":cmd.request_id,"state":if e.is::<inheritance::PartialAclUpdate>() || e.is::<rename::Pending>() || rename::pending(&a.c) {"uncertain"} else {"failed"},"error":safe_error(&e),"error_code":if rename::pending(&a.c){Some("RENAME_RECOVERY_REQUIRED")}else{error_code(&e)}})
                         }
                         Err(_) => {
                             json!({"request_id":cmd.request_id,"state":"uncertain","error":"operation timed out; inspect resource before retrying"})
@@ -460,6 +482,26 @@ fn safe_error(e: &anyhow::Error) -> String {
     }
 }
 fn error_code(e: &anyhow::Error) -> Option<&'static str> {
+    if e.is::<rename::Pending>() {
+        return Some("RENAME_RECOVERY_REQUIRED");
+    }
+    for code in [
+        "RENAME_CONFLICT",
+        "RENAME_PROTECTED",
+        "RENAME_INVALID_NAME",
+        "RENAME_NAME_EXISTS",
+        "RENAME_UNCHANGED",
+        "RENAME_NOT_CONFIGURED",
+        "RENAME_OBJECT_NOT_FOUND",
+        "RENAME_CONFIG_INVALID",
+        "RENAME_CONNECTION_ACK_REQUIRED",
+        "RENAME_RECOVERY_REQUIRED",
+        "RENAME_ROLLED_BACK",
+    ] {
+        if e.to_string() == code {
+            return Some(code);
+        }
+    }
     if let Some(error) = e.downcast_ref::<ad::AdError>() {
         return Some(error.code);
     }
@@ -507,7 +549,8 @@ async fn main() -> Result<()> {
         return files::helper(c).await;
     }
     let address = c.listen.clone();
-    let router = router(c)?;
+    let router = router(c.clone())?;
+    rename::recover(&c).await?;
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown())
@@ -545,6 +588,7 @@ fn router(c: Config) -> Result<Router> {
     )?;
     let private = Router::new()
         .route("/v1/snapshot", get(snapshot))
+        .route("/v1/rename-preview", post(rename_preview))
         .route("/v1/directories", get(directories))
         .route("/v1/acl", get(permissions))
         .route("/v1/commands", post(command))
@@ -680,6 +724,8 @@ mod unified_tests {
         let result = files::call(
             &config,
             files::Local::Save(files::Share {
+                id: String::new(),
+                revision: String::new(),
                 name: "qa_read_only".into(),
                 comment: "test".into(),
                 groups: vec![],

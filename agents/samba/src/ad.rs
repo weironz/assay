@@ -4,6 +4,7 @@ use ldap3::{Ldap, LdapConnAsync, LdapConnSettings, Mod, Scope, SearchEntry};
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
 pub fn name(s: &str) -> Result<()> {
@@ -58,7 +59,7 @@ pub fn guid_filter(id: &str) -> Result<String> {
 fn hex(v: &[u8]) -> String {
     v.iter().map(|v| format!("{v:02x}")).collect()
 }
-fn attr(e: &SearchEntry, k: &str) -> String {
+pub(crate) fn attr(e: &SearchEntry, k: &str) -> String {
     e.attrs
         .get(k)
         .and_then(|v| v.first())
@@ -91,6 +92,8 @@ fn raw(e: &SearchEntry, key: &str) -> Option<Vec<u8>> {
 fn row(e: &SearchEntry) -> Value {
     json!({"id": raw(e,"objectGUID").map(|x|hex(&x)).unwrap_or_default(),
         "sid": raw(e,"objectSid").map(|x|sid(&x)).unwrap_or_default(),
+        "revision":revision(e),"upn":attr(e,"userPrincipalName"),"uidNumber":attr(e,"uidNumber"),"gidNumber":attr(e,"gidNumber"),
+        "accountControl":attr(e,"userAccountControl"),"passwordChangedAt":attr(e,"pwdLastSet"),"primaryGroupId":attr(e,"primaryGroupID"),"groupType":attr(e,"groupType"),
         "name": attr(e,"sAMAccountName"), "displayName": attr(e,"displayName"), "description": attr(e,"description"),
         "disabled": attr(e,"userAccountControl").parse::<u32>().unwrap_or(0) & 2 != 0,
         "members": e.attrs.get("member").cloned().unwrap_or_default(), "dn":e.dn,
@@ -98,7 +101,18 @@ fn row(e: &SearchEntry) -> Value {
         "title":attr(e,"title"),"phone":attr(e,"telephoneNumber"),"company":attr(e,"company"),"office":attr(e,"physicalDeliveryOfficeName"),
         "manageable":attr(e,"adminCount")!="1" && name(&attr(e,"sAMAccountName")).is_ok()})
 }
-const ATTRS: [&str; 17] = [
+fn revision(e: &SearchEntry) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(format!(
+            "{}:{}:{}",
+            e.dn,
+            attr(e, "uSNChanged"),
+            attr(e, "sAMAccountName")
+        ))
+    )
+}
+const ATTRS: [&str; 23] = [
     "objectGUID",
     "objectSid",
     "sAMAccountName",
@@ -116,6 +130,12 @@ const ATTRS: [&str; 17] = [
     "telephoneNumber",
     "company",
     "physicalDeliveryOfficeName",
+    "userPrincipalName",
+    "uSNChanged",
+    "pwdLastSet",
+    "primaryGroupID",
+    "memberOf",
+    "groupType",
 ];
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -175,7 +195,174 @@ pub struct Directory {
     pub ldap: Ldap,
     c: Config,
 }
+#[derive(Clone, serde::Serialize, Deserialize)]
+pub struct RenamePlan {
+    pub id: String,
+    pub group: bool,
+    pub old_name: String,
+    pub new_name: String,
+    pub old_upn: String,
+    pub new_upn: String,
+    pub before: Value,
+}
 impl Directory {
+    pub async fn rename_plan(
+        &mut self,
+        id: &str,
+        group: bool,
+        new_name: &str,
+        expected: &str,
+    ) -> Result<RenamePlan> {
+        name(new_name)?;
+        if group {
+            ensure!(
+                new_name.starts_with(&self.c.group_prefix),
+                "invalid group prefix"
+            );
+        }
+        let e = self.object(id, group).await?;
+        ensure!(revision(&e) == expected, "RENAME_CONFLICT");
+        let old_name = attr(&e, "sAMAccountName");
+        ensure!(old_name != new_name, "RENAME_UNCHANGED");
+        let old_upn = attr(&e, "userPrincipalName");
+        let suffix = if let Some((_, suffix)) = old_upn.rsplit_once('@') {
+            suffix.to_owned()
+        } else {
+            self.c
+                .base_dn
+                .split(',')
+                .map(|v| {
+                    v.trim()
+                        .split_once('=')
+                        .filter(|(key, _)| key.eq_ignore_ascii_case("dc"))
+                        .map(|(_, value)| value)
+                        .unwrap_or_default()
+                })
+                .collect::<Vec<_>>()
+                .join(".")
+                .to_lowercase()
+        };
+        let new_upn = if group {
+            String::new()
+        } else {
+            format!("{new_name}@{suffix}")
+        };
+        let filter = if group {
+            format!("(sAMAccountName={})", ldap3::ldap_escape(new_name))
+        } else {
+            format!(
+                "(|(sAMAccountName={})(userPrincipalName={}))",
+                ldap3::ldap_escape(new_name),
+                ldap3::ldap_escape(&new_upn)
+            )
+        };
+        ensure!(
+            self.entries(&self.c.base_dn.clone(), &filter)
+                .await?
+                .is_empty(),
+            "RENAME_NAME_EXISTS"
+        );
+        Ok(RenamePlan {
+            id: id.to_lowercase(),
+            group,
+            old_name,
+            new_name: new_name.to_owned(),
+            old_upn,
+            new_upn,
+            before: row(&e),
+        })
+    }
+    pub async fn apply_rename(&mut self, p: &RenamePlan, forward: bool) -> Result<Value> {
+        let e = self.object(&p.id, p.group).await?;
+        let (old, new, old_upn, new_upn) = if forward {
+            (&p.old_name, &p.new_name, &p.old_upn, &p.new_upn)
+        } else {
+            (&p.new_name, &p.old_name, &p.new_upn, &p.old_upn)
+        };
+        let current = row(&e);
+        // No password, flags, numeric identity, SID, membership or display attributes are written.
+        for key in [
+            "id",
+            "sid",
+            "dn",
+            "uidNumber",
+            "gidNumber",
+            "disabled",
+            "displayName",
+            "description",
+            "employeeId",
+            "email",
+            "department",
+            "title",
+            "phone",
+            "company",
+            "office",
+            "members",
+            "accountControl",
+            "passwordChangedAt",
+            "primaryGroupId",
+            "groupType",
+        ] {
+            ensure!(current[key] == p.before[key], "RENAME_CONFLICT");
+        }
+        if attr(&e, "sAMAccountName") == *new
+            && (p.group || attr(&e, "userPrincipalName") == *new_upn)
+        {
+            return Ok(current);
+        }
+        ensure!(
+            attr(&e, "sAMAccountName") == *old
+                && (p.group || attr(&e, "userPrincipalName") == *old_upn),
+            "RENAME_CONFLICT"
+        );
+        if forward {
+            ensure!(
+                current["revision"] == p.before["revision"],
+                "RENAME_CONFLICT"
+            );
+        }
+        let mut modifications = vec![
+            Mod::Delete("sAMAccountName", HashSet::from([old.as_str()])),
+            Mod::Add("sAMAccountName", HashSet::from([new.as_str()])),
+        ];
+        if !p.group {
+            if !old_upn.is_empty() {
+                modifications.push(Mod::Delete(
+                    "userPrincipalName",
+                    HashSet::from([old_upn.as_str()]),
+                ));
+            }
+            if !new_upn.is_empty() {
+                modifications.push(Mod::Add(
+                    "userPrincipalName",
+                    HashSet::from([new_upn.as_str()]),
+                ));
+            }
+        }
+        // GUID binding prevents a concurrent delete/recreate at the same DN from targeting another identity.
+        let bytes: Vec<u8> = (0..32)
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&p.id[i..i + 2], 16))
+            .collect::<std::result::Result<_, _>>()?;
+        let guid = uuid::Uuid::from_bytes_le(
+            bytes
+                .try_into()
+                .map_err(|_| anyhow!("invalid object GUID"))?,
+        );
+        check(
+            self.ldap
+                .modify(&format!("<GUID={guid}>"), modifications)
+                .await?,
+        )?;
+        let result = row(&self.object(&p.id, p.group).await?);
+        ensure!(
+            result["name"] == new.as_str()
+                && result["sid"] == p.before["sid"]
+                && result["dn"] == p.before["dn"],
+            "RENAME_CONFLICT"
+        );
+        Ok(result)
+    }
     pub async fn connect(c: &Config) -> Result<Self> {
         let mut roots = rustls::RootCertStore::empty();
         let pem = std::fs::read(&c.ldap_ca_file)?;

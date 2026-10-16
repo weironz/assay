@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
+import { Rename } from './Rename';
 import { Badge, DataTable, button, card, link, primary } from './components';
 import { employeeLabel, sameDn, type Group, type Workspace } from './types';
 
@@ -127,7 +128,7 @@ export function Groups({
           <h2 className="text-xl font-semibold">{group.name}</h2>
           <p className="mt-1 text-sm text-gray-500">{group.description}</p>
         </div>
-        <button
+        <div className="flex flex-wrap gap-2"><Rename kind="group" object={group} disabled={!editable||!snapshot.renameEnabled} confirm={confirm}/><button
           className={button}
           disabled={!editable}
           onClick={() =>
@@ -140,7 +141,7 @@ export function Groups({
           }
         >
           编辑用户组
-        </button>
+        </button></div>
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
         {[
@@ -304,7 +305,7 @@ export function Groups({
             {
               label: '目录名称',
               render: (s) => (
-                <Link className={link} to={`/samba/shares/${s.name}`}>
+                <Link className={link} to={`/samba/shares/${s.id || s.name}`}>
                   {s.name}
                 </Link>
               ),

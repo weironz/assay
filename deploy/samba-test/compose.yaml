@@ -5,7 +5,7 @@ services:
     pull_policy: never
     hostname: ad
     domainname: assay.test
-    dns: [172.30.225.10]
+    dns: ["${SAMBA_TEST_DIRECTORY_IP:-172.30.225.10}"]
     entrypoint: ["/usr/bin/samba", "--interactive", "--no-process-group"]
     restart: unless-stopped
     cap_add: [SYS_ADMIN]
@@ -30,7 +30,10 @@ services:
       retries: 15
     networks:
       directory:
-        ipv4_address: 172.30.225.10
+        ipv4_address: ${SAMBA_TEST_DIRECTORY_IP:-172.30.225.10}
+      # Docker's isolated networks do not publish ports; this exposes only the
+      # explicitly loopback-bound acceptance ports, never production SMB.
+      edge: {}
   agent:
     image: ${SAMBA_AGENT_IMAGE:-assay-samba-agent:test}
     # One process performs local share management and employee SMB transport.
@@ -50,6 +53,7 @@ services:
       - ./tls/ca.crt:/tls/ca.crt:ro
       - ./shares:/shares
       - ./managed:/managed
+      - ./ad-etc:/existing:ro
       - ./agent-state:/state
       - ./ad-run:/samba-run:ro
     depends_on:
@@ -133,6 +137,6 @@ networks:
   directory:
     internal: true
     ipam:
-      config: [{subnet: 172.30.225.0/24}]
+      config: [{subnet: "${SAMBA_TEST_DIRECTORY_SUBNET:-172.30.225.0/24}"}]
   management:
     internal: true

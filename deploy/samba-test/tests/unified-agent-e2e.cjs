@@ -26,7 +26,7 @@ async function command(action, args) {
   throw Error('QA management operation timed out');
 }
 const fileURL = path => origin + '/api/files/content?' + new URLSearchParams({ share: f.share, path });
-const normalize = rows => rows.map(row => ({ ...row, ...(row.members ? { members: [...row.members].sort() } : {}) })).sort((a, b) => (a.id || a.name).localeCompare(b.id || b.name));
+const normalize = rows => rows.map(({revision,...row}) => ({ ...row, ...(row.members ? { members: [...row.members].sort() } : {}) })).sort((a, b) => (a.id || a.name).localeCompare(b.id || b.name));
 (async () => {
   assert(f.ad_name.startsWith('qa_') && f.share.startsWith('qa_'));
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'], ...(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY, bypass: new URL(origin).hostname + ',localhost,127.0.0.1' } } : {}) });
@@ -43,7 +43,7 @@ const normalize = rows => rows.map(row => ({ ...row, ...(row.members ? { members
   await command('share.save', { ...shareArgs, comment: 'QA unified in-process configuration reload' });
   assert.equal((await api(admin, '/samba/snapshot')).shares.find(s => s.name === f.share).comment, 'QA unified in-process configuration reload');
   await command('share.save', shareArgs); restoreShare = false;
-  assert.deepEqual((await api(admin, '/samba/snapshot')).shares, original.shares);
+  assert.deepEqual(normalize((await api(admin, '/samba/snapshot')).shares), normalize(original.shares));
   pass('In-process local configuration writes and smbd reload work without a helper; original configuration is restored');
   const login = await api(employee, '/auth/sign-in/directory', 'POST', { username: f.ad_name, password: f.ad_password }); assert(login.filesConnected);
   await command('directory.create', { share: f.share, path: folder }); folderCreated = true;
@@ -63,7 +63,7 @@ const normalize = rows => rows.map(row => ({ ...row, ...(row.members ? { members
   await api(employee, '/files/commands', 'POST', { action: 'delete', share: f.share, path: file }, 201); fileCreated = false;
   await command('directory.delete', { share: f.share, path: folder }); folderCreated = false;
   const current = await api(admin, '/samba/snapshot');
-  assert.deepEqual(normalize(current.users), normalize(original.users)); assert.deepEqual(normalize(current.groups), normalize(original.groups)); assert.deepEqual(current.shares, original.shares);
+  assert.deepEqual(normalize(current.users), normalize(original.users)); assert.deepEqual(normalize(current.groups), normalize(original.groups)); assert.deepEqual(normalize(current.shares), normalize(original.shares));
   assert.equal((await api(admin, '/samba/acl?' + new URLSearchParams({ share: f.share, path: '' }))).revision, acl.revision);
   pass('QA files are removed; existing AD accounts, group membership, shares and root ACL stay unchanged');
   fs.writeFileSync(dir + '/unified-agent-result.json', JSON.stringify({ passed: results.length, results, completedAt: new Date().toISOString() }, null, 2), { mode: 0o600 });

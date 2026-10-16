@@ -1,6 +1,17 @@
 // Only fixed application messages are displayed. Protocol diagnostics never
 // become dialog content, including errors returned by an older/unknown agent.
 const messages: Record<string, string> = {
+  RENAME_INVALID_NAME:'名称参数无效，请使用 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线。',
+  RENAME_PROTECTED:'系统共享或打印机扫描入口受到保护，不能通过此操作改名。',
+  RENAME_CONFLICT:'资源或配置已被其他操作修改，请刷新后重新预检查。',
+  RENAME_NAME_EXISTS:'名称已被占用。AD 员工账号和用户组不能重名，共享名称也不能重复。',
+  RENAME_UNCHANGED:'新旧名称相同，请填写不同的新名称。',
+  RENAME_NOT_CONFIGURED:'当前部署尚未启用安全重命名，请由部署管理员完成升级配置。',
+  RENAME_OBJECT_NOT_FOUND:'原对象已不存在或不在管理范围内，请刷新列表。',
+  RENAME_CONFIG_INVALID:'Samba 配置验证失败，尚未执行重命名，请检查服务端操作记录。',
+  RENAME_CONNECTION_ACK_REQUIRED:'当前存在 SMB 连接，请重新预检查并确认连接影响。',
+  RENAME_RECOVERY_REQUIRED:'重命名结果需要恢复核对，已暂停进一步管理写入。请联系管理员查看恢复记录，不要重复提交。',
+  RENAME_ROLLED_BACK:'操作中断后已恢复原名称和配置，请刷新核对后重新操作。',
   SAMBA_GROUP_ACCOUNT_NAME_EXISTS: '名称已被员工账号占用；AD 账号与用户组不能重名，请使用其他组名。',
   AD_OBJECT_EXISTS: '名称或目录对象已在 AD 中被占用，请刷新核对并使用其他名称。',
   SAMBA_GROUP_NAME_PROTECTED: '该名称为系统保留名，请使用其他用户组名称。',

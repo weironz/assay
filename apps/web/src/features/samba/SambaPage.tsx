@@ -64,6 +64,9 @@ const states: Record<string, string> = {
   running: '执行中',
 };
 const actions: Record<string, string> = {
+  'user.rename':'重命名登录账号',
+  'group.rename':'重命名用户组',
+  'share.rename':'重命名共享',
   'user.create': '新增员工',
   'user.update': '编辑员工资料',
   'user.password': '重置 AD 密码',
@@ -224,7 +227,7 @@ export default function SambaPage() {
       ? snapshot?.users.find((u) => u.id === id)?.displayName
       : section === 'groups'
         ? snapshot?.groups.find((g) => g.id === id)?.name
-        : id;
+        : snapshot?.shares.find(s=>s.id===id||s.name===id)?.name || id;
   const workspace = snapshot
     ? {
         snapshot,

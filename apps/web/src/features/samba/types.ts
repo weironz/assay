@@ -1,4 +1,5 @@
 export type Employee = {
+  revision?: string;
   id: string;
   name: string;
   displayName: string;
@@ -15,6 +16,7 @@ export type Employee = {
   office: string;
 };
 export type Group = {
+  revision?: string;
   id: string;
   name: string;
   description: string;
@@ -23,6 +25,8 @@ export type Group = {
   manageable: boolean;
 };
 export type Share = {
+  id?: string;
+  revision?: string;
   name: string;
   comment: string;
   groups: string[];
@@ -37,6 +41,7 @@ export type Snapshot = {
   readOnly: boolean;
   domain: string;
   groupPrefix?: string;
+  renameEnabled?: boolean;
   users: Employee[];
   groups: Group[];
   shares: Share[];
