@@ -51,7 +51,7 @@ export function Groups({
                 title: '新增用户组',
                 action: 'group.create',
                 fields: [
-                  { name: 'name', label: '用户组名称' },
+                  { name: 'name', label: '用户组名称', maxLength: 48, hint: '名称按输入原样创建，不会自动添加前缀。使用 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线，系统保留名不可使用。' + (snapshot.groupPrefix ? ` 当前部署仍配置了 ${snapshot.groupPrefix} 前缀限制，需填写完整组名。` : '') },
                   { name: 'description', label: '说明' },
                 ],
                 values: { name: '', description: '' },

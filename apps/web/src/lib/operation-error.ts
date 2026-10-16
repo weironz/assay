@@ -1,6 +1,11 @@
 // Only fixed application messages are displayed. Protocol diagnostics never
 // become dialog content, including errors returned by an older/unknown agent.
 const messages: Record<string, string> = {
+  SAMBA_GROUP_NAME_PROTECTED: '该名称为系统保留名，请使用其他用户组名称。',
+  SAMBA_GROUP_NAME_INVALID: '完整组名需为 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线。',
+  SAMBA_GROUP_PREFIX_REQUIRED: '用户组名称不符合当前配置的前缀要求，请刷新页面确认最新命名规则后重新提交。',
+  SAMBA_GROUP_NAME_EXISTS: '用户组名称已存在，请刷新列表或使用其他名称。',
+  SAMBA_GROUP_POLICY_UNAVAILABLE: '无法读取用户组命名规则，请刷新页面或检查目录服务后重试。',
   AD_PASSWORD_COMPLEXITY: '新密码不符合公司 AD 的复杂度要求。请组合使用大小写字母、数字或符号，并避免包含账号或姓名。',
   AD_PASSWORD_HISTORY: '新密码与近期使用过的密码重复，请换一个未使用过的密码。',
   AD_PASSWORD_TOO_SHORT: '新密码长度不足，请按公司 AD 的最小密码长度要求设置。',

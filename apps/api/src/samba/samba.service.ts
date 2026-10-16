@@ -73,6 +73,13 @@ export class SambaService {
       if (!reconciled || reconciled.state !== 'succeeded') throw new ConflictException({ message: '先前操作未确认成功，请核对操作记录', operationId: requestId, state: reconciled?.state });
       return reconciled;
     }
+    // Check deployment policy only for new writes; successful request IDs remain replayable.
+    if (action === 'group.create') {
+      const policy = await this.agent('/v1/snapshot');
+      if (typeof policy.groupPrefix !== 'string' || !Array.isArray(policy.groups)) throw new ServiceUnavailableException({ code: 'SAMBA_GROUP_POLICY_UNAVAILABLE', message: '无法读取用户组命名规则' });
+      if (!(args.name as string).startsWith(policy.groupPrefix)) throw new BadRequestException({ code: 'SAMBA_GROUP_PREFIX_REQUIRED', message: '用户组名称不符合配置的前缀要求', groupPrefix: policy.groupPrefix });
+      if (policy.groups.some((group: { name: string }) => group.name.toLowerCase() === (args.name as string).toLowerCase())) throw new ConflictException({ code: 'SAMBA_GROUP_NAME_EXISTS', message: '用户组名称已存在' });
+    }
     try {
       await this.prisma.sambaOperation.create({ data: { id: requestId, actorId: user.id, actorName: user.name, action, requestHash: hash, metadata: metadata(args) as any } });
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('操作已提交，请查看操作记录'); throw e; }
@@ -92,10 +99,14 @@ export class SambaService {
     const { requestId, action, args } = parsed.data;
     const validated = actions[action].safeParse(args);
     if (!validated.success) {
+      if (action === 'group.create' && validated.error.issues.some(issue => issue.path[0] === 'name'))
+        throw new BadRequestException({ code: 'SAMBA_GROUP_NAME_INVALID', message: '完整组名需为 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线' });
       if (['user.create', 'user.password'].includes(action) && validated.error.issues.some(issue => issue.path[0] === 'password'))
         throw new BadRequestException('新的 AD 密码需为 8–512 个字符，且不能包含空字符。');
       throw new BadRequestException('操作参数无效');
     }
+    if (action === 'group.create' && ['administrator', 'krbtgt', 'guest', 'domain_admins', 'sysvol', 'netlogon'].includes((validated.data as { name: string }).name))
+      throw new BadRequestException({ code: 'SAMBA_GROUP_NAME_PROTECTED', message: '该名称为系统保留名，请使用其他用户组名称' });
     return this.submit(user, requestId, action, validated.data);
   }
   async bind(user: AuthUser, input: unknown) {

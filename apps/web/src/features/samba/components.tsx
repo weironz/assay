@@ -269,7 +269,7 @@ export function EditorDialog({
     };
   }, []);
   const update = (name: string, value: unknown) =>
-    setEditor({ ...editor, values: { ...editor.values, [name]: value } });
+    setEditor({ ...editor, error: undefined, values: { ...editor.values, [name]: value } });
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
       <section

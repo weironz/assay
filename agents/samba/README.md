@@ -27,7 +27,7 @@ docker build -t assay-samba-agent:0.1.0 agents/samba
 挂载 `/config/agent.json`，字段见 `src/config.rs` 和隔离测试的 `deploy/samba-test/setup.py`。生产凭据自行以文件挂载，不提交版本控制。
 
 - `ldap_url` 必须为 `ldaps://`，CA 与服务器名称/IP 必须匹配，不支持跳过校验。
-- `users_dn` 为员工 OU，`groups_dn` 为受管组 OU，均限定在 `base_dn` 内。
+- `users_dn` 为员工 OU，`groups_dn` 为受管组 OU，均限定在 `base_dn` 内。使用专用组 OU 时，默认 `group_prefix` 为空，组名按用户输入原样创建，不自动添加前缀；现有 `dept_*` 组无需重命名，受保护对象仍不可管理。
 - 若现有部门组位于 `CN=Users`，可配置 `groups_dn` 为该容器，并明确设置 `group_prefix`，例如 `dept_`，无需移动原组。其他前缀及内置/高权限对象不可管理。
 - `primary_gid` 按现有文件服务器的 RFC2307 规则配置。已有用户 UID/GID 不被修改；新用户 UID 由域内已有值扫描后分配。每个域使用一个写入 Agent，避免多个独立分配器竞争。
 - `shares_root` 是 Agent 本地共享挂载根；`samba_shares_root` 是同一存储在 Samba 内的绝对路径，默认 `/shares`，两者可不同。

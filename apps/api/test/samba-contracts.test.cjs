@@ -94,3 +94,42 @@ test('self-service password changes target only the caller binding and require t
   service.agent = async () => ({ domain: 'DC=example,DC=com', users: [{ id: link.adObjectId, disabled: false }] });
   await assert.rejects(service.selfPassword(user, body), e => e.getStatus() === 403);
 });
+
+test('new groups require the live Agent prefix and reject duplicate names before any write', async () => {
+  const previousSecret = process.env.AUTH_SECRET; process.env.AUTH_SECRET = 'test-only-group-request-hmac';
+  try {
+    const rows = new Map(), writes = [], reads = [];
+    const policy = { groupPrefix: 'dept_', groups: [{ name: 'dept_existing' }] };
+    const service = new SambaService({ sambaOperation: {
+      findUnique: async ({ where }) => rows.get(where.id) || null,
+      create: async ({ data }) => { rows.set(data.id, { ...data, state: 'pending' }); },
+      update: async ({ where, data }) => { const row = { ...rows.get(where.id), ...data }; rows.set(where.id, row); return row; },
+    } });
+    service.agent = async (path, body) => {
+      if (path === '/v1/snapshot') { reads.push(path); return policy; }
+      assert.equal(path, '/v1/commands'); writes.push(body); return { state: 'succeeded' };
+    };
+    const user = { id: 'group-manager', name: 'Manager' };
+    const command = name => ({ requestId: crypto.randomUUID(), action: 'group.create', args: { name, description: 'QA group' } });
+    for (const name of ['部门', 'dept bad', 'A'.repeat(49)]) await assert.rejects(service.command(user, command(name)), e => e.getStatus() === 400 && e.getResponse().code === 'SAMBA_GROUP_NAME_INVALID');
+    await assert.rejects(service.command(user, command('administrator')), e => e.getStatus() === 400 && e.getResponse().code === 'SAMBA_GROUP_NAME_PROTECTED');
+    assert.equal(reads.length, 0);
+    await assert.rejects(service.command(user, command('test')), e => e.getStatus() === 400 && e.getResponse().code === 'SAMBA_GROUP_PREFIX_REQUIRED');
+    await assert.rejects(service.command(user, command('dept_existing')), e => e.getStatus() === 409 && e.getResponse().code === 'SAMBA_GROUP_NAME_EXISTS');
+    assert.equal(writes.length, 0); assert.equal(rows.size, 0);
+    const request = command('dept_new');
+    const result = await service.command(user, request); assert.equal(result.state, 'succeeded');
+    assert.equal(writes.length, 1); assert.equal(writes[0].args.name, 'dept_new');
+    const readCount = reads.length;
+    policy.groupPrefix = 'new_'; policy.groups.push({ name: 'dept_new' });
+    assert.equal((await service.command(user, request)).state, 'succeeded');
+    assert.equal(writes.length, 1); assert.equal(reads.length, readCount, 'confirmed retries do not reapply a new prefix or reject their own created group');
+    await assert.rejects(service.command({ ...user, id: 'other' }, request), e => e.getStatus() === 409);
+    delete policy.groupPrefix;
+    await assert.rejects(service.command(user, command('new_team')), e => e.getStatus() === 503 && e.getResponse().code === 'SAMBA_GROUP_POLICY_UNAVAILABLE');
+    assert.equal(writes.length, 1);
+    policy.groupPrefix = ''; policy.groups = [];
+    assert.equal((await service.command(user, command('unprefixed'))).state, 'succeeded');
+    assert.equal(writes.length, 2);
+  } finally { if (previousSecret === undefined) delete process.env.AUTH_SECRET; else process.env.AUTH_SECRET = previousSecret; }
+});

@@ -18,7 +18,7 @@
   "users_dn": "OU=Employees,DC=ad,DC=example,DC=com",
   "groups_dn": "OU=Groups,DC=ad,DC=example,DC=com",
   "services_dn": "OU=Services,DC=ad,DC=example,DC=com",
-  "group_prefix": "dept_",
+  "group_prefix": "",
   "management_account": "svc_assay_agent",
   "directory_account": "svc_assay_read",
   "primary_gid": 31000,

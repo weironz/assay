@@ -36,6 +36,7 @@ export type Snapshot = {
   enabled: boolean;
   readOnly: boolean;
   domain: string;
+  groupPrefix?: string;
   users: Employee[];
   groups: Group[];
   shares: Share[];
