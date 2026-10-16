@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { Rename } from './Rename';
 import {
@@ -198,6 +198,8 @@ export function Shares({
       />
     );
   if (!share) return <p>目录不存在或不在管理范围内。</p>;
+  if (share.id && id !== share.id)
+    return <Navigate to={`/samba/shares/${share.id}`} replace />;
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-3">

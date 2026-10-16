@@ -150,8 +150,9 @@ async function rename(kind, row, name) {
       "/samba/" +
       { user: "users", group: "groups", share: "shares" }[kind] +
       "/" +
-      row.id,
+      (kind === "share" ? row.name : row.id),
   );
+  if (kind === "share") await page.waitForURL("**/samba/shares/" + row.id);
   const title = {
     user: "重命名登录账号",
     group: "重命名用户组",
