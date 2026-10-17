@@ -5,6 +5,7 @@ mod dns;
 mod files;
 mod inheritance;
 mod portal;
+mod recycle;
 mod rename;
 use anyhow::{Result, ensure};
 use axum::{
@@ -620,6 +621,12 @@ async fn main() -> Result<()> {
     let address = c.listen.clone();
     let router = router(c.clone())?;
     rename::recover(&c).await?;
+    // 内置回收站清理：随镜像分发，替代服务器侧脚本与 systemd 单元
+    if let Some(settings) = c.recycle.clone() {
+        if !c.read_only {
+            recycle::spawn(c.shares_root.clone(), settings);
+        }
+    }
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown())

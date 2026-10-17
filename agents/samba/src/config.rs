@@ -49,6 +49,10 @@ pub struct Config {
     // 状态文件（同一卷挂载），否则读取失败而不是返回过期数据。
     #[serde(default)]
     pub smb_status: Option<SmbStatus>,
+    // 可选：内置回收站清理。周期性删除各共享 .recycle 中超过保留期的
+    // 文件，随镜像分发，无需服务器侧脚本或 systemd 单元。
+    #[serde(default)]
+    pub recycle: Option<Recycle>,
     #[serde(default)]
     pub read_only: bool,
 }
@@ -58,6 +62,20 @@ pub struct SmbStatus {
     pub state_dir: PathBuf,
     pub cache_dir: PathBuf,
     pub private_dir: PathBuf,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Recycle {
+    #[serde(default = "recycle_retention_days")]
+    pub retention_days: u32,
+    #[serde(default = "recycle_every_hours")]
+    pub every_hours: u32,
+}
+fn recycle_retention_days() -> u32 {
+    30
+}
+fn recycle_every_hours() -> u32 {
+    24
 }
 fn registry_name() -> String {
     "assay-shares.json".into()
