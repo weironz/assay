@@ -114,16 +114,12 @@ fn decode_record(blob: &[u8]) -> Result<Value> {
             )
         }
         16 => {
-            let count = *data
-                .first()
-                .ok_or_else(|| anyhow!("malformed TXT record"))? as usize;
+            // ndr_dnsp.c encodes a sequence of length-prefixed strings until
+            // the record ends, with no list-count prefix.
             let mut parts = vec![];
-            let mut off = 1;
-            for _ in 0..count {
-                let len = *data
-                    .get(off)
-                    .ok_or_else(|| anyhow!("malformed TXT record"))?
-                    as usize;
+            let mut off = 0;
+            while off < data.len() {
+                let len = data[off] as usize;
                 off += 1;
                 let value = data
                     .get(off..off + len)
@@ -131,7 +127,7 @@ fn decode_record(blob: &[u8]) -> Result<Value> {
                 parts.push(String::from_utf8_lossy(value).to_string());
                 off += len;
             }
-            parts.join(" ")
+            parts.join("")
         }
         6 => {
             // Samba dnsp.idl: five big-endian integers, then two dnsp_name values.
@@ -354,6 +350,39 @@ mod tests {
         for len in 0..20 {
             assert!(decode_record(&record(6, &data[..len])).is_err());
         }
+    }
+    #[test]
+    fn names_mx_srv_txt_and_ipv6_match_samba_wire_records() {
+        for kind in [2, 5, 12] {
+            assert_eq!(
+                decode_record(&record(kind, &name("dc.example.test"))).unwrap()["data"],
+                "dc.example.test"
+            );
+        }
+        let mut mx = 10u16.to_be_bytes().to_vec();
+        mx.extend(name("mail.example.test"));
+        assert_eq!(
+            decode_record(&record(15, &mx)).unwrap()["data"],
+            "10 mail.example.test"
+        );
+        let mut srv = vec![];
+        for n in [0u16, 100, 389] {
+            srv.extend(n.to_be_bytes());
+        }
+        srv.extend(name("dc.example.test"));
+        assert_eq!(
+            decode_record(&record(33, &srv)).unwrap()["data"],
+            "0 100 389 dc.example.test"
+        );
+        assert_eq!(
+            decode_record(&record(16, b"\x03foo\x03bar")).unwrap()["data"],
+            "foobar"
+        );
+        assert_eq!(decode_record(&record(16, &[0])).unwrap()["data"], "");
+        assert!(decode_record(&record(16, b"\x04ab")).is_err());
+        let mut ipv6 = [0u8; 16];
+        ipv6[15] = 1;
+        assert_eq!(decode_record(&record(28, &ipv6)).unwrap()["data"], "::1");
     }
     #[test]
     fn malformed_records_are_rejected_without_panics() {
