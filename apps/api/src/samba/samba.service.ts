@@ -1,9 +1,10 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash, createHmac } from 'crypto';
+import { Prisma } from '@prisma/client';
 import { readFileSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
-import { actions, bindingSchema, commandSchema, directoryPath, metadata, selfPasswordSchema, renameSchema } from './contracts';
+import { actions, bindingSchema, bulkCreateSchema, commandSchema, directoryPath, metadata, selfPasswordSchema, renameSchema } from './contracts';
 import { normalizedDomainDN } from '../auth/directory-config';
 
 @Injectable()
@@ -19,8 +20,30 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
   }
   async renamePreview(input:unknown){const p=renameSchema.safeParse(input);if(!p.success)throw new BadRequestException({code:'RENAME_INVALID_NAME',message:'重命名参数无效，请核对名称并刷新后重试'});return this.agent('/v1/rename-preview',p.data)}
   private async invalidateRenameProfile(providerId:string,id:string){const {authRedis}=await import('../auth/auth-redis');await authRedis.del(`assay:directory:profile:${createHash('sha256').update(`${providerId}:${id}`).digest('hex')}`)}
-  private async recordResult(id:string,result:any){
-    const op=await this.prisma.sambaOperation.findUnique({where:{id}});
+  /** 审计哈希链的固定编号，串行化并发追加，保证链头读取不竞争 */
+  private static readonly CHAIN_LOCK_KEY = 918273645;
+  private chainHash(previous: string | null, id: string, requestHash: string) {
+    return createHash('sha256').update(`${previous ?? ''}|${id}|${requestHash}`).digest('hex');
+  }
+  /** 在事务内追加一条 SambaOperation 并接入哈希链 */
+  private async appendOperation(tx: Prisma.TransactionClient, data: { id: string; actorId: string; actorName: string; action: string; requestHash: string; metadata: any; state?: string }) {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SambaService.CHAIN_LOCK_KEY})`;
+    const last = await tx.sambaOperation.findFirst({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { chainHash: true } });
+    return tx.sambaOperation.create({ data: { ...data, chainHash: this.chainHash(last?.chainHash ?? null, data.id, data.requestHash) } });
+  }
+  /** 校验审计哈希链：返回首个断点。迁移前的旧行为 NULL，作为未入链前缀跳过 */
+  async audit() {
+    const rows = await this.prisma.sambaOperation.findMany({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, requestHash: true, chainHash: true } });
+    let previous = '';
+    let brokenAt: string | null = null;
+    for (const row of rows) {
+      if (row.chainHash === null) continue;
+      if (!brokenAt && row.chainHash !== this.chainHash(previous || null, row.id, row.requestHash)) brokenAt = row.id;
+      previous = row.chainHash;
+    }
+    return { total: rows.length, chained: rows.filter(r => r.chainHash !== null).length, valid: !brokenAt, brokenAt };
+  }
+  private async recordResult(id:string,result:any){    const op=await this.prisma.sambaOperation.findUnique({where:{id}});
     if(op && result.state==='succeeded' && ['user.rename','group.rename','share.rename'].includes(op.action)){
       const r=result.result;const expected=op.metadata as any;
       if(!r || r.id!==expected.id || r.newName!==expected.name || r.kind!==expected.kind)throw new ServiceUnavailableException('重命名结果需要人工核对');
@@ -77,6 +100,14 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     if (!parsed.success) throw new BadRequestException('目录参数无效');
     return this.agent(`/v1/${acl ? 'acl' : 'directories'}?${new URLSearchParams(parsed.data).toString()}`);
   }
+  async dns(zone?: string) {
+    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    return this.agent(zone ? `/v1/dns/records?zone=${encodeURIComponent(zone)}` : '/v1/dns/zones');
+  }
+  async sessions() {
+    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    return this.agent('/v1/sessions');
+  }
   async history() {
     return this.prisma.sambaOperation.findMany({ take: 100, orderBy: { createdAt: 'desc' }, select: { id: true, actorName: true, action: true, metadata: true, state: true, result: true, createdAt: true } });
   }
@@ -116,7 +147,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
       if (policy.groups.some((group: { name: string }) => group.name.toLowerCase() === (args.name as string).toLowerCase())) throw new ConflictException({ code: 'SAMBA_GROUP_NAME_EXISTS', message: '用户组名称已存在' });
     }
     try {
-      await this.prisma.sambaOperation.create({ data: { id: requestId, actorId: user.id, actorName: user.name, action, requestHash: hash, metadata: metadata(args) as any } });
+      await this.prisma.$transaction(tx => this.appendOperation(tx, { id: requestId, actorId: user.id, actorName: user.name, action, requestHash: hash, metadata: metadata(args) as any }));
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('操作已提交，请查看操作记录'); throw e; }
     let result: any;
     try { result = await this.agent('/v1/commands', { request_id: requestId, action, args }); }
@@ -127,6 +158,23 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     const op = await this.recordResult(requestId,result);
     if (!['succeeded', 'queued', 'running'].includes(result.state)) throw new BadRequestException({ message: result.error || '操作未完成', code: result.error_code, operationId: requestId, state: result.state });
     return op;
+  }
+  /** 批量开户：逐行复用单条 command 流程，每行独立幂等键与审计记录，互不阻断 */
+  async bulkCreate(user: AuthUser, input: unknown) {
+    const p = bulkCreateSchema.safeParse(input);
+    if (!p.success) throw new BadRequestException('批量导入参数无效（1–100 行，登录账号不能重复）');
+    const results: { row: string; operationId: string; state: string; ok: boolean; error?: string }[] = [];
+    for (const row of p.data.rows) {
+      const requestId = crypto.randomUUID();
+      try {
+        const op = await this.command(user, { requestId, action: 'user.create', args: row });
+        results.push({ row: row.name, operationId: requestId, state: op.state, ok: ['succeeded', 'queued', 'running'].includes(op.state) });
+      } catch (e: any) {
+        const message = e?.response?.message ?? e?.response?.data?.message ?? e?.message ?? '创建失败';
+        results.push({ row: row.name, operationId: requestId, state: 'failed', ok: false, error: Array.isArray(message) ? message.join('；') : typeof message === 'string' ? message : JSON.stringify(message) });
+      }
+    }
+    return { total: results.length, created: results.filter(r => r.ok).length, results };
   }
   async command(user: AuthUser, input: unknown) {
     const parsed = commandSchema.safeParse(input);
@@ -165,7 +213,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
         }
         if (identity) await tx.sambaIdentity.upsert({ where: { userId: p.data.userId }, create: { userId: p.data.userId, ...identity }, update: identity });
         else await tx.sambaIdentity.deleteMany({ where: { userId: p.data.userId } });
-        await tx.sambaOperation.create({ data: { id: crypto.randomUUID(), actorId: user.id, actorName: user.name, action: identity ? 'identity.bind' : 'identity.unbind', requestHash: '-', state: 'succeeded', metadata: { userId: p.data.userId, adObjectId: p.data.adObjectId } } });
+        await this.appendOperation(tx, { id: crypto.randomUUID(), actorId: user.id, actorName: user.name, action: identity ? 'identity.bind' : 'identity.unbind', requestHash: '-', state: 'succeeded', metadata: { userId: p.data.userId, adObjectId: p.data.adObjectId } });
         return { linked: !!identity };
       });
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('AD 账号已绑定其他 Assay 用户'); throw e; }

@@ -17,7 +17,7 @@ export interface ImportSheet {
   name: string;
   rows: Record<string, string>[];
 }
-function csvRows(text: string): string[][] {
+export function csvRows(text: string): string[][] {
   const rows: string[][] = [];
   let row: string[] = [],
     cell = '',
@@ -45,7 +45,7 @@ function csvRows(text: string): string[][] {
   if (row.some((v) => v.trim())) rows.push(row);
   return rows;
 }
-function zipBounds(buffer: ArrayBuffer) {
+export function zipBounds(buffer: ArrayBuffer) {
   const view = new DataView(buffer);
   let end = -1;
   for (
@@ -78,7 +78,7 @@ function zipBounds(buffer: ArrayBuffer) {
       view.getUint16(offset + 32, true);
   }
 }
-function records(rows: string[][]): Record<string, string>[] {
+export function records(rows: string[][]): Record<string, string>[] {
   const headers = rows[0]?.map((h) => h.replace(/^\uFEFF/, '').trim()) ?? [];
   return rows
     .slice(1)

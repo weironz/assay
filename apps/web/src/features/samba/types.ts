@@ -4,6 +4,10 @@ export type Employee = {
   name: string;
   displayName: string;
   disabled: boolean;
+  locked?: boolean;
+  badPasswords?: number;
+  lastLogonAt?: number | null;
+  passwordExpiresAt?: number | null;
   dn: string;
   sid: string;
   manageable: boolean;
@@ -42,12 +46,23 @@ export type Snapshot = {
   domain: string;
   groupPrefix?: string;
   renameEnabled?: boolean;
+  policy?: Record<string, string>;
   users: Employee[];
   groups: Group[];
   shares: Share[];
   bindings: { userId: string; adObjectId: string; accountName: string; directoryManaged?: boolean }[];
   assayUsers: { id: string; name: string; email: string }[];
 };
+/** 负 FILETIME 间隔（100ns 单位）转天数；0、正数或超长哨兵值（INT64_MIN）表示未启用 */
+export const filetimeDays = (v?: string) => {
+  const n = Number(v ?? 0);
+  if (n >= 0) return null;
+  const days = Math.round(-n / 10_000_000 / 86400);
+  // 超过 10 年视为未启用：Windows/Samba 用 INT64_MIN 哨兵表示"永不过期"
+  return days > 3650 ? null : days;
+};
+export const formatTime = (ms?: number | null) =>
+  ms && ms > 0 ? new Date(ms).toLocaleString() : '—';
 export type Acl = {
   revision: string;
   protected: boolean;
@@ -90,6 +105,7 @@ export type Workspace = {
     action: string,
     args: unknown,
     onSuccess?: () => void,
+    preview?: [string, string][],
   ) => void;
 };
 export const sameDn = (a: string, b: string) =>

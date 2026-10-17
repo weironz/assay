@@ -84,8 +84,16 @@ export function Shares({
     };
   }, [id, path, share?.active, refresh]);
   const removeDirectory = () => {
-    confirm('删除空目录', 'directory.delete', { share: share?.name, path }, () =>
-      setPath(path.split('/').slice(0, -1).join('/')),
+    confirm(
+      '删除空目录',
+      'directory.delete',
+      { share: share?.name, path },
+      () => setPath(path.split('/').slice(0, -1).join('/')),
+      [
+        ['共享目录', share?.name || ''],
+        ['删除路径', path],
+        ['前置条件', '仅允许删除空目录；目录内还有文件或子目录时会被拒绝'],
+      ],
     );
   };
   const edit = (s?: Share) =>
@@ -223,7 +231,11 @@ export function Shares({
               onClick={() =>
                 confirm('移除共享（保留目录和文件）', 'share.remove', {
                   name: share.name,
-                })
+                }, undefined, [
+                  ['共享目录', share.name],
+                  ['授权用户组', share.groups.length ? share.groups.join('、') : '无'],
+                  ['影响', '停止共享发布；目录与文件全部保留，重新创建同名共享可恢复访问'],
+                ])
               }
             >
               移除共享

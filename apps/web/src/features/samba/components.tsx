@@ -20,13 +20,15 @@ export const link =
 export function Badge({
   children,
   muted = false,
+  danger = false,
 }: {
   children: ReactNode;
   muted?: boolean;
+  danger?: boolean;
 }) {
   return (
     <span
-      className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${muted ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300'}`}
+      className={`inline-flex rounded-md px-2 py-1 text-xs font-medium ${danger ? 'bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300' : muted ? 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400' : 'bg-brand-50 text-brand-800 dark:bg-brand-950 dark:text-brand-300'}`}
     >
       {children}
     </span>

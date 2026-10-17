@@ -451,46 +451,50 @@ export default function FilesPage() {
     blocked: false,
   }));
   const serviceUnavailable = (
-    <section className={card + " max-w-lg space-y-4 p-6"}>
-      <h2 className="font-semibold">文件服务暂不可用</h2>
-      <p className="text-sm text-gray-500">
-        请稍后重试，你仍可使用其他业务模块。
-      </p>
-      <button
-        className={button}
-        disabled={busy || checkingStatus}
-        onClick={() => {
-          if (companyMode && directoryFilesReady === false) void companyLogin();
-          else void refreshStatus();
-        }}
-      >
-        重试
-      </button>
-    </section>
+    <div className="flex justify-center py-8">
+      <section className={card + " w-full max-w-lg space-y-4 p-8 text-center"}>
+        <h2 className="font-semibold">文件服务暂不可用</h2>
+        <p className="text-sm text-gray-500">
+          请稍后重试，你仍可使用其他业务模块。
+        </p>
+        <button
+          className={button}
+          disabled={busy || checkingStatus}
+          onClick={() => {
+            if (companyMode && directoryFilesReady === false) void companyLogin();
+            else void refreshStatus();
+          }}
+        >
+          重试
+        </button>
+      </section>
+    </div>
   );
   const verificationForm = (
-    <form onSubmit={verify} className={card + " max-w-lg space-y-4 p-6"}>
-      <h2 className="font-semibold">验证自己的 AD 密码</h2>
-      <p className="text-sm text-gray-500">
-        连接后随当前 Assay 登录保留。AD 密码不写入数据库或日志。
-      </p>
-      <label className="block space-y-2 text-sm">
-        <span>AD 密码</span>
-        <input
-          className={input}
-          type="password"
-          autoComplete="current-password"
-          value={password}
-          maxLength={512}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-          disabled={busy}
-        />
-      </label>
-      <button className={primary} disabled={busy}>
-        {busy ? "正在验证…" : "验证并打开文件"}
-      </button>
-    </form>
+    <div className="flex justify-center py-8">
+      <form onSubmit={verify} className={card + " w-full max-w-lg space-y-4 p-8"}>
+        <h2 className="font-semibold">验证自己的 AD 密码</h2>
+        <p className="text-sm text-gray-500">
+          连接后随当前 Assay 登录保留。AD 密码不写入数据库或日志。
+        </p>
+        <label className="block space-y-2 text-sm">
+          <span>AD 密码</span>
+          <input
+            className={input}
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            maxLength={512}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            disabled={busy}
+          />
+        </label>
+        <button className={primary + " w-full"} disabled={busy}>
+          {busy ? "正在验证…" : "验证并打开文件"}
+        </button>
+      </form>
+    </div>
   );
   return (
     <div className="mx-auto max-w-[1500px] space-y-6">
@@ -524,7 +528,10 @@ export default function FilesPage() {
         </p>
       )}
       {notice && (
-        <p role="status" className="text-sm text-green-700 dark:text-green-300">
+        <p
+          role="status"
+          className="rounded-lg bg-green-50 p-3 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-300"
+        >
           {notice}
         </p>
       )}
@@ -623,6 +630,16 @@ export default function FilesPage() {
                   </span>
                 ))}
             </nav>
+            <span
+              aria-live="polite"
+              className="ml-auto shrink-0 text-xs text-gray-500"
+            >
+              {loading
+                ? "正在读取目录…"
+                : share
+                  ? `共 ${entries.length} 项`
+                  : `可访问共享 ${sharedDirectories.length} 个`}
+            </span>
           </div>
           <UploadPanel tasks={transfers} queue={queue} />
           {batchResults.length > 0 && (
@@ -631,12 +648,14 @@ export default function FilesPage() {
               className={card + " p-4 text-sm"}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <h2 className="font-semibold">
-                  批量操作结果：
-                  {batchResults.filter((r) => r.state === "done").length}{" "}
-                  项成功，
-                  {batchResults.filter((r) => r.state !== "done").length}{" "}
-                  项失败或未执行
+                <h2 className="flex flex-wrap items-center gap-2 font-semibold">
+                  批量操作结果
+                  <Badge>{batchResults.filter((r) => r.state === "done").length} 项成功</Badge>
+                  {batchResults.some((r) => r.state !== "done") && (
+                    <Badge danger>
+                      {batchResults.filter((r) => r.state !== "done").length} 项失败或未执行
+                    </Badge>
+                  )}
                 </h2>
                 <button
                   className={button}
@@ -646,7 +665,7 @@ export default function FilesPage() {
                   清除结果
                 </button>
               </div>
-              <ul className="mt-2 max-h-48 space-y-2 overflow-y-auto break-words">
+              <ul className="mt-3 max-h-48 space-y-2 overflow-y-auto break-words rounded-lg bg-gray-50 p-3 dark:bg-gray-950/40">
                 {batchResults.map((r) => (
                   <li
                     key={r.name}
@@ -656,7 +675,8 @@ export default function FilesPage() {
                         : "text-red-600 dark:text-red-400"
                     }
                   >
-                    {r.name} · {r.state === "done" ? "已完成" : r.message}
+                    {r.state === "done" ? "✓" : "✕"} {r.name}
+                    {r.state !== "done" && r.message ? ` · ${r.message}` : ""}
                   </li>
                 ))}
               </ul>

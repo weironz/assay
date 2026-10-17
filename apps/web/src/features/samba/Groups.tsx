@@ -181,6 +181,12 @@ export function Groups({
                     `移出 ${selectedIds.length} 名组成员`,
                     'group.members',
                     { group_id: group.id, user_ids: selectedIds, add: false },
+                    undefined,
+                    [
+                      ['用户组', group.name],
+                      ['移出成员', `${selectedIds.length} 名`],
+                      ['影响', '被移出成员将失去该组授予的共享目录与文件权限'],
+                    ],
                   )
                 }
               >
@@ -280,6 +286,11 @@ export function Groups({
                           user_ids: [m.user!.id],
                           add: false,
                         },
+                        undefined,
+                        [
+                          ['用户组', group.name],
+                          ['移出成员', `${m.user!.displayName || m.user!.name}（${m.user!.name}）`],
+                        ],
                       )
                     }
                   >
@@ -334,7 +345,10 @@ export function Groups({
           disabled={!editable || !!reason}
           title={reason || undefined}
           onClick={() =>
-            confirm('删除空用户组', 'group.delete', { id: group.id })
+            confirm('删除空用户组', 'group.delete', { id: group.id }, undefined, [
+              ['用户组', `${group.name}${group.description ? `（${group.description}）` : ''}`],
+              ['前置条件', '仅允许删除没有任何成员的用户组'],
+            ])
           }
         >
           删除用户组

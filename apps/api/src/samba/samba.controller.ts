@@ -15,9 +15,15 @@ export class SambaController {
   @Get('directories') @RequirePermissions('samba:read') directories(@Query() q: unknown) { return this.samba.directories(q); }
   @Get('acl') @RequirePermissions('samba:read') acl(@Query() q: unknown) { return this.samba.directories(q, true); }
   @Get('operations') @RequirePermissions('samba:read') history() { return this.samba.history(); }
+  @Get('audit') @RequirePermissions('samba:read') audit() { return this.samba.audit(); }
+  @Get('dns') @RequirePermissions('samba:read') dns(@Query('zone') zone?: string) { return this.samba.dns(zone); }
+  @Get('sessions') @RequirePermissions('samba:read') sessions() { return this.samba.sessions(); }
   @Get('operations/:id') @RequirePermissions('samba:read') operation(@Param('id') id: string) { return this.samba.operation(id); }
   @Post('commands') @RequirePermissions('samba:manage') async command(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
     await this.stepUp.consume(req, user, 'samba'); return this.samba.command(user, body);
+  }
+  @Post('users/bulk') @RequirePermissions('samba:manage') async bulk(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
+    await this.stepUp.consume(req, user, 'samba'); return this.samba.bulkCreate(user, body);
   }
   @Post('bindings') @RequirePermissions('samba:manage') async bind(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
     await this.stepUp.consume(req, user, 'samba'); return this.samba.bind(user, body);

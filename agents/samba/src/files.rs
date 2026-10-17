@@ -120,8 +120,12 @@ pub(crate) fn render(c: &Config, shares: &[Share]) -> Result<String> {
             .join(" ");
         let relative = if s.path.is_empty() { &s.name } else { &s.path };
         components(relative)?;
+        // access based share enum：无权限用户在枚举中看不到该共享；
+        // hide unreadable：目录内不可读条目对无权用户隐藏（ABE）。
+        // vfs_recycle：删除进入共享根下隐藏的 .recycle 目录，保留目录结构
+        // 与历史版本，由运维侧定期清理（见部署文档），不随共享移除删除。
         out += &format!(
-            "\n[{}]\n    path = {}/{}\n    comment = {}\n    browseable = {}\n    read only = {}\n    valid users = \"{}\" {}\n    admin users = \"{}\"\n    vfs objects = acl_xattr\n    acl_xattr:ignore system acls = yes\n    map acl inherit = yes\n    inherit acls = yes\n    wide links = no\n",
+            "\n[{}]\n    path = {}/{}\n    comment = {}\n    browseable = {}\n    read only = {}\n    valid users = \"{}\" {}\n    admin users = \"{}\"\n    vfs objects = acl_xattr recycle\n    acl_xattr:ignore system acls = yes\n    map acl inherit = yes\n    inherit acls = yes\n    wide links = no\n    access based share enum = yes\n    hide unreadable = yes\n    recycle:repository = .recycle\n    recycle:keeptree = yes\n    recycle:versions = yes\n    recycle:maxsize = 0\n",
             s.name,
             c.samba_shares_root.display(),
             relative,

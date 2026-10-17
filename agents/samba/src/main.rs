@@ -1,6 +1,7 @@
 mod acl;
 mod ad;
 mod config;
+mod dns;
 mod files;
 mod inheritance;
 mod portal;
@@ -180,6 +181,68 @@ async fn rename_preview(State(a): State<App>, Json(input): Json<rename::Request>
     let _guard = a.lock.lock().await;
     reply(rename::preview(&a.c, &input).await)
 }
+/// 只读会话可见性：smbstatus 以固定 argv 运行，无任何请求可控参数。
+/// 状态目录由部署在 agent.json 中显式配置，须与 smbd 共享同一卷。
+async fn sessions(State(a): State<App>) -> Response {
+    let result = async {
+        let s = a
+            .c
+            .smb_status
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("smbstatus is not configured for this deployment"))?;
+        // smbd 的锁/连接数据库位于 state 目录的 lock 子目录；msg.lock 等运行
+        // 期文件也随 lock directory 解析，因此把四类路径都指到挂载目录，
+        // 避免 smbstatus 在只读根文件系统的编译期默认路径上创建文件。
+        let lock = s.state_dir.join("lock");
+        let conf = format!(
+            "[global]\n\tlock directory = {}\n\tstate directory = {}\n\tcache directory = {}\n\tprivate directory = {}\n",
+            lock.display(),
+            s.state_dir.display(),
+            lock.display(),
+            s.private_dir.display()
+        );
+        let conf_path = a.c.state_dir.join("smbstatus.conf");
+        tokio::fs::write(&conf_path, conf).await?;
+        let output = tokio::process::Command::new("/usr/bin/smbstatus")
+            .arg("-s")
+            .arg(&conf_path)
+            .arg("--json")
+            .output()
+            .await?;
+        ensure!(
+            output.status.success(),
+            "smbstatus exited with {}",
+            output.status
+        );
+        Ok::<_, anyhow::Error>(serde_json::from_slice::<Value>(&output.stdout)?)
+    }
+    .await;
+    reply(result)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zone {
+    zone: String,
+}
+/// 会话可见性路由见 sessions；DNS 为只读视图（zones / records）
+async fn dns_zones(State(a): State<App>) -> Response {
+    let _lock = a.lock.lock().await;
+    let result = async {
+        let mut d = ad::Directory::connect(&a.c).await?;
+        dns::zones(&mut d).await
+    }
+    .await;
+    reply(result)
+}
+async fn dns_records(State(a): State<App>, Query(q): Query<Zone>) -> Response {
+    let _lock = a.lock.lock().await;
+    let result = async {
+        let mut d = ad::Directory::connect(&a.c).await?;
+        dns::records(&mut d, &q.zone).await
+    }
+    .await;
+    reply(result)
+}
 async fn execute(a: &App, cmd: &Command) -> Result<Value> {
     ensure!(!a.c.read_only, "agent is read-only");
     rename::idle(&a.c)?;
@@ -209,6 +272,10 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         "user.password" => {
             let x: Reset = parse(cmd.args.clone())?;
             d.reset_password(&x.id, &x.password).await
+        }
+        "user.unlock" => {
+            let x: Id = parse(cmd.args.clone())?;
+            d.unlock(&x.id).await
         }
         "user.change_password" => {
             let x: Change = parse(cmd.args.clone())?;
@@ -467,6 +534,8 @@ fn safe_error(e: &anyhow::Error) -> String {
             "existing directory",
             "remove group",
             "configured process",
+            "smbstatus",
+            "no DNS zones",
             "null ACL",
             "password must",
             "request ID",
@@ -589,6 +658,9 @@ fn router(c: Config) -> Result<Router> {
     let private = Router::new()
         .route("/v1/snapshot", get(snapshot))
         .route("/v1/rename-preview", post(rename_preview))
+        .route("/v1/sessions", get(sessions))
+        .route("/v1/dns/zones", get(dns_zones))
+        .route("/v1/dns/records", get(dns_records))
         .route("/v1/directories", get(directories))
         .route("/v1/acl", get(permissions))
         .route("/v1/commands", post(command))

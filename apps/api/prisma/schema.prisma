@@ -397,6 +397,10 @@ model Ticket {
   @@index([status])
   @@index([assigneeId])
   @@index([queueId])
+  // 列表页的典型组合：按队列/处理人筛状态、按创建时间倒序翻页。
+  // 单列索引只能服务一个维度，组合查询需逐行回表过滤。
+  @@index([queueId, status, createdAt])
+  @@index([assigneeId, status, createdAt])
   @@map("tickets")
 }
 
@@ -433,7 +437,8 @@ model TicketMessage {
   attachments TicketAttachment[]
   mentions    TicketMessageMention[]
 
-  @@index([ticketId])
+  // 复合索引覆盖「工单内消息按时间排序」；纯 ticketId 前缀查询同样命中
+  @@index([ticketId, createdAt])
   @@map("ticket_messages")
 }
 
@@ -796,6 +801,9 @@ model SambaOperation {
   metadata    Json
   state       String @default("pending")
   result      Json?
+  // 追加式审计哈希链：sha256(上一条 chainHash | 本条 id | 本条 requestHash)。
+  // 检测对历史行的篡改/插入/删除；尾行截断需靠离线导出日志发现。
+  chainHash   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@index([createdAt])

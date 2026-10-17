@@ -45,8 +45,19 @@ pub struct Config {
     // Explicit deployment opt-in: fixed validator and read-only Samba config view.
     #[serde(default)]
     pub rename: Option<crate::rename::Settings>,
+    // 可选：会话可见性（smbstatus 只读探测）。目录必须与 smbd 指向同一套
+    // 状态文件（同一卷挂载），否则读取失败而不是返回过期数据。
+    #[serde(default)]
+    pub smb_status: Option<SmbStatus>,
     #[serde(default)]
     pub read_only: bool,
+}
+#[derive(Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SmbStatus {
+    pub state_dir: PathBuf,
+    pub cache_dir: PathBuf,
+    pub private_dir: PathBuf,
 }
 fn registry_name() -> String {
     "assay-shares.json".into()
@@ -125,6 +136,11 @@ impl Config {
                 !fs::symlink_metadata(p)?.file_type().is_symlink(),
                 "symlink root rejected"
             );
+        }
+        if let Some(s) = &c.smb_status {
+            for p in [&s.state_dir, &s.cache_dir, &s.private_dir] {
+                ensure!(p.is_absolute(), "absolute smbstatus directories required");
+            }
         }
         Ok(c)
     }

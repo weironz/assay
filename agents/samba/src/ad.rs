@@ -94,12 +94,23 @@ fn row(e: &SearchEntry) -> Value {
         "sid": raw(e,"objectSid").map(|x|sid(&x)).unwrap_or_default(),
         "revision":revision(e),"upn":attr(e,"userPrincipalName"),"uidNumber":attr(e,"uidNumber"),"gidNumber":attr(e,"gidNumber"),
         "accountControl":attr(e,"userAccountControl"),"passwordChangedAt":attr(e,"pwdLastSet"),"primaryGroupId":attr(e,"primaryGroupID"),"groupType":attr(e,"groupType"),
+        "locked":attr(e,"lockoutTime").parse::<i64>().unwrap_or(0) > 0,
+        "badPasswords":attr(e,"badPwdCount").parse::<u32>().unwrap_or(0),
+        "lastLogonAt":ft_ms(attr(e,"lastLogonTimestamp").parse::<i64>().unwrap_or(0)),
         "name": attr(e,"sAMAccountName"), "displayName": attr(e,"displayName"), "description": attr(e,"description"),
-        "disabled": attr(e,"userAccountControl").parse::<u32>().unwrap_or(0) & 2 != 0,
+        "disabled":attr(e,"userAccountControl").parse::<u32>().unwrap_or(0) & 2 != 0,
         "members": e.attrs.get("member").cloned().unwrap_or_default(), "dn":e.dn,
         "employeeId":attr(e,"employeeID"),"email":attr(e,"mail"),"department":attr(e,"department"),
         "title":attr(e,"title"),"phone":attr(e,"telephoneNumber"),"company":attr(e,"company"),"office":attr(e,"physicalDeliveryOfficeName"),
         "manageable":attr(e,"adminCount")!="1" && name(&attr(e,"sAMAccountName")).is_ok()})
+}
+/// Windows FILETIME（1601 纪元、100ns 单位）转 unix 毫秒；非正值为"无"。
+fn ft_ms(v: i64) -> Value {
+    if v <= 0 {
+        Value::Null
+    } else {
+        json!(v / 10_000 - 11_644_473_600_000)
+    }
 }
 fn revision(e: &SearchEntry) -> String {
     format!(
@@ -112,7 +123,7 @@ fn revision(e: &SearchEntry) -> String {
         ))
     )
 }
-const ATTRS: [&str; 23] = [
+const ATTRS: [&str; 26] = [
     "objectGUID",
     "objectSid",
     "sAMAccountName",
@@ -136,6 +147,9 @@ const ATTRS: [&str; 23] = [
     "primaryGroupID",
     "memberOf",
     "groupType",
+    "lockoutTime",
+    "badPwdCount",
+    "lastLogonTimestamp",
 ];
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -206,6 +220,9 @@ pub struct RenamePlan {
     pub before: Value,
 }
 impl Directory {
+    pub fn base(&self) -> &str {
+        &self.c.base_dn
+    }
     pub async fn rename_plan(
         &mut self,
         id: &str,
@@ -394,13 +411,90 @@ impl Directory {
         check(r)?;
         Ok(rows.into_iter().map(SearchEntry::construct).collect())
     }
+    pub async fn unlock(&mut self, id: &str) -> Result<Value> {
+        let e = self.object(id, false).await?;
+        // lockoutTime=0 是 AD 的标准解锁写法；对未锁定账号执行是幂等的。
+        check(
+            self.ldap
+                .modify(
+                    &e.dn,
+                    vec![Mod::Replace("lockoutTime", HashSet::from(["0"]))],
+                )
+                .await?,
+        )?;
+        Ok(row(&self.object(id, false).await?))
+    }
+    /// 域级密码/锁定策略（domainDNS 根对象属性）。时间间隔属性是负 FILETIME。
+    pub async fn domain_policy(&mut self) -> Result<Value> {
+        let (rows, r) = self
+            .ldap
+            .search(
+                &self.c.base_dn.clone(),
+                Scope::Base,
+                "(objectClass=*)",
+                vec![
+                    "maxPwdAge",
+                    "minPwdAge",
+                    "lockoutDuration",
+                    "lockOutObservationWindow",
+                    "lockoutThreshold",
+                    "minPwdLength",
+                    "pwdHistoryLength",
+                    "pwdProperties",
+                ],
+            )
+            .await?
+            .success()?;
+        check(r)?;
+        let e = rows
+            .into_iter()
+            .next()
+            .map(SearchEntry::construct)
+            .ok_or_else(|| anyhow!("domain policy not found"))?;
+        Ok(json!({
+            "maxPwdAge":attr(&e,"maxPwdAge"),"minPwdAge":attr(&e,"minPwdAge"),
+            "lockoutDuration":attr(&e,"lockoutDuration"),"lockoutObservationWindow":attr(&e,"lockOutObservationWindow"),
+            "lockoutThreshold":attr(&e,"lockoutThreshold"),"minPwdLength":attr(&e,"minPwdLength"),
+            "pwdHistoryLength":attr(&e,"pwdHistoryLength"),"pwdProperties":attr(&e,"pwdProperties")
+        }))
+    }
     pub async fn snapshot(&mut self) -> Result<Value> {
+        let policy = self.domain_policy().await?;
+        // 密码到期 = pwdLastSet + maxPwdAge（maxPwdAge 为 0 或缺失表示永不过期）
+        let max_age = policy["maxPwdAge"]
+            .as_str()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(0);
+        let expire = |e: &SearchEntry| -> Value {
+            let flags = attr(e, "userAccountControl").parse::<u32>().unwrap_or(0);
+            let set = attr(e, "pwdLastSet").parse::<i64>().unwrap_or(0);
+            // 永不过期：账号带 DONT_EXPIRE_PASSWORD（0x10000）标志、策略未启用
+            // （maxPwdAge>=0，含 0），或 INT64_MIN 哨兵值；pwdLastSet=0/1（必须
+            // 改密/从未设置）没有可信到期时刻
+            if flags & 0x10000 != 0
+                || max_age >= 0
+                || max_age == i64::MIN
+                || set <= 1
+            {
+                Value::Null
+            } else {
+                json!((set + max_age) / 10_000 - 11_644_473_600_000)
+            }
+        };
         let users = self
             .entries(
                 &self.c.users_dn.clone(),
                 "(&(objectClass=user)(!(objectClass=computer)))",
             )
             .await?;
+        let users: Vec<Value> = users
+            .iter()
+            .map(|e| {
+                let mut value = row(e);
+                value["passwordExpiresAt"] = expire(e);
+                value
+            })
+            .collect();
         let group_filter = format!(
             "(&(objectClass=group)(sAMAccountName={}*))",
             ldap3::ldap_escape(&self.c.group_prefix)
@@ -420,7 +514,7 @@ impl Directory {
             })
             .collect::<Vec<_>>();
         Ok(
-            json!({"users":users.iter().map(row).collect::<Vec<_>>(),"groups":groups,"groupPrefix":self.c.group_prefix}),
+            json!({"users":users,"groups":groups,"groupPrefix":self.c.group_prefix,"policy":policy}),
         )
     }
     pub async fn object(&mut self, id: &str, group: bool) -> Result<SearchEntry> {

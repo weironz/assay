@@ -13,6 +13,7 @@ import {
 } from './components';
 import {
   employeeProfileValues,
+  formatTime,
   profileFields,
   sameDn,
   type Employee,
@@ -71,7 +72,10 @@ export function Employees({
         label="员工账号"
         rows={users.filter(
           (u) =>
-            (status === 'all' || u.disabled === (status === 'disabled')) &&
+            (status === 'all' ||
+              (status === 'disabled' && u.disabled) ||
+              (status === 'locked' && u.locked) ||
+              (status === 'active' && !u.disabled && !u.locked)) &&
             (department === 'all' || (u.department || '未填写') === department),
         )}
         rowKey={(u) => u.id}
@@ -101,6 +105,7 @@ export function Employees({
               <option value="all">全部状态</option>
               <option value="active">已启用</option>
               <option value="disabled">已停用</option>
+              <option value="locked">已锁定</option>
             </select>
             <select
               className={input + ' sm:w-auto'}
@@ -143,9 +148,16 @@ export function Employees({
           {
             label: '状态',
             render: (u) => (
-              <Badge muted={u.disabled}>
-                {u.disabled ? '已停用' : '已启用'}
-              </Badge>
+              <span className="flex flex-wrap gap-1">
+                <Badge muted={u.disabled}>
+                  {u.disabled ? '已停用' : '已启用'}
+                </Badge>
+                {u.locked && (
+                  <Badge danger>
+                    已锁定{u.badPasswords ? `（${u.badPasswords} 次）` : ''}
+                  </Badge>
+                )}
+              </span>
             ),
           },
           {
@@ -178,6 +190,26 @@ export function Employees({
           <Badge muted={employee.disabled}>
             {employee.disabled ? '已停用' : '已启用'}
           </Badge>
+          {employee.locked && (
+            <>
+              <Badge danger>
+                已锁定{employee.badPasswords ? `（${employee.badPasswords} 次失败）` : ''}
+              </Badge>
+              <button
+                className={button}
+                disabled={!editable}
+                onClick={() =>
+                  confirm(
+                    `解锁账号 ${employee.name}`,
+                    'user.unlock',
+                    { id: employee.id },
+                  )
+                }
+              >
+                解锁账号
+              </button>
+            </>
+          )}
           <button
             className={button}
             disabled={!editable}
@@ -219,6 +251,24 @@ export function Employees({
           <Info label="电话">{employee.phone}</Info>
           <Info label="公司">{employee.company}</Info>
           <Info label="办公地点">{employee.office}</Info>
+        </dl>
+      </section>
+      <section className={card + ' p-6'}>
+        <h3 className="mb-5 font-semibold">账号状态</h3>
+        <dl className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+          <Info label="锁定状态">
+            {employee.locked
+              ? `已锁定（连续失败 ${employee.badPasswords ?? 0} 次）`
+              : '正常'}
+          </Info>
+          <Info label="最近登录">
+            {employee.lastLogonAt ? formatTime(employee.lastLogonAt) : '从未登录'}
+          </Info>
+          <Info label="密码到期">
+            {employee.passwordExpiresAt
+              ? formatTime(employee.passwordExpiresAt)
+              : '未设置密码过期策略'}
+          </Info>
         </dl>
       </section>
       <section className="space-y-3">

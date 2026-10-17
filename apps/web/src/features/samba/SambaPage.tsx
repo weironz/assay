@@ -25,12 +25,16 @@ import { groupNameError } from './group-policy';
 import { Groups } from './Groups';
 import { Shares } from './Shares';
 import { Bindings } from './Bindings';
+import { ImportUsers, type BulkResult } from './ImportUsers';
+import { Health } from './Health';
+import { Dns, Sessions } from './Dns';
 
 type Pending = {
   title: string;
   endpoint: string;
   body: unknown;
   onSuccess?: () => void;
+  preview?: [string, string][];
 };
 type Operation = {
   id: string;
@@ -47,6 +51,10 @@ const titles: Record<string, string> = {
   shares: '共享目录',
   bindings: '登录账号关联',
   history: '操作记录',
+  import: '批量开户',
+  health: '账号健康',
+  dns: 'DNS 记录',
+  sessions: '文件会话',
 };
 const descriptions: Record<string, string> = {
   users: '管理员工资料、公司 AD 账号状态及所属用户组',
@@ -54,6 +62,10 @@ const descriptions: Record<string, string> = {
   shares: '管理共享目录、访问用户组及目录内的 Windows 权限',
   bindings: '关联 Assay 登录账号与公司 AD 账号，供员工自助修改 AD 密码',
   history: '查看公司目录管理操作的执行状态和结果',
+  import: '按模板批量创建员工 AD 账号，逐行校验并单独记录执行结果',
+  health: '关注锁定、密码过期与长期未登录账号，掌握域密码策略',
+  dns: '查看 AD 集成 DNS 的区域与记录（只读）',
+  sessions: '查看文件服务器的 SMB 会话、连接与打开的文件',
 };
 const states: Record<string, string> = {
   succeeded: '已完成',
@@ -70,6 +82,7 @@ const actions: Record<string, string> = {
   'user.create': '新增员工',
   'user.update': '编辑员工资料',
   'user.password': '重置 AD 密码',
+  'user.unlock': '解锁账号',
   'user.change_password': '自助修改 AD 密码',
   'group.create': '新增用户组',
   'group.update': '编辑用户组',
@@ -107,6 +120,7 @@ export default function SambaPage() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
   const [history, setHistory] = useState<Operation[]>([]);
+  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
   const [refresh, setRefresh] = useState(0);
   async function load() {
     setBusy(true);
@@ -143,6 +157,7 @@ export default function SambaPage() {
     action: string,
     args: unknown,
     onSuccess?: () => void,
+    preview?: [string, string][],
   ) => {
     setError('');
     setNotice('');
@@ -151,6 +166,7 @@ export default function SambaPage() {
       endpoint: '/samba/commands',
       body: { requestId: crypto.randomUUID(), action, args },
       onSuccess,
+      preview,
     });
   };
   const submit = (event: FormEvent) => {
@@ -206,9 +222,14 @@ export default function SambaPage() {
       });
       if (pending.endpoint.endsWith('/commands'))
         await awaitOperation(response.data);
-      pending.onSuccess?.();
-      setNotice('操作已完成');
+      if (pending.endpoint.endsWith('/users/bulk')) {
+        setBulkResult(response.data as BulkResult);
+        setNotice(
+          `已提交 ${(response.data as BulkResult).created} / ${(response.data as BulkResult).total} 行，逐行执行状态见下方结果表`,
+        );
+      } else setNotice('操作已完成');
       setError('');
+      pending.onSuccess?.();
       await load();
     } catch (e) {
       const code = (e as { response?: { data?: { code?: string } } })?.response?.data?.code;
@@ -308,6 +329,26 @@ export default function SambaPage() {
             <span>成员或权限变更后，重新连接文件共享以刷新访问权限。</span>
           </div>
           {section === 'users' && <Employees {...workspace} id={id} />}
+          {section === 'health' && <Health {...workspace} />}
+          {section === 'dns' && <Dns />}
+          {section === 'sessions' && <Sessions />}
+          {section === 'import' && (
+            <ImportUsers
+              {...workspace}
+              bulk={(rows) =>
+                setPending({
+                  title: '批量创建员工账号',
+                  endpoint: '/samba/users/bulk',
+                  body: { rows },
+                  preview: [
+                    ['导入行数', `${rows.length}`],
+                    ['登录账号', rows.map((r) => r.name).slice(0, 8).join('、') + (rows.length > 8 ? ' …' : '')],
+                  ],
+                })
+              }
+              result={bulkResult}
+            />
+          )}
           {section === 'groups' && (
             <Groups key={id || 'list'} {...workspace} id={id} />
           )}
@@ -337,6 +378,30 @@ export default function SambaPage() {
               label="操作记录"
               rows={history}
               rowKey={(h) => h.id}
+              actions={
+                <button
+                  className={button}
+                  onClick={async () => {
+                    try {
+                      const audit = (await api.get('/samba/audit')).data as {
+                        total: number;
+                        chained: number;
+                        valid: boolean;
+                        brokenAt: string | null;
+                      };
+                      setNotice(
+                        audit.valid
+                          ? `审计哈希链校验通过：共 ${audit.total} 条记录（${audit.chained} 条已入链）`
+                          : `审计哈希链在 ${audit.brokenAt} 处断裂，请核查操作记录`,
+                      );
+                    } catch (e) {
+                      setError(errorMessage(e));
+                    }
+                  }}
+                >
+                  校验审计链
+                </button>
+              }
               searchText={(h) =>
                 h.actorName +
                 ' ' +
@@ -412,6 +477,7 @@ export default function SambaPage() {
         <StepUpDialog
           purpose="samba"
           title={pending.title}
+          preview={pending.preview}
           onCancel={() => setPending(null)}
           onAuthorized={complete}
         />

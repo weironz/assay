@@ -12,9 +12,11 @@ type Props = {
   onAuthorized: (token: string, password: string) => Promise<void>;
   preferredFocus?: HTMLElement | null;
   fallbackFocus?: HTMLElement | null;
+  /** 操作影响预览：确认前向管理员展示将要变更的内容 */
+  preview?: [string, string][];
 };
 
-export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, preferredFocus, fallbackFocus }: Props) {
+export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, preferredFocus, fallbackFocus, preview }: Props) {
   const { t } = useTranslation();
   const id = useId();
   const panel = useRef<HTMLDivElement>(null);
@@ -113,6 +115,16 @@ export default function StepUpDialog({ purpose, title, onCancel, onAuthorized, p
   return createPortal(<div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/60 p-4" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onCancel(); }}>
     <div ref={panel} data-step-up-dialog={exempt ? undefined : true} data-admin-action={exempt ? true : undefined} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={`${id}-title`} aria-describedby={`${id}-hint`} onKeyDown={trapFocus} className="max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto overscroll-contain rounded-xl border border-gray-200 bg-white p-5 shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:p-6">
       <h2 id={`${id}-title`} className="text-lg font-semibold text-gray-900 dark:text-gray-100">{title}</h2>
+      {preview && !!preview.length && (
+        <dl className="mt-3 space-y-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+          {preview.map(([label, value]) => (
+            <div key={label} className="flex gap-2">
+              <dt className="shrink-0 font-medium text-amber-900 dark:text-amber-200">{label}：</dt>
+              <dd className="min-w-0 break-all text-amber-900 dark:text-amber-100">{value}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
       {!status ? <p id={`${id}-hint`} role={errorKey ? 'alert' : 'status'} className="mt-4 text-sm">{t(errorKey || 'common.processing')}</p> : exempt ? <>
         <p id={`${id}-hint`} role={errorKey ? 'alert' : 'status'} className="mt-4 text-sm">{operationMessage || t(errorKey || 'common.processing')}</p>
         {errorKey && <div className="mt-5 flex justify-end gap-2"><button type="button" onClick={onCancel} className={`min-h-11 rounded-md border border-gray-300 px-4 text-sm dark:border-gray-700 ${focus}`}>{t('common.cancel')}</button></div>}
