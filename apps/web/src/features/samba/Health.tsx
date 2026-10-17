@@ -94,6 +94,8 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
   }
 
   const [editDays, setEditDays] = useState('');
+  const [editThreshold, setEditThreshold] = useState('');
+  const [editLockMinutes, setEditLockMinutes] = useState('');
   const [policyError, setPolicyError] = useState('');
   const saveMaxAge = () => {
     const raw = editDays.trim();
@@ -115,6 +117,33 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
         ['影响', days === 0 ? '全员密码不再因过期被要求修改' : `密码超过 ${days} 天未改将被要求修改`],
       ],
     );
+  };
+  const saveLockout = () => {
+    const rawT = editThreshold.trim();
+    const rawM = editLockMinutes.trim();
+    if (rawT === '' && rawM === '') return;
+    const threshold = rawT === '' ? null : Number(rawT);
+    const minutes = rawM === '' ? null : Number(rawM);
+    if (threshold !== null && (!Number.isInteger(threshold) || threshold < 0 || threshold > 1000)) {
+      setPolicyError('锁定阈值需为 0–1000 的整数（0 = 不再自动锁定）');
+      return;
+    }
+    if (minutes !== null && (!Number.isInteger(minutes) || minutes < 0 || minutes > 43200)) {
+      setPolicyError('锁定时长需为 0–43200 的整数分钟（0 = 锁定后需管理员解锁）');
+      return;
+    }
+    setPolicyError('');
+    const args: Record<string, number> = {};
+    const preview: [string, string][] = [];
+    if (threshold !== null) {
+      args.lockout_threshold = threshold;
+      preview.push(['锁定阈值', threshold === 0 ? '不自动锁定' : `连续 ${threshold} 次失败`]);
+    }
+    if (minutes !== null) {
+      args.lockout_duration_minutes = minutes;
+      preview.push(['锁定时长', minutes === 0 ? '永久（需手动解锁）' : `${minutes} 分钟后自动解锁`]);
+    }
+    confirm('修改域账号锁定策略', 'policy.set', args, undefined, preview);
   };
 
   return (
@@ -160,14 +189,53 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
           <Info label="密码历史数量">
             {policy?.pwdHistoryLength ? Number(policy.pwdHistoryLength) : '未配置'}
           </Info>
-          <Info label="锁定阈值">
-            {policy?.lockoutThreshold ? `${Number(policy.lockoutThreshold)} 次失败` : '不锁定'}
-          </Info>
-          <Info label="锁定时长">
-            {filetimeDays(policy?.lockoutDuration) !== null
-              ? `${filetimeDays(policy!.lockoutDuration)} 天`
-              : '永久（需手动解锁）'}
-          </Info>
+          <div className="min-w-0 sm:col-span-2">
+            <dt className="text-sm text-gray-500">账号锁定</dt>
+            <dd className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium">
+              <span>
+                {policy?.lockoutThreshold
+                  ? `连续 ${Number(policy.lockoutThreshold)} 次失败锁定`
+                  : '失败不自动锁定'}
+                {policy?.lockoutThreshold && filetimeDays(policy?.lockoutDuration) !== null
+                  ? `，${filetimeDays(policy!.lockoutDuration)! * 1440} 分钟后自动解锁`
+                  : policy?.lockoutThreshold
+                    ? '，永久（需手动解锁）'
+                    : ''}
+              </span>
+              {canWrite && (
+                <>
+                  <input
+                    className="min-h-8 w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+                    type="number"
+                    min={0}
+                    max={1000}
+                    placeholder="次数"
+                    aria-label="新的锁定阈值（0 为不自动锁定）"
+                    value={editThreshold}
+                    onChange={(e) => setEditThreshold(e.target.value)}
+                  />
+                  <input
+                    className="min-h-8 w-24 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+                    type="number"
+                    min={0}
+                    max={43200}
+                    placeholder="分钟"
+                    aria-label="新的锁定时长分钟（0 为需手动解锁）"
+                    value={editLockMinutes}
+                    onChange={(e) => setEditLockMinutes(e.target.value)}
+                  />
+                  <button className={button + ' min-h-8 px-2 py-1'} onClick={saveLockout}>
+                    修改
+                  </button>
+                </>
+              )}
+            </dd>
+            {policyError && (
+              <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+                {policyError}
+              </p>
+            )}
+          </div>
           <Info label="锁定观察窗口">
             {filetimeDays(policy?.lockoutObservationWindow) !== null
               ? `${filetimeDays(policy!.lockoutObservationWindow)} 天`
