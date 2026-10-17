@@ -426,6 +426,15 @@ impl Directory {
     }
     /// 域级密码/锁定策略（domainDNS 根对象属性）。时间间隔属性是负 FILETIME。
     pub async fn domain_policy(&mut self) -> Result<Value> {
+        let e = self.domain_policy_entry().await?;
+        Ok(json!({
+            "maxPwdAge":attr(&e,"maxPwdAge"),"minPwdAge":attr(&e,"minPwdAge"),
+            "lockoutDuration":attr(&e,"lockoutDuration"),"lockoutObservationWindow":attr(&e,"lockOutObservationWindow"),
+            "lockoutThreshold":attr(&e,"lockoutThreshold"),"minPwdLength":attr(&e,"minPwdLength"),
+            "pwdHistoryLength":attr(&e,"pwdHistoryLength"),"pwdProperties":attr(&e,"pwdProperties")
+        }))
+    }
+    async fn domain_policy_entry(&mut self) -> Result<SearchEntry> {
         let (rows, r) = self
             .ldap
             .search(
@@ -446,16 +455,96 @@ impl Directory {
             .await?
             .success()?;
         check(r)?;
-        let e = rows
-            .into_iter()
-            .next()
+        rows.into_iter()
             .map(SearchEntry::construct)
-            .ok_or_else(|| anyhow!("domain policy not found"))?;
+            .next()
+            .ok_or_else(|| anyhow!("domain policy not found"))
+    }
+    /// 更新域密码/锁定策略。days=0 表示永不过期（INT64_MIN 哨兵）；
+    /// 分钟字段为 0 表示禁用该间隔；全部写入前做范围校验。
+    pub async fn set_domain_policy(
+        &mut self,
+        max_pwd_age_days: Option<u32>,
+        min_pwd_age_days: Option<u32>,
+        lockout_threshold: Option<u32>,
+        lockout_duration_minutes: Option<u32>,
+    ) -> Result<Value> {
+        let e = self.domain_policy_entry().await?;
+        let mut modifications: Vec<Mod<String>> = vec![];
+        // 天 -> 负 FILETIME（100ns 单位）；0 天特指"永不过期"
+        let filetime = |days: u32| -> String {
+            if days == 0 {
+                i64::MIN.to_string()
+            } else {
+                format!("-{}", days as i64 * 864_000_000_000)
+            }
+        };
+        let minutes_filetime = |minutes: u32| -> String {
+            format!("-{}", minutes as i64 * 600_000_000)
+        };
+        if let Some(days) = max_pwd_age_days {
+            ensure!(days <= 3650, "password age must be at most 3650 days");
+            let value = filetime(days);
+            modifications.push(Mod::Replace(
+                "maxPwdAge".to_owned(),
+                HashSet::from([value]),
+            ));
+        }
+        if let Some(days) = min_pwd_age_days {
+            ensure!(days <= 3650, "minimum password age must be at most 3650 days");
+            let value = filetime(days);
+            modifications.push(Mod::Replace(
+                "minPwdAge".to_owned(),
+                HashSet::from([value]),
+            ));
+        }
+        if let Some(threshold) = lockout_threshold {
+            ensure!(threshold <= 1000, "lockout threshold must be at most 1000");
+            let value = threshold.to_string();
+            modifications.push(Mod::Replace(
+                "lockoutThreshold".to_owned(),
+                HashSet::from([value]),
+            ));
+        }
+        if let Some(minutes) = lockout_duration_minutes {
+            ensure!(minutes <= 60 * 24 * 30, "lockout duration must be at most 30 days");
+            let value = minutes_filetime(minutes);
+            modifications.push(Mod::Replace(
+                "lockoutDuration".to_owned(),
+                HashSet::from([value]),
+            ));
+        }
+        ensure!(!modifications.is_empty(), "no policy changes requested");
+        check(self.ldap.modify(&e.dn, modifications).await?)?;
+        self.domain_policy().await
+    }
+    /// 单账号的有效密码规则：域策略与账号自身状态（永不过期标志、
+    /// 必须改密）的合成视图，供员工详情页展示。
+    pub async fn effective_policy(&mut self, id: &str) -> Result<Value> {
+        let e = self.object(id, false).await?;
+        let flags = attr(&e, "userAccountControl").parse::<u32>().unwrap_or(0);
+        let policy = self.domain_policy().await?;
+        let days = |v: &Value| -> Option<u64> {
+            v.as_str()
+                .and_then(|s| s.parse::<i64>().ok())
+                .and_then(|n| {
+                    // INT64_MIN 是"未启用"哨兵；>=0（含 0）同样未启用
+                    if n >= 0 || n == i64::MIN {
+                        None
+                    } else {
+                        Some((-(n as i128)) as u64 / 864_000_000_000)
+                    }
+                })
+        };
+        let never_expires = flags & 0x10000 != 0;
         Ok(json!({
-            "maxPwdAge":attr(&e,"maxPwdAge"),"minPwdAge":attr(&e,"minPwdAge"),
-            "lockoutDuration":attr(&e,"lockoutDuration"),"lockoutObservationWindow":attr(&e,"lockOutObservationWindow"),
-            "lockoutThreshold":attr(&e,"lockoutThreshold"),"minPwdLength":attr(&e,"minPwdLength"),
-            "pwdHistoryLength":attr(&e,"pwdHistoryLength"),"pwdProperties":attr(&e,"pwdProperties")
+            "neverExpires": never_expires,
+            "mustChange": attr(&e, "pwdLastSet") == "0",
+            "maxPwdAgeDays": days(&policy["maxPwdAge"]),
+            "minPwdAgeDays": days(&policy["minPwdAge"]),
+            "minPwdLength": policy["minPwdLength"].as_str().and_then(|v| v.parse::<u32>().ok()),
+            "pwdHistoryLength": policy["pwdHistoryLength"].as_str().and_then(|v| v.parse::<u32>().ok()),
+            "lockoutThreshold": policy["lockoutThreshold"].as_str().and_then(|v| v.parse::<u32>().ok()),
         }))
     }
     pub async fn snapshot(&mut self) -> Result<Value> {

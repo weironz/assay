@@ -22,6 +22,12 @@ export const actions = {
   'user.update': z.object({ id, display_name: display, disabled: z.boolean(), profile: employeeProfile.optional() }).strict(),
   'user.password': z.object({ id, password }).strict(),
   'user.unlock': z.object({ id }).strict(),
+  'policy.set': z.object({
+    max_pwd_age_days: z.number().int().min(0).max(3650).optional(),
+    min_pwd_age_days: z.number().int().min(0).max(3650).optional(),
+    lockout_threshold: z.number().int().min(0).max(1000).optional(),
+    lockout_duration_minutes: z.number().int().min(0).max(43200).optional(),
+  }).refine(v => Object.keys(v).length > 0, { message: '至少指定一项策略变更' }).strict(),
   'group.create': z.object({ name, description: display }).strict(),
   'group.update': z.object({ id, description: display }).strict(),
   'group.delete': z.object({ id }).strict(),

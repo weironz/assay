@@ -114,6 +114,10 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 3650) throw new BadRequestException('回收站保留天数需为 1–3650 的整数');
     return this.agent('/v1/recycle', { retention_days: days }, 45000, 'PUT');
   }
+  async effectivePolicy(id: string) {
+    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    return this.agent(`/v1/effective-policy?id=${encodeURIComponent(id)}`);
+  }
   async sessions() {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent('/v1/sessions');

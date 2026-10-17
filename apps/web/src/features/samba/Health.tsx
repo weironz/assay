@@ -93,6 +93,30 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
     }
   }
 
+  const [editDays, setEditDays] = useState('');
+  const [policyError, setPolicyError] = useState('');
+  const saveMaxAge = () => {
+    const raw = editDays.trim();
+    if (raw === '') return;
+    const days = Number(raw);
+    if (!Number.isInteger(days) || days < 0 || days > 3650) {
+      setPolicyError('密码有效期需为 0–3650 的整数天数（0 = 永不过期）');
+      return;
+    }
+    setPolicyError('');
+    confirm(
+      days === 0 ? '设置域密码永不过期' : `设置域密码有效期为 ${days} 天`,
+      'policy.set',
+      { max_pwd_age_days: days },
+      undefined,
+      [
+        ['变更项', '域密码有效期（maxPwdAge）'],
+        ['新值', days === 0 ? '永不过期' : `${days} 天`],
+        ['影响', days === 0 ? '全员密码不再因过期被要求修改' : `密码超过 ${days} 天未改将被要求修改`],
+      ],
+    );
+  };
+
   return (
     <div className="space-y-6">
       <section className={card + ' p-6'}>
@@ -101,11 +125,38 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
           <Info label="最短密码长度">
             {policy?.minPwdLength ? `${Number(policy.minPwdLength)} 个字符` : '未配置'}
           </Info>
-          <Info label="密码有效期">
-            {filetimeDays(policy?.maxPwdAge) !== null
-              ? `${filetimeDays(policy?.maxPwdAge)} 天`
-              : '永不过期'}
-          </Info>
+          <div className="min-w-0">
+            <dt className="text-sm text-gray-500">密码有效期</dt>
+            <dd className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium">
+              <span>
+                {filetimeDays(policy?.maxPwdAge) !== null
+                  ? `${filetimeDays(policy?.maxPwdAge)} 天`
+                  : '永不过期'}
+              </span>
+              {canWrite && (
+                <>
+                  <input
+                    className="min-h-8 w-20 rounded-md border border-gray-300 bg-white px-2 py-1 text-sm dark:border-gray-700 dark:bg-gray-900"
+                    type="number"
+                    min={0}
+                    max={3650}
+                    placeholder="天数"
+                    aria-label="新的密码有效天数（0 为永不过期）"
+                    value={editDays}
+                    onChange={(e) => setEditDays(e.target.value)}
+                  />
+                  <button className={button + ' min-h-8 px-2 py-1'} onClick={saveMaxAge}>
+                    修改
+                  </button>
+                </>
+              )}
+            </dd>
+            {policyError && (
+              <p role="alert" className="mt-2 text-xs text-red-600 dark:text-red-400">
+                {policyError}
+              </p>
+            )}
+          </div>
           <Info label="密码历史数量">
             {policy?.pwdHistoryLength ? Number(policy.pwdHistoryLength) : '未配置'}
           </Info>

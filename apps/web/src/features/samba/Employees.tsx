@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { api } from '../../lib/api';
 import { Rename } from './Rename';
 import {
   Badge,
@@ -20,6 +21,16 @@ import {
   type Workspace,
 } from './types';
 
+type EffectivePolicy = {
+  neverExpires?: boolean;
+  mustChange?: boolean;
+  maxPwdAgeDays?: number | null;
+  minPwdAgeDays?: number | null;
+  minPwdLength?: number | null;
+  pwdHistoryLength?: number | null;
+  lockoutThreshold?: number | null;
+};
+
 export function Employees({
   snapshot,
   canWrite,
@@ -29,6 +40,15 @@ export function Employees({
 }: Workspace & { id?: string }) {
   const [status, setStatus] = useState('all');
   const [department, setDepartment] = useState('all');
+  const [effective, setEffective] = useState<EffectivePolicy | null>(null);
+  useEffect(() => {
+    setEffective(null);
+    if (!id) return;
+    void api
+      .get('/samba/effective-policy', { params: { id } })
+      .then((r) => setEffective(r.data))
+      .catch(() => setEffective(null));
+  }, [id, snapshot]);
   const users = snapshot.users;
   const employee = users.find((u) => u.id === id);
   const edit = (u: Employee) =>
@@ -270,6 +290,37 @@ export function Employees({
               : '未设置密码过期策略'}
           </Info>
         </dl>
+        {effective && (
+          <div className="mt-6 border-t border-gray-100 pt-5 dark:border-gray-800">
+            <h4 className="text-sm font-medium">适用的密码规则</h4>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {effective.neverExpires ? (
+                <Badge>密码永不过期（账号标志）</Badge>
+              ) : effective.maxPwdAgeDays ? (
+                <Badge>密码 {effective.maxPwdAgeDays} 天过期</Badge>
+              ) : (
+                <Badge>密码永不过期（域策略）</Badge>
+              )}
+              {effective.mustChange && <Badge danger>下次登录必须改密</Badge>}
+              {effective.minPwdLength != null && (
+                <Badge muted>最短 {effective.minPwdLength} 位</Badge>
+              )}
+              {effective.pwdHistoryLength != null && (
+                <Badge muted>
+                  历史密码 {effective.pwdHistoryLength} 条
+                </Badge>
+              )}
+              {effective.minPwdAgeDays ? (
+                <Badge muted>改密间隔 {effective.minPwdAgeDays} 天</Badge>
+              ) : null}
+              {effective.lockoutThreshold ? (
+                <Badge muted>输错 {effective.lockoutThreshold} 次锁定</Badge>
+              ) : (
+                <Badge muted>失败不锁定</Badge>
+              )}
+            </div>
+          </div>
+        )}
       </section>
       <section className="space-y-3">
         <h3 className="font-semibold">所属用户组</h3>

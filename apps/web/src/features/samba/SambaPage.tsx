@@ -83,6 +83,7 @@ const actions: Record<string, string> = {
   'user.update': '编辑员工资料',
   'user.password': '重置 AD 密码',
   'user.unlock': '解锁账号',
+  'policy.set': '修改域密码策略',
   'user.change_password': '自助修改 AD 密码',
   'group.create': '新增用户组',
   'group.update': '编辑用户组',

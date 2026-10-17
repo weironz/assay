@@ -308,6 +308,16 @@ async fn recycle_put(State(a): State<App>, Json(input): Json<RecycleUpdate>) -> 
     .await;
     reply(result)
 }
+/// 单账号有效密码规则（只读）
+async fn effective_policy(State(a): State<App>, Query(q): Query<Id>) -> Response {
+    let _lock = a.lock.lock().await;
+    let result = async {
+        let mut d = ad::Directory::connect(&a.c).await?;
+        d.effective_policy(&q.id).await
+    }
+    .await;
+    reply(result)
+}
 async fn execute(a: &App, cmd: &Command) -> Result<Value> {
     ensure!(!a.c.read_only, "agent is read-only");
     rename::idle(&a.c)?;
@@ -341,6 +351,28 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         "user.unlock" => {
             let x: Id = parse(cmd.args.clone())?;
             d.unlock(&x.id).await
+        }
+        "policy.set" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct P {
+                #[serde(default)]
+                max_pwd_age_days: Option<u32>,
+                #[serde(default)]
+                min_pwd_age_days: Option<u32>,
+                #[serde(default)]
+                lockout_threshold: Option<u32>,
+                #[serde(default)]
+                lockout_duration_minutes: Option<u32>,
+            }
+            let x: P = parse(cmd.args.clone())?;
+            d.set_domain_policy(
+                x.max_pwd_age_days,
+                x.min_pwd_age_days,
+                x.lockout_threshold,
+                x.lockout_duration_minutes,
+            )
+            .await
         }
         "user.change_password" => {
             let x: Change = parse(cmd.args.clone())?;
@@ -605,6 +637,11 @@ fn safe_error(e: &anyhow::Error) -> String {
             "cleanup interval must",
             "recycle cleanup is not",
             "agent configuration path unknown",
+            "password age must",
+            "minimum password age must",
+            "lockout threshold must",
+            "lockout duration must",
+            "no policy changes",
             "null ACL",
             "password must",
             "request ID",
@@ -746,6 +783,7 @@ fn router(c: Config) -> Result<Router> {
         .route("/v1/dns/zones", get(dns_zones))
         .route("/v1/dns/records", get(dns_records))
         .route("/v1/recycle", get(recycle_get).put(recycle_put))
+        .route("/v1/effective-policy", get(effective_policy))
         .route("/v1/directories", get(directories))
         .route("/v1/acl", get(permissions))
         .route("/v1/commands", post(command))
