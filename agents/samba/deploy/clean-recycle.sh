@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 # 清理各受管共享 .recycle 回收站中超过保留期的文件。
 # vfs_recycle 由 Assay Agent 写入共享根下的 .recycle 目录（keeptree + versions），
 # 本脚本删除超期文件并清掉因此空掉的目录（.recycle 本身保留）。
