@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "1762d3fa2a1c79f2a143b3b4ab563da0a22d3826",
+    "indexed_at": "2026-10-16T17:05:40Z",
+    "project": "D-codes-assay",
+    "nodes": 3075,
+    "edges": 14088,
+    "original_size": 11927552,
+    "compressed_size": 2603364,
+    "compression_level": 3
+}

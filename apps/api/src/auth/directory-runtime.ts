@@ -4,7 +4,6 @@ import type { PrismaClient } from '@prisma/client';
 import { DirectoryClient, DirectoryRejected, DirectoryUnavailable, type DirectoryProfile } from './directory-client';
 import { adDomainDN, normalizedDomainDN, readDirectorySettings } from './directory-config';
 import { authRedis } from './auth-redis';
-import { appendOperation } from '../samba/samba-audit';
 import type { SystemRoleName } from './role-policy';
 import { directoryRolesForGroups } from './directory-role-policy';
 
@@ -63,7 +62,7 @@ export async function resolveDirectoryIdentity(db: PrismaClient, profile: Direct
       if (current && (current.adObjectId !== profile.id || normalizedDomainDN(current.domain) !== normalizedDomainDN(adDomainDN(settings.domain)))) throw new DirectoryRejected();
       await tx.sambaIdentity.upsert({ where: { userId: user.id }, create: { userId: user.id, adObjectId: profile.id, domain: adDomainDN(settings.domain), accountName: profile.accountName, linkedBy: 'directory-login' }, update: { accountName: profile.accountName } });
     }
-    if (link) await appendOperation(tx, { id: randomUUID(), actorId: link.actorId, actorName: link.actorName, action: 'directory.identity.link', requestHash: '-', metadata: { userId: user.id, providerId: settings.providerId, objectId: profile.id }, state: 'succeeded' });
+    if (link) await tx.sambaOperation.create({ data: { id: randomUUID(), actorId: link.actorId, actorName: link.actorName, action: 'directory.identity.link', requestHash: '-', metadata: { userId: user.id, providerId: settings.providerId, objectId: profile.id }, state: 'succeeded' } });
     // Changing the authentication authority invalidates old local sessions and pending MFA challenges.
     if (!existing) user = await tx.user.update({ where: { id: user.id }, data: { sessionEpoch: { increment: 1 } } });
     return user;

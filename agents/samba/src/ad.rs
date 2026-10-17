@@ -62,6 +62,12 @@ fn hex(v: &[u8]) -> String {
 pub(crate) fn attr(e: &SearchEntry, k: &str) -> String {
     e.attrs
         .get(k)
+        .or_else(|| {
+            e.attrs
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(k))
+                .map(|(_, value)| value)
+        })
         .and_then(|v| v.first())
         .cloned()
         .unwrap_or_default()
@@ -94,7 +100,7 @@ fn row(e: &SearchEntry) -> Value {
         "sid": raw(e,"objectSid").map(|x|sid(&x)).unwrap_or_default(),
         "revision":revision(e),"upn":attr(e,"userPrincipalName"),"uidNumber":attr(e,"uidNumber"),"gidNumber":attr(e,"gidNumber"),
         "accountControl":attr(e,"userAccountControl"),"passwordChangedAt":attr(e,"pwdLastSet"),"primaryGroupId":attr(e,"primaryGroupID"),"groupType":attr(e,"groupType"),
-        "locked":attr(e,"lockoutTime").parse::<i64>().unwrap_or(0) > 0,
+        "locked":attr(e,"msDS-User-Account-Control-Computed").parse::<u32>().map(|flags|flags & 0x10 != 0).unwrap_or_else(|_|attr(e,"lockoutTime").parse::<i64>().unwrap_or(0)>0),
         "badPasswords":attr(e,"badPwdCount").parse::<u32>().unwrap_or(0),
         "lastLogonAt":ft_ms(attr(e,"lastLogonTimestamp").parse::<i64>().unwrap_or(0)),
         "name": attr(e,"sAMAccountName"), "displayName": attr(e,"displayName"), "description": attr(e,"description"),
@@ -112,6 +118,31 @@ fn ft_ms(v: i64) -> Value {
         json!(v / 10_000 - 11_644_473_600_000)
     }
 }
+fn password_interval(days: u32, maximum: bool) -> String {
+    if maximum && days == 0 {
+        i64::MIN.to_string()
+    } else {
+        (-(days as i64) * 864_000_000_000).to_string()
+    }
+}
+fn password_expiry(e: &SearchEntry, max_age: i64) -> Value {
+    let flags = attr(e, "userAccountControl").parse::<u32>().unwrap_or(0);
+    let set = attr(e, "pwdLastSet").parse::<i64>().unwrap_or(0);
+    if flags & 0x10000 != 0 || set <= 1 {
+        return Value::Null;
+    }
+    if let Ok(computed) = attr(e, "msDS-UserPasswordExpiryTimeComputed").parse::<i64>() {
+        return if computed > 0 && computed < i64::MAX {
+            ft_ms(computed)
+        } else {
+            Value::Null
+        };
+    }
+    if max_age >= 0 || max_age == i64::MIN {
+        return Value::Null;
+    }
+    set.checked_sub(max_age).map(ft_ms).unwrap_or(Value::Null)
+}
 fn revision(e: &SearchEntry) -> String {
     format!(
         "{:x}",
@@ -123,7 +154,7 @@ fn revision(e: &SearchEntry) -> String {
         ))
     )
 }
-const ATTRS: [&str; 26] = [
+const ATTRS: [&str; 29] = [
     "objectGUID",
     "objectSid",
     "sAMAccountName",
@@ -150,6 +181,9 @@ const ATTRS: [&str; 26] = [
     "lockoutTime",
     "badPwdCount",
     "lastLogonTimestamp",
+    "msDS-UserPasswordExpiryTimeComputed",
+    "msDS-User-Account-Control-Computed",
+    "msDS-ResultantPSO",
 ];
 #[derive(Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -471,16 +505,26 @@ impl Directory {
     ) -> Result<Value> {
         let e = self.domain_policy_entry().await?;
         let mut modifications: Vec<Mod<String>> = vec![];
-        // 天 -> 负 FILETIME（100ns 单位）；0 天特指"永不过期"
-        let filetime = |days: u32| -> String {
-            if days == 0 {
-                i64::MIN.to_string()
-            } else {
-                format!("-{}", days as i64 * 864_000_000_000)
-            }
+        let filetime = |days: u32| password_interval(days, true);
+        let minutes_filetime = |minutes: u32| (-(minutes as i64) * 600_000_000).to_string();
+        let current_days = |key: &str| {
+            attr(&e, key)
+                .parse::<i64>()
+                .ok()
+                .filter(|n| *n < 0 && *n != i64::MIN)
+                .map(|n| n.unsigned_abs() / 864_000_000_000)
+                .unwrap_or(0)
         };
-        let minutes_filetime =
-            |minutes: u32| -> String { format!("-{}", minutes as i64 * 600_000_000) };
+        let max = max_pwd_age_days
+            .map(u64::from)
+            .unwrap_or_else(|| current_days("maxPwdAge"));
+        let min = min_pwd_age_days
+            .map(u64::from)
+            .unwrap_or_else(|| current_days("minPwdAge"));
+        ensure!(
+            max == 0 || min <= max,
+            "minimum password age must not exceed maximum password age"
+        );
         if let Some(days) = max_pwd_age_days {
             ensure!(days <= 3650, "password age must be at most 3650 days");
             let value = filetime(days);
@@ -491,7 +535,7 @@ impl Directory {
                 days <= 3650,
                 "minimum password age must be at most 3650 days"
             );
-            let value = filetime(days);
+            let value = password_interval(days, false);
             modifications.push(Mod::Replace("minPwdAge".to_owned(), HashSet::from([value])));
         }
         if let Some(threshold) = lockout_threshold {
@@ -522,7 +566,42 @@ impl Directory {
     pub async fn effective_policy(&mut self, id: &str) -> Result<Value> {
         let e = self.object(id, false).await?;
         let flags = attr(&e, "userAccountControl").parse::<u32>().unwrap_or(0);
-        let policy = self.domain_policy().await?;
+        let mut policy = self.domain_policy().await?;
+        let pso = attr(&e, "msDS-ResultantPSO");
+        if !pso.is_empty() {
+            ensure!(
+                pso.to_lowercase().ends_with(&format!(
+                    ",cn=password settings container,cn=system,{}",
+                    self.c.base_dn.to_lowercase()
+                )),
+                "password policy outside domain"
+            );
+            let attributes = [
+                ("msDS-MaximumPasswordAge", "maxPwdAge"),
+                ("msDS-MinimumPasswordAge", "minPwdAge"),
+                ("msDS-MinimumPasswordLength", "minPwdLength"),
+                ("msDS-PasswordHistoryLength", "pwdHistoryLength"),
+                ("msDS-LockoutThreshold", "lockoutThreshold"),
+            ];
+            let (rows, _) = self
+                .ldap
+                .search(
+                    &pso,
+                    Scope::Base,
+                    "(objectClass=msDS-PasswordSettings)",
+                    attributes.iter().map(|(k, _)| *k).collect::<Vec<_>>(),
+                )
+                .await?
+                .success()?;
+            let rule = rows
+                .into_iter()
+                .map(SearchEntry::construct)
+                .next()
+                .ok_or_else(|| anyhow!("password policy not found"))?;
+            for (source, target) in attributes {
+                policy[target] = json!(attr(&rule, source));
+            }
+        }
         let days = |v: &Value| -> Option<u64> {
             v.as_str()
                 .and_then(|s| s.parse::<i64>().ok())
@@ -548,25 +627,10 @@ impl Directory {
     }
     pub async fn snapshot(&mut self) -> Result<Value> {
         let policy = self.domain_policy().await?;
-        // 密码到期 = pwdLastSet + maxPwdAge（maxPwdAge 为 0 或缺失表示永不过期）
         let max_age = policy["maxPwdAge"]
             .as_str()
-            .and_then(|v| v.parse::<i64>().ok())
+            .and_then(|s| s.parse::<i64>().ok())
             .unwrap_or(0);
-        let expire = |e: &SearchEntry| -> Value {
-            let flags = attr(e, "userAccountControl").parse::<u32>().unwrap_or(0);
-            let set = attr(e, "pwdLastSet").parse::<i64>().unwrap_or(0);
-            // 永不过期：账号带 DONT_EXPIRE_PASSWORD（0x10000）标志、策略未启用
-            // （maxPwdAge>=0，含 0），或 INT64_MIN 哨兵值；pwdLastSet=0/1（必须
-            // 改密/从未设置）没有可信到期时刻
-            if flags & 0x10000 != 0 || max_age >= 0 || max_age == i64::MIN || set <= 1 {
-                Value::Null
-            } else {
-                // AD 有效期间隔是负数：到期 = pwdLastSet 减去它（即改密后 N 天）。
-                // 曾错写成相加，导致 30 天策略显示为改密前 30 天。
-                json!((set - max_age) / 10_000 - 11_644_473_600_000)
-            }
-        };
         let users = self
             .entries(
                 &self.c.users_dn.clone(),
@@ -577,7 +641,7 @@ impl Directory {
             .iter()
             .map(|e| {
                 let mut value = row(e);
-                value["passwordExpiresAt"] = expire(e);
+                value["passwordExpiresAt"] = password_expiry(e, max_age);
                 value
             })
             .collect();
@@ -1098,5 +1162,60 @@ mod tests {
             .attributes()
             .is_err()
         );
+    }
+}
+
+#[cfg(test)]
+mod policy_regressions {
+    use super::*;
+    fn employee() -> SearchEntry {
+        SearchEntry {
+            dn: "CN=test,DC=assay,DC=test".into(),
+            attrs: std::collections::HashMap::from([
+                ("pwdLastSet".into(), vec!["134366400000000000".into()]),
+                ("userAccountControl".into(), vec!["512".into()]),
+            ]),
+            bin_attrs: std::collections::HashMap::new(),
+        }
+    }
+    #[test]
+    fn password_expiry_adds_the_absolute_interval_and_honors_ad_computed_policy() {
+        let mut e = employee();
+        let age = -30 * 864_000_000_000;
+        let set = attr(&e, "pwdLastSet").parse::<i64>().unwrap();
+        assert_eq!(password_expiry(&e, age), ft_ms(set - age));
+        e.attrs.insert(
+            "msDS-UserPasswordExpiryTimeComputed".into(),
+            vec![(set + 10 * 864_000_000_000i64).to_string()],
+        );
+        assert_eq!(
+            password_expiry(&e, age),
+            ft_ms(set + 10 * 864_000_000_000i64)
+        );
+        e.attrs.insert(
+            "msDS-UserPasswordExpiryTimeComputed".into(),
+            vec![i64::MAX.to_string()],
+        );
+        assert_eq!(password_expiry(&e, age), Value::Null);
+        e.attrs.remove("msDS-UserPasswordExpiryTimeComputed");
+        for sentinel in [0, i64::MIN] {
+            assert_eq!(password_expiry(&e, sentinel), Value::Null);
+        }
+        e.attrs
+            .insert("userAccountControl".into(), vec!["66048".into()]);
+        assert_eq!(password_expiry(&e, age), Value::Null);
+    }
+    #[test]
+    fn zero_minimum_age_allows_immediate_password_changes() {
+        assert_eq!(password_interval(0, false), "0");
+        assert_eq!(password_interval(0, true), i64::MIN.to_string());
+        assert_eq!(password_interval(1, false), "-864000000000");
+        let mut e = employee();
+        e.attrs.insert("lockoutTime".into(), vec!["1000".into()]);
+        e.attrs.insert(
+            "msDS-User-Account-Control-Computed".into(),
+            vec!["0".into()],
+        );
+        assert_eq!(row(&e)["locked"], false);
     }
 }

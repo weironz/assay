@@ -22,7 +22,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
 #[derive(Clone)]
 struct App {
@@ -245,62 +245,29 @@ async fn dns_records(State(a): State<App>, Query(q): Query<Zone>) -> Response {
     .await;
     reply(result)
 }
-/// 回收站清理设置（读）：以运行中的设置为准（PUT 会即时更新内存值）
+/// Runtime settings live in the writable state volume, never in agent.json.
 async fn recycle_get(State(a): State<App>) -> Response {
-    let result = async {
-        let handle = a
-            .recycle
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))?;
-        Ok::<_, anyhow::Error>(serde_json::to_value(&*handle.settings.lock().unwrap())?)
-    }
-    .await;
-    reply(result)
+    reply(match &a.recycle {
+        Some(handle) => Ok(json!({"enabled":true,"read_only":a.c.read_only,
+            "retention_days":handle.settings.lock().unwrap().retention_days})),
+        None => Ok(json!({"enabled":false,"read_only":a.c.read_only})),
+    })
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct RecycleUpdate {
     retention_days: u32,
 }
-/// 回收站清理设置（写）：更新内存 + 写回 agent.json（原子替换），并唤醒
-/// 清理线程立即按新保留期执行。清理周期仍由部署文件管理。
+// Compatibility for older internal API clients. Current API writes use the
+// idempotent command queue, where settings changes receive normal audit records.
 async fn recycle_put(State(a): State<App>, Json(input): Json<RecycleUpdate>) -> Response {
-    let result = async {
-        ensure!(!a.c.read_only, "agent is read-only");
-        let handle = a
-            .recycle
+    let _guard = a.lock.lock().await;
+    reply(
+        a.recycle
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))?;
-        let mut next = handle.settings.lock().unwrap().clone();
-        next.retention_days = input.retention_days;
-        recycle::validate(&next)?;
-        // 写回 agent.json：重读磁盘原文、只替换 recycle 段，避免覆盖并发编辑
-        let path =
-            a.c.source_path
-                .as_ref()
-                .ok_or_else(|| anyhow::anyhow!("agent configuration path unknown"))?;
-        let mut document: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
-        document["recycle"] = serde_json::to_value(&next)?;
-        let bytes = serde_json::to_vec_pretty(&document)?;
-        // agent.json 挂载在容器只读根内时，同目录临时文件不可写；先落
-        // state 目录（始终可写）再原子 rename 到目标。跨设备 rename 会
-        // 失败时回退为直接写（绑定挂载同一文件时目标本身仍可写）。
-        let target = std::path::Path::new(path);
-        let temp =
-            a.c.state_dir
-                .join(format!("agent-{}.json.tmp", uuid::Uuid::new_v4()));
-        if std::fs::write(&temp, &bytes).is_ok() && std::fs::rename(&temp, target).is_ok() {
-            std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
-        } else {
-            let _ = std::fs::remove_file(&temp);
-            std::fs::write(target, &bytes)?;
-        }
-        *handle.settings.lock().unwrap() = next;
-        handle.reload.notify_waiters();
-        Ok(json!({"retention_days": input.retention_days, "persisted": true}))
-    }
-    .await;
-    reply(result)
+            .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))
+            .and_then(|handle| recycle::update(&a.c, handle, input.retention_days)),
+    )
 }
 /// 单账号有效密码规则（只读）
 async fn effective_policy(State(a): State<App>, Query(q): Query<Id>) -> Response {
@@ -314,6 +281,7 @@ async fn effective_policy(State(a): State<App>, Query(q): Query<Id>) -> Response
 }
 /// 回收站浏览（只读）
 async fn recycle_list(State(a): State<App>, Query(q): Query<ShareName>) -> Response {
+    let _guard = a.lock.lock().await;
     let result = async {
         let entries = recycle::list(&a.c, &q.name)?;
         Ok::<_, anyhow::Error>(serde_json::to_value(entries)?)
@@ -354,6 +322,14 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         "user.unlock" => {
             let x: Id = parse(cmd.args.clone())?;
             d.unlock(&x.id).await
+        }
+        "recycle.configure" => {
+            let x: RecycleUpdate = parse(cmd.args.clone())?;
+            let handle = a
+                .recycle
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))?;
+            recycle::update(&a.c, handle, x.retention_days)
         }
         "recycle.restore" | "recycle.purge" => {
             #[derive(Deserialize)]
@@ -771,24 +747,15 @@ fn router(c: Config) -> Result<Router> {
         .clone()
         .map(|files| portal::router(files, &token))
         .transpose()?;
-    // 内置回收站清理：随镜像分发，替代服务器侧脚本与 systemd 单元
-    let recycle = match (&c.recycle, c.read_only) {
-        (Some(settings), false) => {
-            recycle::validate(settings)?;
-            let handle = recycle::Handle {
-                settings: Arc::new(std::sync::Mutex::new(settings.clone())),
-                config: Arc::new(std::sync::Mutex::new(c.clone())),
-                reload: Arc::new(tokio::sync::Notify::new()),
-            };
-            recycle::spawn(handle.clone());
-            Some(handle)
-        }
-        _ => None,
-    };
+    let lock = Arc::new(tokio::sync::Mutex::new(()));
+    let recycle = recycle::load(&c)?;
+    if let (false, Some(handle)) = (c.read_only, &recycle) {
+        recycle::spawn(c.clone(), handle.clone(), lock.clone());
+    }
     let a = App {
         c,
         token,
-        lock: Arc::new(tokio::sync::Mutex::new(())),
+        lock,
         recycle,
     };
     db(&a)?.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,hash TEXT NOT NULL,state TEXT NOT NULL,response TEXT);")?;
@@ -887,6 +854,37 @@ mod unified_tests {
             .unwrap()
             .parse()
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn recycle_http_settings_read_the_live_override_and_leave_config_untouched() {
+        let fixture = Fixture::new();
+        let mut c = fixture.config(false);
+        let before = fs::read(fixture.0.join("agent.json")).unwrap();
+        c.read_only = false;
+        c.recycle = Some(config::Recycle {
+            retention_days: 30,
+            every_hours: 24,
+        });
+        let a = App {
+            recycle: recycle::load(&c).unwrap(),
+            c,
+            token: String::new(),
+            lock: Arc::new(tokio::sync::Mutex::new(())),
+        };
+        assert_eq!(
+            recycle_put(State(a.clone()), Json(RecycleUpdate { retention_days: 7 }))
+                .await
+                .status(),
+            200
+        );
+        let response = recycle_get(State(a)).await;
+        let bytes = axum::body::to_bytes(response.into_body(), 4096)
+            .await
+            .unwrap();
+        let value: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(value["retention_days"], 7);
+        assert_eq!(fs::read(fixture.0.join("agent.json")).unwrap(), before);
     }
 
     #[tokio::test]
