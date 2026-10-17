@@ -55,6 +55,7 @@ const RULES: Record<TicketAction, Rule> = {
     from: ['RESOLVED', 'CLOSED'],
     to: 'REOPENED',
     roles: ['requester', 'supervisor', 'admin'],
+    requireRequester: true,
   },
   cancel: {
     from: ['NEW', 'ASSIGNED'],

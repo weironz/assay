@@ -18,3 +18,4 @@ backups/
 .samba-test/
 
 __pycache__/
+apps/api/.pnpm-store/

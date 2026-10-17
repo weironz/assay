@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -547,7 +548,14 @@ export class TicketsService {
 
     if (to === 'CLOSED') data.closedAt = now;
 
-    await this.prisma.ticket.update({ where: { id }, data });
+    // 乐观并发：状态从读取到写入之间若被并发流转，updateMany 命中 0 行，
+    // 拒绝重放（避免双写历史、双加暂停时长、重复调度 SLA）。
+    const updated = await this.prisma.ticket.updateMany({
+      where: { id, status: ticket.status },
+      data,
+    });
+    if (updated.count === 0)
+      throw new ConflictException('工单状态已被其他人变更，请刷新后重试');
     await this.history(id, user.id, 'TRANSITION', 'status', ticket.status, to);
 
     // SLA 任务调度 / 取消

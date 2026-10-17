@@ -2,6 +2,7 @@ import { BadRequestException, Body, ConflictException, Controller, Delete, Get, 
 import type { Request } from 'express';
 import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
+import { appendOperation } from '../samba/samba-audit';
 import { CurrentUser, RequirePermissions } from './decorators';
 import type { AuthUser } from './auth.types';
 import { PrismaService } from '../prisma/prisma.service';
@@ -74,7 +75,7 @@ export class DirectoryController {
         const roleNames = directoryRolesForGroups(mappings, identity.groupSids);
         await tx.directoryIdentity.update({ where: { userId: identity.userId }, data: { roleNames } });
       }
-      await tx.sambaOperation.create({ data: { id: randomUUID(), actorId: actor.id, actorName: actor.name, action: remove ? 'directory.role.unmap' : 'directory.role.map', requestHash: '-', metadata: key, state: 'succeeded' } });
+      await appendOperation(tx, { id: randomUUID(), actorId: actor.id, actorName: actor.name, action: remove ? 'directory.role.unmap' : 'directory.role.map', requestHash: '-', metadata: key, state: 'succeeded' });
     });
     return { ok: true };
   }

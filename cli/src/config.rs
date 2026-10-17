@@ -35,11 +35,24 @@ impl ConfigStore {
         let parent = self.path.parent().context("无法确定配置目录")?;
         fs::create_dir_all(parent)?;
         let tmp = self.path.with_extension("tmp");
-        fs::write(&tmp, serde_json::to_vec_pretty(&self.config)?)?;
+        let bytes = serde_json::to_vec_pretty(&self.config)?;
+        // 原子创建并直接带 0600：避免先写后 chmod 之间凭据以 umask 默认权限暴露
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&tmp, fs::Permissions::from_mode(0o600))?;
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&tmp)
+                .with_context(|| format!("创建 {} 失败", tmp.display()))?;
+            file.write_all(&bytes)?;
+        }
+        #[cfg(not(unix))]
+        {
+            // Windows 无 POSIX 权限位；写入用户配置目录（%APPDATA% 受用户 ACL 保护）
+            fs::write(&tmp, &bytes)?;
         }
         fs::rename(tmp, &self.path)?;
         Ok(())

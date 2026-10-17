@@ -17,6 +17,11 @@ name: assay
 
 services:
   postgres:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     image: postgres:16-alpine
     restart: always
     environment:
@@ -33,6 +38,11 @@ services:
       retries: 10
 
   redis:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     image: redis:7-alpine
     restart: always
     volumes:
@@ -45,6 +55,11 @@ services:
       retries: 10
 
   rustfs:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
     restart: always
     command: ["/data"]
@@ -58,6 +73,11 @@ services:
     networks: [internal]
 
   api:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-api:${IMAGE_TAG:-latest}
     restart: always
     env_file: .env
@@ -79,6 +99,11 @@ services:
       rustfs: {condition: service_started}
 
   web:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-web:${IMAGE_TAG:-latest}
     restart: always
     networks: [internal, traefik-network]
@@ -95,6 +120,11 @@ services:
 networks:
   internal:
   traefik-network:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     external: true
 
 volumes:

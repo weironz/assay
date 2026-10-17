@@ -222,9 +222,7 @@ export class PlatformService {
       ),
     ];
     const hidden = new Set<string>();
-    if (linkedTicketIds.length && !user.permissions.includes('ticket:read')) {
-      for (const ticketId of linkedTicketIds) hidden.add(ticketId);
-    } else if (linkedTicketIds.length) {
+    if (linkedTicketIds.length && user.permissions.includes('ticket:read')) {
       const readAll = user.permissions.includes('ticket:read:all');
       const tickets = await this.db.ticket.findMany({
         where: { id: { in: linkedTicketIds } },
@@ -248,6 +246,9 @@ export class PlatformService {
       );
       for (const ticketId of linkedTicketIds)
         if (!visible.has(ticketId)) hidden.add(ticketId);
+    } else if (linkedTicketIds.length) {
+      // 无 ticket:read 权限：全部工单引用脱敏，其余记录保持可见
+      for (const ticketId of linkedTicketIds) hidden.add(ticketId);
     }
     return entries.map((entry) => {
       if (!['LINK_TICKET', 'UNLINK_TICKET'].includes(entry.action))

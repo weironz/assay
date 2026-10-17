@@ -125,7 +125,7 @@ pub(crate) fn render(c: &Config, shares: &[Share]) -> Result<String> {
         // vfs_recycle：删除进入共享根下隐藏的 .recycle 目录，保留目录结构
         // 与历史版本。可选清理器按首次收录时间保留，不随共享移除删除。
         out += &format!(
-            "\n[{}]\n    path = {}/{}\n    comment = {}\n    browseable = {}\n    read only = {}\n    valid users = \"{}\" {}\n    admin users = \"{}\"\n    vfs objects = acl_xattr recycle\n    acl_xattr:ignore system acls = yes\n    map acl inherit = yes\n    inherit acls = yes\n    wide links = no\n    access based share enum = yes\n    hide unreadable = yes\n    recycle:repository = .recycle\n    recycle:keeptree = yes\n    recycle:versions = yes\n    recycle:maxsize = 0\n",
+            "\n[{}]\n    path = {}/{}\n    comment = {}\n    browseable = {}\n    read only = {}\n    valid users = \"{}\" {}\n    admin users = \"{}\"\n    vfs objects = acl_xattr recycle\n    acl_xattr:ignore system acls = yes\n    map acl inherit = yes\n    inherit acls = yes\n    wide links = no\n    access based share enum = yes\n    hide unreadable = yes\n    recycle:repository = .recycle\n    recycle:keeptree = yes\n    recycle:versions = yes\n    recycle:maxsize = 0\n    recycle:touch_mtime = yes\n",
             s.name,
             c.samba_shares_root.display(),
             relative,

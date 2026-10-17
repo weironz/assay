@@ -44,6 +44,14 @@ RUN --mount=type=secret,id=proxy_ca \
 
 COPY --from=builder /app/dist ./dist
 
+# 附件目录由卷挂载（/data/attachments）；本地存储驱动启动时确保目录存在。
+# 归属 node 组让挂载卷可写（命名卷继承镜像目录的组权限）。
+RUN mkdir -p /data/attachments && chown -R node:node /app /data/attachments
+
+# 非 root 运行：应用自身的输出（日志/附件）都不需要 root，
+# migrate/seed 在容器内以 node 用户执行，Prisma 只连远端数据库。
+USER node
+
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s \
   CMD node -e "fetch('http://127.0.0.1:'+(Number(process.env.API_PORT)||3000)+'/health',{signal:AbortSignal.timeout(4000)}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

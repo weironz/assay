@@ -30,12 +30,18 @@ import { PermissionsGuard } from './auth/permissions.guard';
     SambaModule,
     FilesModule,
     ConfigModule.forRoot({ isGlobal: true }),
-    BullModule.forRoot({
-      connection: {
-        host: process.env.REDIS_HOST || 'redis',
-        port: Number(process.env.REDIS_PORT) || 6379,
-      },
-    }),
+    // REDIS_URL 优先（可携带密码/TLS）；未设置时退回 HOST/PORT 组合。
+    // 与 ioredis 约定一致：url 存在时 host/port 被忽略。
+    BullModule.forRoot(
+      process.env.REDIS_URL
+        ? { connection: { url: process.env.REDIS_URL } }
+        : {
+            connection: {
+              host: process.env.REDIS_HOST || 'redis',
+              port: Number(process.env.REDIS_PORT) || 6379,
+            },
+          },
+    ),
     PrismaModule,
     StorageModule,
     AuthModule,

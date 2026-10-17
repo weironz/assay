@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # 备份运行中的 Compose 项目：PostgreSQL + RustFS 当前 S3 对象 + 恢复所需密钥。
 # 用法：bash scripts/backup.sh [输出目录] [实际使用的 Compose 文件]
+# 密钥材料（deployment.env / auth-secret.txt / 对象存储中的机密）默认用 age
+# 加密为单个归档：BACKUP_AGE_RECIPIENT 指定接收者公钥；未安装 age 时回退明文并警告。
 set -euo pipefail
 umask 077
 
 die() { printf '备份失败：%s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "缺少命令：$1"; };
 
 need docker
 need jq
@@ -154,4 +156,17 @@ printf 'project=%s\ncompose_file=%s\nrustfs_volume=%s\npostgres_volume=%s\npostg
 [[ "$(sha256sum -- "$COMPOSE_FILE")" == "$COMPOSE_HASH "* ]] ||
   die "所选 Compose 文件在备份期间发生变化，备份已中止"
 rm -- "$DEST/INCOMPLETE"
+# 敏感材料单独打组并加密：age 归档包含 deployment.env、auth-secret.txt 与
+# 校验清单（含这两项的哈希）；未配置 age 时回退明文目录并给出醒目警告。
+SECRET_GROUP="backup-secrets.tar"
+if command -v age >/dev/null 2>&1 && [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]; then
+  (cd "$DEST" && tar -cf "$SECRET_GROUP" deployment.env auth-secret.txt)
+  (cd "$DEST" && age -r "$BACKUP_AGE_RECIPIENT" -o "${SECRET_GROUP}.age" "$SECRET_GROUP")
+  rm -- "$DEST/deployment.env" "$DEST/auth-secret.txt" "$SECRET_GROUP"
+  chmod 600 "${SECRET_GROUP}.age"
+  printf '[加密] 敏感材料已用 age 加密为 %s（接收者：%s）\n' "${SECRET_GROUP}.age" "$BACKUP_AGE_RECIPIENT"
+else
+  printf '警告：未配置 BACKUP_AGE_RECIPIENT 或未安装 age，deployment.env 与 auth-secret.txt 以明文保留。\n' >&2
+  printf '警告：备份目录含 AUTH_SECRET 与数据库凭据，请确保输出目录权限受限并尽快转移。\n' >&2
+fi
 printf '备份完成：%s\n' "$DEST"

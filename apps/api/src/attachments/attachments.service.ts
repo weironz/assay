@@ -147,8 +147,9 @@ export class AttachmentsService {
       where: { id },
     });
     if (!rec) throw new NotFoundException('附件不存在');
-    // 草稿附件(ticketId 为空)：登录用户即可访问；已挂工单的按工单可见性校验
+    // 已挂工单的按工单可见性校验；草稿附件（ticketId 为空）仅上传者本人可下载
     if (rec.ticketId) await this.assertCanView(user, rec.ticketId);
+    else if (rec.uploaderId !== user.id) throw new ForbiddenException('无权访问该附件');
     // 返回流而不是 Buffer：512MB 的附件整包读进内存下载一次就够呛
     const stream = await this.storage.getStream(rec.objectKey);
     return { rec, stream };

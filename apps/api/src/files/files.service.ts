@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { authRedis } from '../auth/auth-redis';
+import { appendAuditOperation } from '../samba/samba-audit';
 import { webSessionScopes } from '../auth/web-session-scope';
 import type { AuthUser } from '../auth/auth.types';
 import { SambaService } from '../samba/samba.service';
@@ -164,7 +165,7 @@ export class FilesService {
     return data;
   }
   private async audit(user: AuthUser, action: string, metadata: Record<string, string>) {
-    return this.prisma.sambaOperation.create({ data: { id: randomUUID(), actorId: user.id, actorName: user.name, action: `file.${action}`, requestHash: createHash('sha256').update(JSON.stringify(metadata)).digest('hex'), metadata } });
+    return appendAuditOperation(this.prisma, { id: randomUUID(), actorId: user.id, actorName: user.name, action: `file.${action}`, requestHash: createHash('sha256').update(JSON.stringify(metadata)).digest('hex'), metadata });
   }
   private async finish(id: string, succeeded: boolean) { await this.prisma.sambaOperation.update({ where: { id }, data: { state: succeeded ? 'succeeded' : 'uncertain', result: { message: succeeded ? '已完成' : '未确认完成，请刷新核对；不要自动重试写操作' } } }); }
   async command(req: Request, user: AuthUser, input: unknown) {

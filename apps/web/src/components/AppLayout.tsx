@@ -5,6 +5,7 @@ import { useAuth } from "../stores/auth";
 import { useModules } from "../stores/modules";
 import { api } from "../lib/api";
 import { signOut } from "../lib/auth-client";
+import { resetQueryCache } from "../App";
 import {
   BUSINESS_MODULES,
   PLATFORM_MODULE,
@@ -90,6 +91,7 @@ export default function AppLayout() {
       }
     }
     await signOut();
+    resetQueryCache();
     clear();
     navigate("/login", { replace: true });
   };
