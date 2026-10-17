@@ -20,7 +20,7 @@ export class SambaController {
   @Get('sessions') @RequirePermissions('samba:read') sessions() { return this.samba.sessions(); }
   @Get('recycle') @RequirePermissions('samba:read') recycle() { return this.samba.recycle(); }
   @Put('recycle') @RequirePermissions('samba:manage') async setRecycle(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
-    await this.stepUp.consume(req, user, 'samba'); return this.samba.setRecycle(body);
+    await this.stepUp.consume(req, user, 'samba'); return this.samba.setRecycle(user, body);
   }
   @Get('effective-policy') @RequirePermissions('samba:read') effectivePolicy(@Query('id') id: string) { return this.samba.effectivePolicy(id); }
   @Get('recycle/list') @RequirePermissions('samba:read') recycleList(@Query('share') share: string) { return this.samba.recycleList(share); }

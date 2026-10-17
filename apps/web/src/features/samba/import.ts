@@ -34,7 +34,7 @@ export async function readEmployeeImportFile(
   if (file.size > 4 * 1024 * 1024) throw Error('文件大小不能超过 4 MiB');
   let sheetRows: Record<string, string>[];
   if (/\.csv$/i.test(file.name)) {
-    sheetRows = records(csvRows(await file.text()));
+    sheetRows = records(csvRows(await file.text()), ['password', '初始密码', '密码']);
   } else if (/\.xlsx$/i.test(file.name)) {
     const buffer = await file.arrayBuffer();
     zipBounds(buffer);
@@ -51,7 +51,7 @@ export async function readEmployeeImportFile(
         Array.from({ length: sheet.columnCount }, (_, i) => row.getCell(i + 1).text),
       );
     });
-    sheetRows = records(rows);
+    sheetRows = records(rows, ['password', '初始密码', '密码']);
   } else {
     throw Error('请选择 XLSX 或 UTF-8 CSV 文件');
   }
@@ -61,7 +61,7 @@ export async function readEmployeeImportFile(
   return sheetRows.map((r) => ({
     name: pick(r, 'name', '登录账号', '账号'),
     display_name: pick(r, 'display_name', '员工姓名', '姓名'),
-    password: pick(r, 'password', '初始密码', '密码'),
+    password: ['password', '初始密码', '密码'].map(k => r[k]).find(v => v !== undefined && v !== '') || '',
     employee_id: pick(r, 'employee_id', '工号') || undefined,
     email: pick(r, 'email', '邮箱') || undefined,
     department: pick(r, 'department', '部门') || undefined,
@@ -69,5 +69,13 @@ export async function readEmployeeImportFile(
     phone: pick(r, 'phone', '电话') || undefined,
     company: pick(r, 'company', '公司') || undefined,
     office: pick(r, 'office', '办公地点') || undefined,
+  }));
+}
+
+/** Preserve credentials exactly; only employee metadata belongs under profile. */
+export function employeeCommandRows(rows: EmployeeImportRow[]) {
+  return rows.map(({ name, display_name, password, ...profile }) => ({
+    name, display_name, password,
+    profile: Object.fromEntries(Object.entries(profile).filter(([, value]) => value !== undefined)),
   }));
 }

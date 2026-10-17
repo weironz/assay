@@ -801,11 +801,23 @@ model SambaOperation {
   metadata    Json
   state       String @default("pending")
   result      Json?
-  // 追加式审计哈希链：sha256(上一条 chainHash | 本条 id | 本条 requestHash)。
-  // 检测对历史行的篡改/插入/删除；尾行截断需靠离线导出日志发现。
+  // Legacy v1 hash retained for compatibility; integrity is tracked by SambaAuditEvent.
   chainHash   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
   @@index([createdAt])
   @@map("samba_operations")
+}
+
+
+model SambaAuditEvent {
+  sequence     BigInt   @id @default(autoincrement())
+  operationId  String   @map("operation_id")
+  event        String
+  snapshot     Json
+  previousHash String   @map("previous_hash")
+  chainHash    String   @map("chain_hash")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  @@index([operationId, sequence])
+  @@map("samba_audit_events")
 }

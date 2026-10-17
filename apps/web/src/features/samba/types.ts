@@ -53,13 +53,17 @@ export type Snapshot = {
   bindings: { userId: string; adObjectId: string; accountName: string; directoryManaged?: boolean }[];
   assayUsers: { id: string; name: string; email: string }[];
 };
-/** 负 FILETIME 间隔（100ns 单位）转天数；0、正数或超长哨兵值（INT64_MIN）表示未启用 */
+/** AD intervals are negative 100ns values; keep sub-day precision. */
 export const filetimeDays = (v?: string) => {
-  const n = Number(v ?? 0);
-  if (n >= 0) return null;
-  const days = Math.round(-n / 10_000_000 / 86400);
-  // 超过 10 年视为未启用：Windows/Samba 用 INT64_MIN 哨兵表示"永不过期"
-  return days > 3650 ? null : days;
+  try {
+    const n = BigInt(v || '0');
+    if (n >= 0n || n === -9223372036854775808n) return null;
+    return Number(-n) / 864_000_000_000;
+  } catch { return null; }
+};
+export const filetimeMinutes = (v?: string) => {
+  const days = filetimeDays(v);
+  return days == null ? null : Math.round(days * 1440);
 };
 export const formatTime = (ms?: number | null) =>
   ms && ms > 0 ? new Date(ms).toLocaleString() : '—';

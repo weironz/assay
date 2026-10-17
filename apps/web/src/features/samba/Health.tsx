@@ -11,6 +11,7 @@ import {
 } from './components';
 import {
   filetimeDays,
+  filetimeMinutes,
   formatTime,
   type Employee,
   type Workspace,
@@ -193,12 +194,12 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
             <dt className="text-sm text-gray-500">账号锁定</dt>
             <dd className="mt-1 flex flex-wrap items-center gap-2 text-sm font-medium">
               <span>
-                {policy?.lockoutThreshold
-                  ? `连续 ${Number(policy.lockoutThreshold)} 次失败锁定`
+                {Number(policy?.lockoutThreshold) > 0
+                  ? `连续 ${Number(policy?.lockoutThreshold)} 次失败锁定`
                   : '失败不自动锁定'}
-                {policy?.lockoutThreshold && filetimeDays(policy?.lockoutDuration) !== null
-                  ? `，${filetimeDays(policy!.lockoutDuration)! * 1440} 分钟后自动解锁`
-                  : policy?.lockoutThreshold
+                {Number(policy?.lockoutThreshold) > 0 && filetimeMinutes(policy?.lockoutDuration) !== null
+                  ? `，${filetimeMinutes(policy?.lockoutDuration)} 分钟后自动解锁`
+                  : Number(policy?.lockoutThreshold) > 0
                     ? '，永久（需手动解锁）'
                     : ''}
               </span>
@@ -238,7 +239,7 @@ export function Health({ snapshot, canWrite, confirm }: Workspace) {
           </div>
           <Info label="锁定观察窗口">
             {filetimeDays(policy?.lockoutObservationWindow) !== null
-              ? `${filetimeDays(policy!.lockoutObservationWindow)} 天`
+              ? `${filetimeMinutes(policy?.lockoutObservationWindow)} 分钟`
               : '未配置'}
           </Info>
         </dl>

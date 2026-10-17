@@ -1,6 +1,6 @@
 import { api } from '../../lib/api';
 import { OperationError } from '../../lib/operation-error';
-type Operation = { id: string; state: string; result?: { error?: string; error_code?: string | null } };
+type Operation = { id: string; state: string; result?: { error?: string; error_code?: string | null; result?: { failed?: { path: string; reason: string }[] } } };
 export async function awaitOperation(operation: Operation, own = false) {
   let current = operation;
   const started = Date.now();

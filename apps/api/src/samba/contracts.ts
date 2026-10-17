@@ -28,6 +28,7 @@ export const actions = {
     lockout_threshold: z.number().int().min(0).max(1000).optional(),
     lockout_duration_minutes: z.number().int().min(0).max(43200).optional(),
   }).refine(v => Object.keys(v).length > 0, { message: '至少指定一项策略变更' }).strict(),
+  'recycle.configure': z.object({ retention_days: z.number().int().min(1).max(3650) }).strict(),
   'recycle.restore': z.object({ share: shareName, paths: z.array(path).min(1).max(100) }).strict(),
   'recycle.purge': z.object({ share: shareName, paths: z.array(path).min(1).max(100) }).strict(),
   'group.create': z.object({ name, description: display }).strict(),

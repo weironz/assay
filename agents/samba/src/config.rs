@@ -5,10 +5,6 @@ use std::{fs, path::PathBuf};
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
-    // 本配置的加载来源；agent 运行时设置（如回收站保留期）写回该文件，
-    // 让变更跨重启持久。测试/内存构造时为 None。
-    #[serde(skip)]
-    pub source_path: Option<String>,
     pub listen: String,
     pub token_file: PathBuf,
     pub ldap_url: String,
@@ -53,8 +49,8 @@ pub struct Config {
     // 状态文件（同一卷挂载），否则读取失败而不是返回过期数据。
     #[serde(default)]
     pub smb_status: Option<SmbStatus>,
-    // 可选：内置回收站清理。周期性删除各共享 .recycle 中超过保留期的
-    // 文件，随镜像分发，无需服务器侧脚本或 systemd 单元。
+    // Optional cleanup of registered share bins. Runtime overrides live in state_dir;
+    // agent.json stays read-only. Retention starts at first observation, not mtime.
     #[serde(default)]
     pub recycle: Option<Recycle>,
     #[serde(default)]
@@ -94,10 +90,7 @@ impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let c: Self = serde_json::from_slice(&fs::read(path)?)?;
         c.check()?;
-        Ok(Self {
-            source_path: Some(path.to_owned()),
-            ..c
-        })
+        Ok(c)
     }
     pub fn check(&self) -> Result<()> {
         for name in [&self.shares_file_name, &self.samba_config_file_name] {

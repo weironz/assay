@@ -40,14 +40,9 @@ fn type_name(t: u16) -> String {
     .to_owned()
 }
 
-/// NUL 结尾字符串（SOA 的 mname/rname 用此编码而非 dnsp_name）
-fn decode_cstr(d: &[u8]) -> Option<(&str, usize)> {
-    let end = d.iter().position(|&b| b == 0)?;
-    Some((std::str::from_utf8(&d[..end]).ok()?, end + 1))
-}
-
 /// dnsp_name：总长、标签数、逐个长度前缀标签、零终结
-fn decode_name(d: &[u8]) -> Option<(String, usize)> {    if d.len() < 2 {
+fn decode_name(d: &[u8]) -> Option<(String, usize)> {
+    if d.len() < 2 {
         return None;
     }
     let (total, count) = (d[0] as usize, d[1] as usize);
@@ -91,13 +86,19 @@ fn decode_record(blob: &[u8]) -> Result<Value> {
             ensure!(data_len == 16, "malformed AAAA record");
             std::net::Ipv6Addr::from(<[u8; 16]>::try_from(data).unwrap()).to_string()
         }
-        2 | 5 | 12 => decode_name(data).ok_or_else(|| anyhow!("malformed name record"))?.0,
+        2 | 5 | 12 => {
+            decode_name(data)
+                .ok_or_else(|| anyhow!("malformed name record"))?
+                .0
+        }
         15 => {
             ensure!(data_len >= 3, "malformed MX record");
             format!(
                 "{} {}",
                 be16(data, 0),
-                decode_name(&data[2..]).ok_or_else(|| anyhow!("malformed MX record"))?.0
+                decode_name(&data[2..])
+                    .ok_or_else(|| anyhow!("malformed MX record"))?
+                    .0
             )
         }
         33 => {
@@ -107,39 +108,41 @@ fn decode_record(blob: &[u8]) -> Result<Value> {
                 be16(data, 0),
                 be16(data, 2),
                 be16(data, 4),
-                decode_name(&data[6..]).ok_or_else(|| anyhow!("malformed SRV record"))?.0
+                decode_name(&data[6..])
+                    .ok_or_else(|| anyhow!("malformed SRV record"))?
+                    .0
             )
         }
         16 => {
-            let mut parts: Vec<String> = vec![];
-            let mut off = 0usize;
-            while off < data.len() {
-                let len = data[off] as usize;
+            let count = *data
+                .first()
+                .ok_or_else(|| anyhow!("malformed TXT record"))? as usize;
+            let mut parts = vec![];
+            let mut off = 1;
+            for _ in 0..count {
+                let len = *data
+                    .get(off)
+                    .ok_or_else(|| anyhow!("malformed TXT record"))?
+                    as usize;
                 off += 1;
-                ensure!(off + len <= data.len(), "malformed TXT record");
-                parts.push(String::from_utf8_lossy(&data[off..off + len]).to_string());
+                let value = data
+                    .get(off..off + len)
+                    .ok_or_else(|| anyhow!("malformed TXT record"))?;
+                parts.push(String::from_utf8_lossy(value).to_string());
                 off += len;
             }
-            parts.join("")
+            parts.join(" ")
         }
         6 => {
-            // MS-DNSP/Samba 的 SOA：mname/rname 是 NUL 结尾字符串，不是 dnsp_name；
-            // 尾部五个整数（serial/refresh/retry/expire/minimum）按小端存储
+            // Samba dnsp.idl: five big-endian integers, then two dnsp_name values.
+            ensure!(data.len() >= 20, "malformed SOA record");
             let (mname, used) =
-                decode_cstr(data).ok_or_else(|| anyhow!("malformed SOA record"))?;
-            let rest = &data[used..];
-            let (rname, used2) =
-                decode_cstr(rest).ok_or_else(|| anyhow!("malformed SOA record"))?;
-            ensure!(rest.len() >= used2 + 20, "malformed SOA record");
-            let n = &rest[used2..];
-            let mut parts: Vec<String> = vec![];
-            for name in [mname, rname] {
-                if !name.is_empty() {
-                    parts.push(name.to_owned());
-                }
-            }
+                decode_name(&data[20..]).ok_or_else(|| anyhow!("malformed SOA record"))?;
+            let (rname, _) =
+                decode_name(&data[20 + used..]).ok_or_else(|| anyhow!("malformed SOA record"))?;
+            let mut parts = vec![mname, rname];
             for i in 0..5 {
-                parts.push(le32(n, i * 4).to_string());
+                parts.push(be32(data, i * 4).to_string());
             }
             parts.join(" ")
         }
@@ -173,17 +176,19 @@ fn zone_name(zone: &str) -> Result<&str> {
 /// 之前的那个 DC= 组件。DNS 名不含逗号，直接按组件拆分是安全的。
 fn zone_of_dn(dn: &str) -> Option<String> {
     let parts: Vec<&str> = dn.split(',').collect();
-    let idx = parts.iter().position(|p| p.eq_ignore_ascii_case("cn=MicrosoftDNS"))?;
+    let idx = parts
+        .iter()
+        .position(|p| p.eq_ignore_ascii_case("cn=MicrosoftDNS"))?;
     let zone_part = parts.get(idx.checked_sub(1)?)?;
-    zone_part.strip_prefix("DC=").or_else(|| zone_part.strip_prefix("dc=")).map(str::to_owned)
+    zone_part
+        .strip_prefix("DC=")
+        .or_else(|| zone_part.strip_prefix("dc="))
+        .map(str::to_owned)
 }
 fn node_of_dn(dn: &str) -> String {
     dn.split(',')
         .next()
-        .and_then(|p| {
-            p.strip_prefix("DC=")
-                .or_else(|| p.strip_prefix("dc="))
-        })
+        .and_then(|p| p.strip_prefix("DC=").or_else(|| p.strip_prefix("dc=")))
         .unwrap_or_default()
         .to_owned()
 }
@@ -228,7 +233,10 @@ pub async fn zones(d: &mut Directory) -> Result<Value> {
     }
     names.sort();
     names.dedup();
-    ensure!(!names.is_empty(), "no DNS zones visible under any partition");
+    ensure!(
+        !names.is_empty(),
+        "no DNS zones visible under any partition"
+    );
     Ok(json!({"zones": names}))
 }
 
@@ -244,7 +252,7 @@ pub async fn records(d: &mut Directory, zone: &str) -> Result<Value> {
         format!("CN=MicrosoftDNS,CN=System,{}", d.base()),
     ];
     let mut nodes: Vec<(String, Vec<Value>)> = vec![];
-    let mut diagnostics: Vec<Value> = vec![];
+    let mut partial = false;
     for base in bases {
         match d
             .ldap
@@ -259,13 +267,6 @@ pub async fn records(d: &mut Directory, zone: &str) -> Result<Value> {
             .and_then(|r| r.success().map_err(anyhow::Error::from))
         {
             Ok((rows, _)) => {
-                let sample = rows.iter().take(2).map(|r| {
-                    let e = ldap3::SearchEntry::construct(r.clone());
-                    json!({"dn": e.dn,
-                        "dnsRecord_n": e.bin_attrs.get("dnsRecord").map(|v| v.len()),
-                        "blob_heads": e.bin_attrs.get("dnsRecord").map(|v| v.iter().take(2).map(|b| b.iter().take(12).map(|x| format!("{x:02x}")).collect::<String>()).collect::<Vec<_>>())})
-                }).collect::<Vec<_>>();
-                diagnostics.push(json!({"base": base, "rows": rows.len(), "sample": sample}));
                 for row in rows {
                     let e = ldap3::SearchEntry::construct(row);
                     if zone_of_dn(&e.dn).as_deref() != Some(zone) {
@@ -277,26 +278,22 @@ pub async fn records(d: &mut Directory, zone: &str) -> Result<Value> {
                         .and_then(|v| v.first())
                         .cloned()
                         .unwrap_or_else(|| node_of_dn(&e.dn));
-            let blobs = e
-                .bin_attrs
-                .get("dnsRecord")
-                .cloned()
-                .unwrap_or_default();
-            let mut decoded = vec![];
-            for blob in blobs.iter().take(MAX_RECORDS_PER_NODE) {
-                if le16(blob, 2) == 0 {
-                    continue; // 墓碑
-                }
-                if let Ok(value) = decode_record(blob) {
-                    decoded.push(value);
-                }
-            }
-            if !decoded.is_empty() {
-                nodes.push((name, decoded));
-            }
+                    let blobs = e.bin_attrs.get("dnsRecord").cloned().unwrap_or_default();
+                    let mut decoded = vec![];
+                    for blob in blobs.iter().take(MAX_RECORDS_PER_NODE) {
+                        if blob.len() < HEADER || le16(blob, 2) == 0 {
+                            continue; // 墓碑
+                        }
+                        if let Ok(value) = decode_record(blob) {
+                            decoded.push(value);
+                        }
+                    }
+                    if !decoded.is_empty() {
+                        nodes.push((name, decoded));
+                    }
                 }
             }
-            Err(e) => diagnostics.push(json!({"base": base, "error": e.to_string()})),
+            Err(_) => partial = true,
         }
     }
     nodes.sort_by(|a, b| a.0.cmp(&b.0));
@@ -306,13 +303,68 @@ pub async fn records(d: &mut Directory, zone: &str) -> Result<Value> {
             values
                 .into_iter()
                 .map(move |mut v| {
-                    v["name"] = json!(if name == "@" { zone.to_owned() } else { name.clone() });
+                    v["name"] = json!(if name == "@" {
+                        zone.to_owned()
+                    } else {
+                        name.clone()
+                    });
                     v
                 })
                 .collect::<Vec<_>>()
         })
         .collect();
-    // 诊断字段仅在没有解析出任何记录时返回，帮助定位分区/属性差异；
-    // 前端忽略该字段。
-    Ok(json!({"zone": zone, "records": records, "debug": diagnostics}))
+    Ok(json!({"zone": zone, "records": records, "partial":partial}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn name(s: &str) -> Vec<u8> {
+        let labels: Vec<_> = s.split('.').collect();
+        let mut raw = vec![];
+        for label in &labels {
+            raw.push(label.len() as u8);
+            raw.extend_from_slice(label.as_bytes());
+        }
+        raw.push(0);
+        let mut result = vec![raw.len() as u8, labels.len() as u8];
+        result.extend(raw);
+        result
+    }
+    fn record(kind: u16, data: &[u8]) -> Vec<u8> {
+        let mut b = vec![0u8; 24];
+        b[..2].copy_from_slice(&(data.len() as u16).to_le_bytes());
+        b[2..4].copy_from_slice(&kind.to_le_bytes());
+        b[4] = 5;
+        b.extend(data);
+        b
+    }
+    #[test]
+    fn soa_matches_the_official_samba_dnsp_wire_layout() {
+        let mut data = vec![];
+        for n in [2026101701u32, 3600, 600, 86400, 3600] {
+            data.extend(n.to_be_bytes());
+        }
+        data.extend(name("dc.example.test"));
+        data.extend(name("hostmaster.example.test"));
+        assert_eq!(
+            decode_record(&record(6, &data)).unwrap()["data"],
+            "dc.example.test hostmaster.example.test 2026101701 3600 600 86400 3600"
+        );
+        for len in 0..20 {
+            assert!(decode_record(&record(6, &data[..len])).is_err());
+        }
+    }
+    #[test]
+    fn malformed_records_are_rejected_without_panics() {
+        for len in 0..24 {
+            assert!(decode_record(&vec![0; len]).is_err());
+        }
+        assert!(decode_record(&record(1, &[1, 2])).is_err());
+        assert!(decode_record(&record(5, &[255, 2, 1])).is_err());
+        assert_eq!(
+            decode_record(&record(1, &[192, 168, 10, 225])).unwrap()["data"],
+            "192.168.10.225"
+        );
+    }
 }

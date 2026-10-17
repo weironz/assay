@@ -20,14 +20,15 @@ const permissions = [
   { value: 'remove', label: '移除直接授权' },
 ];
 
-/** 回收站保留策略：写入由 API 直接透传 agent（无操作队列），此处独立管理状态 */
-function RecycleSettings({ canWrite }: { canWrite: boolean }) {
+/** Settings changes use the same authorization, command queue and audit as other writes. */
+function RecycleSettings({ canWrite, confirm }: { canWrite: boolean; confirm: Workspace['confirm'] }) {
   const [days, setDays] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const load = () => {
+    setBusy(true);
     void api
       .get('/samba/recycle')
       .then((r) => {
@@ -36,7 +37,8 @@ function RecycleSettings({ canWrite }: { canWrite: boolean }) {
         setDraft(value != null ? String(value) : '');
         setError('');
       })
-      .catch(() => setDays(null));
+      .catch(() => setError('无法读取回收站策略，请检查文件服务连接后刷新'))
+      .finally(() => setBusy(false));
   };
   useEffect(load, []);
   const save = () => {
@@ -45,22 +47,11 @@ function RecycleSettings({ canWrite }: { canWrite: boolean }) {
       setError('保留天数需为 1–3650 的整数');
       return;
     }
-    setBusy(true);
     setError('');
-    api
-      .put('/samba/recycle', { retention_days: parsed })
-      .then(() => {
-        setDays(parsed);
-        setNotice('回收站保留策略已更新，清理任务将按新保留期执行');
-        setTimeout(() => setNotice(''), 4000);
-      })
-      .catch((e) =>
-        setError(
-          (e as { response?: { data?: { message?: string } } })?.response?.data
-            ?.message || '保存失败，请重试',
-        ),
-      )
-      .finally(() => setBusy(false));
+    confirm('修改回收站保留期', 'recycle.configure', { retention_days: parsed }, () => {
+      load();
+      setNotice('保留策略已更新；已有文件按首次收录时间计算，未到期的文件会保留');
+    }, [['保留天数', `${parsed} 天`], ['影响', '缩短保留期可能使已收录的超期文件进入清理范围']]);
   };
   return (
     <section className={card + ' p-5'}>
@@ -70,7 +61,7 @@ function RecycleSettings({ canWrite }: { canWrite: boolean }) {
           <p className="mt-1 text-sm text-gray-500">
             {days == null
               ? '未启用内置清理（各共享的 .recycle 目录不会被自动清空）'
-              : `各共享回收站中的文件保留 ${days} 天，超期后由文件服务器自动清理。删除的文件可在保留期内从 .recycle 目录找回。`}
+              : `各共享回收站中的文件从首次收录起至少保留 ${days} 天，超期后自动清理；历史文件首次收录时开始计时。`}
           </p>
         </div>
         <div className="flex items-end gap-2">
@@ -129,7 +120,7 @@ function ShareRecycleBin({
     setBusy(true);
     void api
       .get('/samba/recycle/list', { params: { share: share.name } })
-      .then((r) => setEntries(r.data || []))
+      .then((r) => { setEntries(r.data || []); setSelected([]); })
       .catch((e) => {
         onError(
           (e as { response?: { data?: { message?: string } } })?.response?.data
@@ -208,14 +199,14 @@ function ShareRecycleBin({
                   label: (
                     <input
                       type="checkbox"
-                      aria-label="选择全部回收站条目"
+                      aria-label="选择回收站条目（最多100项）"
                       disabled={busy || !entries.length}
                       checked={
-                        entries.length > 0 && selected.length === entries.length
+                        entries.length > 0 && selected.length === Math.min(entries.length, 100)
                       }
                       onChange={(e) =>
                         setSelected(
-                          e.target.checked ? entries.map((x) => x.path) : [],
+                          e.target.checked ? entries.slice(0, 100).map((x) => x.path) : [],
                         )
                       }
                     />
@@ -224,7 +215,7 @@ function ShareRecycleBin({
                     <input
                       type="checkbox"
                       aria-label={`选择 ${r.path}`}
-                      disabled={busy}
+                      disabled={busy || (!selected.includes(r.path) && selected.length >= 100)}
                       checked={selected.includes(r.path)}
                       onChange={(e) =>
                         setSelected(
@@ -251,7 +242,7 @@ function ShareRecycleBin({
             render: (r) => `${(r.size / 1024).toFixed(1)} KB`,
           },
           {
-            label: '删除时间',
+            label: '首次收录时间',
             render: (r) =>
               r.deleted_at > 0
                 ? new Date(r.deleted_at * 1000).toLocaleString()
@@ -401,7 +392,7 @@ export function Shares({
   if (!id)
     return (
       <div className="space-y-6">
-      <RecycleSettings canWrite={canWrite} />
+      <RecycleSettings canWrite={canWrite} confirm={confirm} />
       <DataTable
         label="共享目录"
         rows={snapshot.shares}

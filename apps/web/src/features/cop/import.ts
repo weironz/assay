@@ -78,13 +78,13 @@ export function zipBounds(buffer: ArrayBuffer) {
       view.getUint16(offset + 32, true);
   }
 }
-export function records(rows: string[][]): Record<string, string>[] {
+export function records(rows: string[][], preserveColumns: readonly string[] = []): Record<string, string>[] {
   const headers = rows[0]?.map((h) => h.replace(/^\uFEFF/, '').trim()) ?? [];
   return rows
     .slice(1)
     .filter((r) => r.some((v) => v.trim()))
     .map((row) =>
-      Object.fromEntries(headers.map((h, i) => [h, row[i]?.trim() || ''])),
+      Object.fromEntries(headers.map((h, i) => [h, preserveColumns.includes(h) ? (row[i] ?? '') : (row[i]?.trim() || '')])),
     );
 }
 export async function readImportFile(file: File): Promise<ImportSheet[]> {

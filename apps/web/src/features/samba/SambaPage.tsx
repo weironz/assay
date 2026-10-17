@@ -26,6 +26,7 @@ import { Groups } from './Groups';
 import { Shares } from './Shares';
 import { Bindings } from './Bindings';
 import { ImportUsers, type BulkResult } from './ImportUsers';
+import { employeeCommandRows } from './import';
 import { Health } from './Health';
 import { Dns, Sessions } from './Dns';
 
@@ -221,15 +222,15 @@ export default function SambaPage() {
       const response = await api.post(pending.endpoint, pending.body, {
         headers: stepUpHeaders(token),
       });
-      if (pending.endpoint.endsWith('/commands'))
-        await awaitOperation(response.data);
+      const completed = pending.endpoint.endsWith('/commands') ? await awaitOperation(response.data) : null;
+      const failed = completed?.result?.result?.failed || [];
       if (pending.endpoint.endsWith('/users/bulk')) {
         setBulkResult(response.data as BulkResult);
         setNotice(
           `已提交 ${(response.data as BulkResult).created} / ${(response.data as BulkResult).total} 行，逐行执行状态见下方结果表`,
         );
-      } else setNotice('操作已完成');
-      setError('');
+      } else setNotice(failed.length ? `操作已处理，${failed.length} 项未执行` : '操作已完成');
+      setError(failed.map(item => `${item.path}：${item.reason}`).join('；'));
       pending.onSuccess?.();
       await load();
     } catch (e) {
@@ -340,7 +341,7 @@ export default function SambaPage() {
                 setPending({
                   title: '批量创建员工账号',
                   endpoint: '/samba/users/bulk',
-                  body: { rows },
+                  body: { rows: employeeCommandRows(rows) },
                   preview: [
                     ['导入行数', `${rows.length}`],
                     ['登录账号', rows.map((r) => r.name).slice(0, 8).join('、') + (rows.length > 8 ? ' …' : '')],

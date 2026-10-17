@@ -222,8 +222,9 @@ export class PlatformService {
       ),
     ];
     const hidden = new Set<string>();
-    if (linkedTicketIds.length) {
-      requirePermission(user, 'ticket:read');
+    if (linkedTicketIds.length && !user.permissions.includes('ticket:read')) {
+      for (const ticketId of linkedTicketIds) hidden.add(ticketId);
+    } else if (linkedTicketIds.length) {
       const readAll = user.permissions.includes('ticket:read:all');
       const tickets = await this.db.ticket.findMany({
         where: { id: { in: linkedTicketIds } },

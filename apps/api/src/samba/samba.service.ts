@@ -1,6 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, ServiceUnavailableException, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { createHash, createHmac } from 'crypto';
-import { Prisma } from '@prisma/client';
 import { readFileSync } from 'fs';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -20,28 +19,32 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
   }
   async renamePreview(input:unknown){const p=renameSchema.safeParse(input);if(!p.success)throw new BadRequestException({code:'RENAME_INVALID_NAME',message:'重命名参数无效，请核对名称并刷新后重试'});return this.agent('/v1/rename-preview',p.data)}
   private async invalidateRenameProfile(providerId:string,id:string){const {authRedis}=await import('../auth/auth-redis');await authRedis.del(`assay:directory:profile:${createHash('sha256').update(`${providerId}:${id}`).digest('hex')}`)}
-  /** 审计哈希链的固定编号，串行化并发追加，保证链头读取不竞争 */
-  private static readonly CHAIN_LOCK_KEY = 918273645;
-  private chainHash(previous: string | null, id: string, requestHash: string) {
-    return createHash('sha256').update(`${previous ?? ''}|${id}|${requestHash}`).digest('hex');
-  }
-  /** 在事务内追加一条 SambaOperation 并接入哈希链 */
-  private async appendOperation(tx: Prisma.TransactionClient, data: { id: string; actorId: string; actorName: string; action: string; requestHash: string; metadata: any; state?: string }) {
-    await tx.$executeRaw`SELECT pg_advisory_xact_lock(${SambaService.CHAIN_LOCK_KEY})`;
-    const last = await tx.sambaOperation.findFirst({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], select: { chainHash: true } });
-    return tx.sambaOperation.create({ data: { ...data, chainHash: this.chainHash(last?.chainHash ?? null, data.id, data.requestHash) } });
-  }
-  /** 校验审计哈希链：返回首个断点。迁移前的旧行为 NULL，作为未入链前缀跳过 */
+  /** One database snapshot verifies immutable events and their latest live rows.
+   * Database triggers capture all callers, including file/identity operations.
+   * The legacy v1 column is preserved but is no longer an integrity claim. */
   async audit() {
-    const rows = await this.prisma.sambaOperation.findMany({ orderBy: [{ createdAt: 'asc' }, { id: 'asc' }], select: { id: true, requestHash: true, chainHash: true } });
-    let previous = '';
-    let brokenAt: string | null = null;
-    for (const row of rows) {
-      if (row.chainHash === null) continue;
-      if (!brokenAt && row.chainHash !== this.chainHash(previous || null, row.id, row.requestHash)) brokenAt = row.id;
-      previous = row.chainHash;
-    }
-    return { total: rows.length, chained: rows.filter(r => r.chainHash !== null).length, valid: !brokenAt, brokenAt };
+    const [summary] = await this.prisma.$queryRaw<{ total: bigint; chained: bigint; events: bigint; brokenAt: string | null }[]>`
+      WITH ordered AS (
+        SELECT *, COALESCE(lag(chain_hash) OVER (ORDER BY sequence), '') AS expected_previous
+        FROM samba_audit_events
+      ), broken_events AS (
+        SELECT operation_id FROM ordered WHERE previous_hash <> expected_previous OR chain_hash <>
+          encode(sha256(convert_to(previous_hash || '|' || sequence::text || '|' || operation_id || '|' || event || '|' || snapshot::text, 'UTF8')), 'hex')
+      ), latest AS (
+        SELECT DISTINCT ON (operation_id) * FROM samba_audit_events ORDER BY operation_id, sequence DESC
+      ), broken_rows AS (
+        SELECT COALESCE(l.operation_id, o.id) AS operation_id
+        FROM latest l FULL JOIN samba_operations o ON o.id = l.operation_id
+        WHERE (l.event = 'DELETE' AND o.id IS NOT NULL)
+          OR (l.event <> 'DELETE' AND (o.id IS NULL OR l.snapshot <> to_jsonb(o) - 'chainHash' - 'updatedAt'))
+          OR l.operation_id IS NULL
+      )
+      SELECT (SELECT count(*) FROM samba_operations) AS total,
+        (SELECT count(*) FROM latest WHERE event <> 'DELETE') AS chained,
+        (SELECT count(*) FROM samba_audit_events) AS events,
+        (SELECT operation_id FROM (SELECT * FROM broken_events UNION ALL SELECT * FROM broken_rows) broken LIMIT 1) AS "brokenAt"
+    `;
+    return { total: Number(summary.total), chained: Number(summary.chained), events: Number(summary.events), valid: !summary.brokenAt, brokenAt: summary.brokenAt };
   }
   private async recordResult(id:string,result:any){    const op=await this.prisma.sambaOperation.findUnique({where:{id}});
     if(op && result.state==='succeeded' && ['user.rename','group.rename','share.rename'].includes(op.action)){
@@ -106,13 +109,12 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
   }
   async recycle() {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
-    try { return await this.agent('/v1/recycle'); }
-    catch { return { enabled: false }; }
+    return this.agent('/v1/recycle');
   }
-  async setRecycle(input: unknown) {
+  async setRecycle(user: AuthUser, input: unknown) {
     const days = (input as { retention_days?: unknown })?.retention_days;
     if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 3650) throw new BadRequestException('回收站保留天数需为 1–3650 的整数');
-    return this.agent('/v1/recycle', { retention_days: days }, 45000, 'PUT');
+    return this.command(user, { requestId: crypto.randomUUID(), action: 'recycle.configure', args: { retention_days: days } });
   }
   async effectivePolicy(id: string) {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
@@ -165,7 +167,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
       if (policy.groups.some((group: { name: string }) => group.name.toLowerCase() === (args.name as string).toLowerCase())) throw new ConflictException({ code: 'SAMBA_GROUP_NAME_EXISTS', message: '用户组名称已存在' });
     }
     try {
-      await this.prisma.$transaction(tx => this.appendOperation(tx, { id: requestId, actorId: user.id, actorName: user.name, action, requestHash: hash, metadata: metadata(args) as any }));
+      await this.prisma.sambaOperation.create({ data: { id: requestId, actorId: user.id, actorName: user.name, action, requestHash: hash, metadata: metadata(args) as any } });
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('操作已提交，请查看操作记录'); throw e; }
     let result: any;
     try { result = await this.agent('/v1/commands', { request_id: requestId, action, args }); }
@@ -231,7 +233,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
         }
         if (identity) await tx.sambaIdentity.upsert({ where: { userId: p.data.userId }, create: { userId: p.data.userId, ...identity }, update: identity });
         else await tx.sambaIdentity.deleteMany({ where: { userId: p.data.userId } });
-        await this.appendOperation(tx, { id: crypto.randomUUID(), actorId: user.id, actorName: user.name, action: identity ? 'identity.bind' : 'identity.unbind', requestHash: '-', state: 'succeeded', metadata: { userId: p.data.userId, adObjectId: p.data.adObjectId } });
+        await tx.sambaOperation.create({ data: { id: crypto.randomUUID(), actorId: user.id, actorName: user.name, action: identity ? 'identity.bind' : 'identity.unbind', requestHash: '-', state: 'succeeded', metadata: { userId: p.data.userId, adObjectId: p.data.adObjectId } } });
         return { linked: !!identity };
       });
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('AD 账号已绑定其他 Assay 用户'); throw e; }

@@ -67,6 +67,7 @@ export function ImportUsers({
   const [reading, setReading] = useState(false);
   const [live, setLive] = useState<BulkResult | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  useEffect(() => setLive(null), [result]);
   const outcome = live ?? result;
   const pendingRows = outcome?.results.filter((r) => ['queued', 'running', 'pending'].includes(r.state)) ?? [];
 
@@ -86,7 +87,7 @@ export function ImportUsers({
             results: base.results.map((row, i) => ({
               ...row,
               state: ops[i]?.state ?? row.state,
-              error: ops[i]?.state === 'failed' ? row.error : row.error,
+              error: ['failed', 'uncertain'].includes(ops[i]?.state) ? ops[i]?.result?.error || row.error || '执行未确认成功，请查看操作记录' : row.error,
             })),
           };
         });
