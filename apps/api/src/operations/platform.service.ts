@@ -208,27 +208,52 @@ export class PlatformService {
       orderBy: { createdAt: 'desc' },
       take: 100,
     });
-    return Promise.all(
-      entries.map(async (entry) => {
-        if (!['LINK_TICKET', 'UNLINK_TICKET'].includes(entry.action))
-          return entry;
-        const ticketId = (entry.after as { ticketId?: string } | null)
-          ?.ticketId;
-        if (!ticketId) return entry;
-        try {
-          await this.ticket(user, ticketId);
-          return entry;
-        } catch (error) {
-          if (
-            !(
-              error instanceof ForbiddenException ||
-              error instanceof NotFoundException
+    // LINK/UNLINK 条目需按工单可见性脱敏。工单 id 去重后一次查询探测，
+    // 替代逐条 this.ticket()（每条都是带 participants include 的独立查询）。
+    const linkedTicketIds = [
+      ...new Set(
+        entries.flatMap((entry) => {
+          if (!['LINK_TICKET', 'UNLINK_TICKET'].includes(entry.action))
+            return [];
+          const ticketId = (entry.after as { ticketId?: string } | null)
+            ?.ticketId;
+          return ticketId ? [ticketId] : [];
+        }),
+      ),
+    ];
+    const hidden = new Set<string>();
+    if (linkedTicketIds.length) {
+      requirePermission(user, 'ticket:read');
+      const readAll = user.permissions.includes('ticket:read:all');
+      const tickets = await this.db.ticket.findMany({
+        where: { id: { in: linkedTicketIds } },
+        select: {
+          id: true,
+          requesterId: true,
+          assigneeId: true,
+          participants: { select: { userId: true } },
+        },
+      });
+      const visible = new Set(
+        (readAll
+          ? tickets
+          : tickets.filter(
+              (t) =>
+                t.requesterId === user.id ||
+                t.assigneeId === user.id ||
+                t.participants.some((p) => p.userId === user.id),
             )
-          )
-            throw error;
-          return { ...entry, after: { ticketHidden: true } };
-        }
-      }),
-    );
+        ).map((t) => t.id),
+      );
+      for (const ticketId of linkedTicketIds)
+        if (!visible.has(ticketId)) hidden.add(ticketId);
+    }
+    return entries.map((entry) => {
+      if (!['LINK_TICKET', 'UNLINK_TICKET'].includes(entry.action))
+        return entry;
+      const ticketId = (entry.after as { ticketId?: string } | null)?.ticketId;
+      if (!ticketId || !hidden.has(ticketId)) return entry;
+      return { ...entry, after: { ticketHidden: true } };
+    });
   }
 }

@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { LANGUAGES, DEFAULT_LANGUAGE } from '../i18n';
+import { LANGUAGES, DEFAULT_LANGUAGE, setLanguage } from '../i18n';
 
 /**
  * Language picker — a neutral, low-weight auxiliary control.
@@ -47,7 +47,7 @@ export default function LanguageSwitcher() {
 
   const choose = (index: number) => {
     const code = LANGUAGES[index]?.code ?? DEFAULT_LANGUAGE;
-    void i18n.changeLanguage(code);
+    void setLanguage(code);
     close();
   };
 
