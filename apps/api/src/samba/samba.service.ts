@@ -118,6 +118,10 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent(`/v1/effective-policy?id=${encodeURIComponent(id)}`);
   }
+  async recycleList(share: string) {
+    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    return this.agent(`/v1/recycle/list?name=${encodeURIComponent(share)}`);
+  }
   async sessions() {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent('/v1/sessions');

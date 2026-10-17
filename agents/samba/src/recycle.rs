@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Result, ensure};
+use serde_json::{Value, json};
 
 use crate::config::Recycle;
 
@@ -88,6 +89,155 @@ pub fn spawn(handle: Handle) {
 struct Stats {
     files: u64,
     bytes: u64,
+}
+
+// ===== 管理操作：浏览 / 恢复 / 删除（走命令队列，由 API 审计） =====
+
+/// 浏览一个共享的回收站：列出全部文件条目（相对 .recycle 的原路径、
+/// 大小、删除时间）。不跟随符号链接；路径返回用 '/' 分隔供前端展示。
+pub fn list(c: &crate::config::Config, share: &str) -> Result<Vec<Entry>> {
+    crate::ad::name(share)?;
+    let bin = bin_of(c, share)?;
+    let mut out = vec![];
+    if bin.exists() {
+        collect(&bin, &bin, 0, &mut out)?;
+    }
+    out.sort_by(|a, b| b.deleted_at.cmp(&a.deleted_at));
+    Ok(out)
+}
+
+#[derive(serde::Serialize)]
+pub struct Entry {
+    pub path: String,
+    pub size: u64,
+    /// Unix 秒（与前端约定；0 = 未知）
+    pub deleted_at: u64,
+}
+
+fn collect(bin: &Path, dir: &Path, depth: usize, out: &mut Vec<Entry>) -> Result<()> {
+    if depth > MAX_SHARE_DEPTH {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.file_type()?.is_symlink() {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_dir() {
+            collect(bin, &path, depth + 1, out)?;
+        } else {
+            let meta = entry.metadata()?;
+            let relative = path
+                .strip_prefix(bin)
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
+            if relative.is_empty() {
+                continue;
+            }
+            out.push(Entry {
+                path: relative,
+                size: meta.len(),
+                deleted_at: meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// 恢复：把回收站条目移回原路径（.recycle 内的相对路径即原路径）。
+/// 目标已存在时拒绝（不覆盖）；恢复后回收空目录。
+pub fn restore(c: &crate::config::Config, share: &str, paths: &[String]) -> Result<Value> {
+    crate::ad::name(share)?;
+    let bin = bin_of(c, share)?;
+    let mut restored = vec![];
+    let mut failed = vec![];
+    for rel in paths {
+        // 相对路径按共享根安全校验（组件规则与 files::components 一致）
+        if crate::files::components(rel).is_err() {
+            failed.push(json!({"path": rel, "reason": "无效路径"}));
+            continue;
+        }
+        let source = bin.join(rel);
+        let target = c.shares_root.join(share).join(rel);
+        if !source.starts_with(&bin) || source.exists() == false {
+            failed.push(json!({"path": rel, "reason": "回收站中不存在"}));
+            continue;
+        }
+        if target.exists() {
+            failed.push(json!({"path": rel, "reason": "原位置已存在同名文件"}));
+            continue;
+        }
+        match restore_one(&source, &target) {
+            Ok(()) => {
+                restored.push(rel.clone());
+                prune_empty(&bin, &source);
+            }
+            Err(e) => failed.push(json!({"path": rel, "reason": e.to_string()})),
+        }
+    }
+    Ok(json!({"restored": restored, "failed": failed}))
+}
+
+fn restore_one(source: &Path, target: &Path) -> Result<()> {
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::rename(source, target)?;
+    Ok(())
+}
+
+/// 恢复/删除后自底向上清掉 .recycle 内留下的空目录（保留 bin 根）。
+fn prune_empty(bin: &Path, mut path: &Path) {
+    while let Some(parent) = path.parent() {
+        if parent == bin || fs::remove_dir(path).is_err() {
+            return;
+        }
+        path = parent;
+    }
+}
+
+/// 删除回收站条目（立即彻底删除，不再等保留期）。
+pub fn purge(c: &crate::config::Config, share: &str, paths: &[String]) -> Result<Value> {
+    crate::ad::name(share)?;
+    let bin = bin_of(c, share)?;
+    let mut purged = vec![];
+    let mut failed = vec![];
+    for rel in paths {
+        if crate::files::components(rel).is_err() {
+            failed.push(json!({"path": rel, "reason": "无效路径"}));
+            continue;
+        }
+        let target = bin.join(rel);
+        if !target.starts_with(&bin) || !target.exists() {
+            failed.push(json!({"path": rel, "reason": "回收站中不存在"}));
+            continue;
+        }
+        match fs::remove_file(&target) {
+            Ok(()) => {
+                purged.push(rel.clone());
+                prune_empty(&bin, &target);
+            }
+            Err(e) => failed.push(json!({"path": rel, "reason": e.to_string()})),
+        }
+    }
+    Ok(json!({"purged": purged, "failed": failed}))
+}
+
+/// 共享对应的 .recycle 路径；共享必须已注册且激活。
+fn bin_of(c: &crate::config::Config, share: &str) -> Result<PathBuf> {
+    let rows = crate::files::shares(c)?;
+    let row = rows
+        .iter()
+        .find(|r| r.name == share && r.active)
+        .ok_or_else(|| anyhow::anyhow!("share is not registered"))?;
+    let relative = if row.path.is_empty() { &row.name } else { &row.path };
+    Ok(c.shares_root.join(relative).join(".recycle"))
 }
 
 fn sweep(root: &Path, cutoff: SystemTime) -> Result<Stats> {

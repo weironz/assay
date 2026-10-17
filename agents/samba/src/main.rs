@@ -318,6 +318,15 @@ async fn effective_policy(State(a): State<App>, Query(q): Query<Id>) -> Response
     .await;
     reply(result)
 }
+/// 回收站浏览（只读）
+async fn recycle_list(State(a): State<App>, Query(q): Query<ShareName>) -> Response {
+    let result = async {
+        let entries = recycle::list(&a.c, &q.name)?;
+        Ok::<_, anyhow::Error>(serde_json::to_value(entries)?)
+    }
+    .await;
+    reply(result)
+}
 async fn execute(a: &App, cmd: &Command) -> Result<Value> {
     ensure!(!a.c.read_only, "agent is read-only");
     rename::idle(&a.c)?;
@@ -351,6 +360,24 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         "user.unlock" => {
             let x: Id = parse(cmd.args.clone())?;
             d.unlock(&x.id).await
+        }
+        "recycle.restore" | "recycle.purge" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct R {
+                share: String,
+                paths: Vec<String>,
+            }
+            let x: R = parse(cmd.args.clone())?;
+            ensure!(
+                !x.paths.is_empty() && x.paths.len() <= 100,
+                "select 1 to 100 recycle entries"
+            );
+            if cmd.action == "recycle.restore" {
+                recycle::restore(&a.c, &x.share, &x.paths)
+            } else {
+                recycle::purge(&a.c, &x.share, &x.paths)
+            }
         }
         "policy.set" => {
             #[derive(Deserialize)]
@@ -783,6 +810,7 @@ fn router(c: Config) -> Result<Router> {
         .route("/v1/dns/zones", get(dns_zones))
         .route("/v1/dns/records", get(dns_records))
         .route("/v1/recycle", get(recycle_get).put(recycle_put))
+        .route("/v1/recycle/list", get(recycle_list))
         .route("/v1/effective-policy", get(effective_policy))
         .route("/v1/directories", get(directories))
         .route("/v1/acl", get(permissions))

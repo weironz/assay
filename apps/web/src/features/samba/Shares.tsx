@@ -108,6 +108,161 @@ function RecycleSettings({ canWrite }: { canWrite: boolean }) {
   );
 }
 
+/** 共享回收站：浏览被删除文件，按需恢复或彻底删除（走命令队列+审计） */
+function ShareRecycleBin({
+  share,
+  canWrite,
+  confirm,
+  onError,
+}: {
+  share: Share;
+  canWrite: boolean;
+  confirm: Workspace['confirm'];
+  onError: (message: string) => void;
+}) {
+  const [entries, setEntries] = useState<
+    { path: string; size: number; deleted_at: number }[] | null
+  >(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const load = () => {
+    setBusy(true);
+    void api
+      .get('/samba/recycle/list', { params: { share: share.name } })
+      .then((r) => setEntries(r.data || []))
+      .catch((e) => {
+        onError(
+          (e as { response?: { data?: { message?: string } } })?.response?.data
+            ?.message || '回收站加载失败',
+        );
+        setEntries([]);
+      })
+      .finally(() => setBusy(false));
+  };
+  useEffect(load, [share.name]);
+  if (entries == null)
+    return (
+      <p role="status" className="text-sm text-gray-500">
+        正在加载回收站…
+      </p>
+    );
+  const act = (action: 'recycle.restore' | 'recycle.purge') => {
+    if (!selected.length) return;
+    const restoring = action === 'recycle.restore';
+    confirm(
+      restoring
+        ? `恢复 ${selected.length} 个回收站文件`
+        : `彻底删除 ${selected.length} 个回收站文件`,
+      action,
+      { share: share.name, paths: selected },
+      load,
+      [
+        ['共享目录', share.name],
+        [restoring ? '恢复到原位置' : '彻底删除', `${selected.length} 项`],
+        ...(restoring
+          ? [['说明', '原位置已存在同名文件的项会跳过，不覆盖']]
+          : [['说明', '立即永久删除，不再受保留期保护']]) as [string, string][],
+      ],
+    );
+  };
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-500">
+        员工删除的文件保留在此（按当前保留策略自动清理）。勾选后可恢复到原位置或彻底删除。
+      </p>
+      <DataTable
+        label="回收站"
+        rows={entries}
+        rowKey={(r) => r.path}
+        searchText={(r) => r.path}
+        empty="回收站是空的"
+        actions={
+          <>
+            <button className={button} disabled={busy} onClick={load}>
+              刷新
+            </button>
+            {canWrite && (
+              <>
+                <button
+                  className={button}
+                  disabled={busy || !selected.length}
+                  onClick={() => act('recycle.restore')}
+                >
+                  恢复所选
+                </button>
+                <button
+                  className={button + ' text-red-600'}
+                  disabled={busy || !selected.length}
+                  onClick={() => act('recycle.purge')}
+                >
+                  彻底删除所选
+                </button>
+              </>
+            )}
+          </>
+        }
+        columns={[
+          ...(canWrite
+            ? [
+                {
+                  label: (
+                    <input
+                      type="checkbox"
+                      aria-label="选择全部回收站条目"
+                      disabled={busy || !entries.length}
+                      checked={
+                        entries.length > 0 && selected.length === entries.length
+                      }
+                      onChange={(e) =>
+                        setSelected(
+                          e.target.checked ? entries.map((x) => x.path) : [],
+                        )
+                      }
+                    />
+                  ),
+                  render: (r: { path: string; size: number; deleted_at: number }) => (
+                    <input
+                      type="checkbox"
+                      aria-label={`选择 ${r.path}`}
+                      disabled={busy}
+                      checked={selected.includes(r.path)}
+                      onChange={(e) =>
+                        setSelected(
+                          e.target.checked
+                            ? [...selected, r.path]
+                            : selected.filter((v) => v !== r.path),
+                        )
+                      }
+                    />
+                  ),
+                },
+              ]
+            : []),
+          {
+            label: '原路径',
+            render: (r) => (
+              <span className="break-all">
+                {share.name}/{r.path}
+              </span>
+            ),
+          },
+          {
+            label: '大小',
+            render: (r) => `${(r.size / 1024).toFixed(1)} KB`,
+          },
+          {
+            label: '删除时间',
+            render: (r) =>
+              r.deleted_at > 0
+                ? new Date(r.deleted_at * 1000).toLocaleString()
+                : '—',
+          },
+        ]}
+      />
+    </div>
+  );
+}
+
 export function Shares({
   snapshot,
   canWrite,
@@ -594,6 +749,17 @@ export function Shares({
               )}
             </div>
           </div>
+        </section>
+      )}
+      {share.active && (
+        <section className="space-y-3">
+          <h3 className="font-semibold">回收站</h3>
+          <ShareRecycleBin
+            share={share}
+            canWrite={canWrite}
+            confirm={confirm}
+            onError={onError}
+          />
         </section>
       )}
     </>

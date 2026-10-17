@@ -23,6 +23,7 @@ export class SambaController {
     await this.stepUp.consume(req, user, 'samba'); return this.samba.setRecycle(body);
   }
   @Get('effective-policy') @RequirePermissions('samba:read') effectivePolicy(@Query('id') id: string) { return this.samba.effectivePolicy(id); }
+  @Get('recycle/list') @RequirePermissions('samba:read') recycleList(@Query('share') share: string) { return this.samba.recycleList(share); }
   @Get('operations/:id') @RequirePermissions('samba:read') operation(@Param('id') id: string) { return this.samba.operation(id); }
   @Post('commands') @RequirePermissions('samba:manage') async command(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
     await this.stepUp.consume(req, user, 'samba'); return this.samba.command(user, body);
