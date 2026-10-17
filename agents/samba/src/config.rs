@@ -1,10 +1,14 @@
 use anyhow::{Context, Result, ensure};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 
 #[derive(Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
+    // 本配置的加载来源；agent 运行时设置（如回收站保留期）写回该文件，
+    // 让变更跨重启持久。测试/内存构造时为 None。
+    #[serde(skip)]
+    pub source_path: Option<String>,
     pub listen: String,
     pub token_file: PathBuf,
     pub ldap_url: String,
@@ -63,7 +67,7 @@ pub struct SmbStatus {
     pub cache_dir: PathBuf,
     pub private_dir: PathBuf,
 }
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Recycle {
     #[serde(default = "recycle_retention_days")]
@@ -89,7 +93,14 @@ fn samba_root() -> PathBuf {
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
         let c: Self = serde_json::from_slice(&fs::read(path)?)?;
-        for name in [&c.shares_file_name, &c.samba_config_file_name] {
+        c.check()?;
+        Ok(Self {
+            source_path: Some(path.to_owned()),
+            ..c
+        })
+    }
+    pub fn check(&self) -> Result<()> {
+        for name in [&self.shares_file_name, &self.samba_config_file_name] {
             ensure!(
                 !name.is_empty()
                     && name.len() <= 128
@@ -102,25 +113,25 @@ impl Config {
             );
         }
         ensure!(
-            c.shares_file_name != c.samba_config_file_name,
+            self.shares_file_name != self.samba_config_file_name,
             "distinct configuration filenames required"
         );
         ensure!(
-            c.samba_shares_root.is_absolute()
-                && c.samba_shares_root.to_str().is_some_and(|p| p
+            self.samba_shares_root.is_absolute()
+                && self.samba_shares_root.to_str().is_some_and(|p| p
                     .chars()
                     .all(|ch| ch.is_ascii_alphanumeric() || "/_-".contains(ch)))
-                && !c
+                && !self
                     .samba_shares_root
                     .components()
                     .any(|p| matches!(p, std::path::Component::ParentDir)),
             "invalid Samba-visible shares root"
         );
         ensure!(
-            c.external_shares_file.is_some() == c.external_samba_config_file.is_some(),
+            self.external_shares_file.is_some() == self.external_samba_config_file.is_some(),
             "external inventory and source config must be configured together"
         );
-        for path in [&c.external_shares_file, &c.external_samba_config_file]
+        for path in [&self.external_shares_file, &self.external_samba_config_file]
             .into_iter()
             .flatten()
         {
@@ -129,25 +140,25 @@ impl Config {
                 "absolute external inventory paths required"
             );
         }
-        ensure!(c.ldap_url.starts_with("ldaps://"), "LDAPS is required");
+        ensure!(self.ldap_url.starts_with("ldaps://"), "LDAPS is required");
         ensure!(
-            c.users_dn.to_lowercase().starts_with("ou=")
-                && (c.groups_dn.to_lowercase().starts_with("ou=")
-                    || (c.groups_dn.to_lowercase().starts_with("cn=")
-                        && !c.group_prefix.is_empty())),
+            self.users_dn.to_lowercase().starts_with("ou=")
+                && (self.groups_dn.to_lowercase().starts_with("ou=")
+                    || (self.groups_dn.to_lowercase().starts_with("cn=")
+                        && !self.group_prefix.is_empty())),
             "managed OUs are required"
         );
-        if !c.group_prefix.is_empty() {
-            crate::ad::name(&c.group_prefix)?;
+        if !self.group_prefix.is_empty() {
+            crate::ad::name(&self.group_prefix)?;
         }
-        for dn in [&c.users_dn, &c.groups_dn] {
+        for dn in [&self.users_dn, &self.groups_dn] {
             ensure!(
                 dn.to_lowercase()
-                    .ends_with(&format!(",{}", c.base_dn.to_lowercase())),
+                    .ends_with(&format!(",{}", self.base_dn.to_lowercase())),
                 "OU outside domain"
             );
         }
-        for p in [&c.shares_root, &c.config_dir, &c.state_dir] {
+        for p in [&self.shares_root, &self.config_dir, &self.state_dir] {
             ensure!(p.is_absolute(), "absolute filesystem roots required");
             fs::create_dir_all(p)?;
             ensure!(
@@ -155,12 +166,12 @@ impl Config {
                 "symlink root rejected"
             );
         }
-        if let Some(s) = &c.smb_status {
+        if let Some(s) = &self.smb_status {
             for p in [&s.state_dir, &s.cache_dir, &s.private_dir] {
                 ensure!(p.is_absolute(), "absolute smbstatus directories required");
             }
         }
-        Ok(c)
+        Ok(())
     }
 }
 pub fn secret(path: &PathBuf) -> Result<String> {

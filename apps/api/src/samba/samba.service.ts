@@ -75,10 +75,10 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     if (token.length < 32) throw new ServiceUnavailableException('Agent 凭据未配置');
     return { address: address.replace(/\/$/, ''), token };
   }
-  private async agent(path: string, body?: unknown, timeout=45000) {
+  private async agent(path: string, body?: unknown, timeout=45000, method?: 'PUT') {
     const c = this.config();
     let response: Response;
-    try { response = await fetch(c.address + path, { method: body ? 'POST' : 'GET', redirect: 'error', headers: { Authorization: `Bearer ${c.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeout) }); }
+    try { response = await fetch(c.address + path, { method: method || (body ? 'POST' : 'GET'), redirect: 'error', headers: { Authorization: `Bearer ${c.token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) }, body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(timeout) }); }
     catch { throw new ServiceUnavailableException('Agent 连接失败；写操作请查看操作记录确认结果'); }
     const value = await response.json();
     if (!response.ok) throw new HttpException(value.error_code ? {code:value.error_code,message:'操作预检查失败，请核对名称、配置和资源状态'} : value.error || 'Agent 请求失败', response.status === 401 ? 502 : 400);
@@ -103,6 +103,16 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
   async dns(zone?: string) {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent(zone ? `/v1/dns/records?zone=${encodeURIComponent(zone)}` : '/v1/dns/zones');
+  }
+  async recycle() {
+    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    try { return await this.agent('/v1/recycle'); }
+    catch { return { enabled: false }; }
+  }
+  async setRecycle(input: unknown) {
+    const days = (input as { retention_days?: unknown })?.retention_days;
+    if (typeof days !== 'number' || !Number.isInteger(days) || days < 1 || days > 3650) throw new BadRequestException('回收站保留天数需为 1–3650 的整数');
+    return this.agent('/v1/recycle', { retention_days: days }, 45000, 'PUT');
   }
   async sessions() {
     if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');

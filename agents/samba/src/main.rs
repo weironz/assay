@@ -22,13 +22,14 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::{sync::Arc, time::Duration};
+use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 use subtle::ConstantTimeEq;
 #[derive(Clone)]
 struct App {
     c: Config,
     token: String,
     lock: Arc<tokio::sync::Mutex<()>>,
+    recycle: Option<recycle::Handle>,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -240,6 +241,69 @@ async fn dns_records(State(a): State<App>, Query(q): Query<Zone>) -> Response {
     let result = async {
         let mut d = ad::Directory::connect(&a.c).await?;
         dns::records(&mut d, &q.zone).await
+    }
+    .await;
+    reply(result)
+}
+/// 回收站清理设置（读）
+async fn recycle_get(State(a): State<App>) -> Response {
+    let result = async {
+        let settings = a
+            .c
+            .recycle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))?;
+        Ok::<_, anyhow::Error>(serde_json::to_value(settings)?)
+    }
+    .await;
+    reply(result)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecycleUpdate {
+    retention_days: u32,
+}
+/// 回收站清理设置（写）：更新内存 + 写回 agent.json（原子替换），并唤醒
+/// 清理线程立即按新保留期执行。清理周期仍由部署文件管理。
+async fn recycle_put(State(a): State<App>, Json(input): Json<RecycleUpdate>) -> Response {
+    let result = async {
+        ensure!(!a.c.read_only, "agent is read-only");
+        let handle = a
+            .recycle
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("recycle cleanup is not configured"))?;
+        let mut next = handle.settings.lock().unwrap().clone();
+        next.retention_days = input.retention_days;
+        recycle::validate(&next)?;
+        // 写回 agent.json：重读磁盘原文、只替换 recycle 段，避免覆盖并发编辑
+        let path = a
+            .c
+            .source_path
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("agent configuration path unknown"))?;
+        let mut document: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path)?)?;
+        document["recycle"] = serde_json::to_value(&next)?;
+        let bytes = serde_json::to_vec_pretty(&document)?;
+        // agent.json 挂载在容器只读根内时，同目录临时文件不可写；先落
+        // state 目录（始终可写）再原子 rename 到目标。跨设备 rename 会
+        // 失败时回退为直接写（绑定挂载同一文件时目标本身仍可写）。
+        let target = std::path::Path::new(path);
+        let temp = a
+            .c
+            .state_dir
+            .join(format!("agent-{}.json.tmp", uuid::Uuid::new_v4()));
+        if std::fs::write(&temp, &bytes).is_ok()
+            && std::fs::rename(&temp, target).is_ok()
+        {
+            std::fs::set_permissions(target, std::fs::Permissions::from_mode(0o600))?;
+        } else {
+            let _ = std::fs::remove_file(&temp);
+            std::fs::write(target, &bytes)?;
+        }
+        *handle.settings.lock().unwrap() = next;
+        handle.reload.notify_waiters();
+        Ok(json!({"retention_days": input.retention_days, "persisted": true}))
     }
     .await;
     reply(result)
@@ -537,6 +601,10 @@ fn safe_error(e: &anyhow::Error) -> String {
             "configured process",
             "smbstatus",
             "no DNS zones",
+            "retention must",
+            "cleanup interval must",
+            "recycle cleanup is not",
+            "agent configuration path unknown",
             "null ACL",
             "password must",
             "request ID",
@@ -621,12 +689,6 @@ async fn main() -> Result<()> {
     let address = c.listen.clone();
     let router = router(c.clone())?;
     rename::recover(&c).await?;
-    // 内置回收站清理：随镜像分发，替代服务器侧脚本与 systemd 单元
-    if let Some(settings) = c.recycle.clone() {
-        if !c.read_only {
-            recycle::spawn(c.shares_root.clone(), settings);
-        }
-    }
     let listener = tokio::net::TcpListener::bind(address).await?;
     axum::serve(listener, router)
         .with_graceful_shutdown(shutdown())
@@ -651,10 +713,25 @@ fn router(c: Config) -> Result<Router> {
         .clone()
         .map(|files| portal::router(files, &token))
         .transpose()?;
+    // 内置回收站清理：随镜像分发，替代服务器侧脚本与 systemd 单元
+    let recycle = match (&c.recycle, c.read_only) {
+        (Some(settings), false) => {
+            recycle::validate(settings)?;
+            let handle = recycle::Handle {
+                settings: Arc::new(std::sync::Mutex::new(settings.clone())),
+                root: c.shares_root.clone(),
+                reload: Arc::new(tokio::sync::Notify::new()),
+            };
+            recycle::spawn(handle.clone());
+            Some(handle)
+        }
+        _ => None,
+    };
     let a = App {
         c,
         token,
         lock: Arc::new(tokio::sync::Mutex::new(())),
+        recycle,
     };
     db(&a)?.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS operations(id TEXT PRIMARY KEY,hash TEXT NOT NULL,state TEXT NOT NULL,response TEXT);")?;
     // A crash cannot safely replay an external write. Operators reconcile the resource.
@@ -668,6 +745,7 @@ fn router(c: Config) -> Result<Router> {
         .route("/v1/sessions", get(sessions))
         .route("/v1/dns/zones", get(dns_zones))
         .route("/v1/dns/records", get(dns_records))
+        .route("/v1/recycle", get(recycle_get).put(recycle_put))
         .route("/v1/directories", get(directories))
         .route("/v1/acl", get(permissions))
         .route("/v1/commands", post(command))

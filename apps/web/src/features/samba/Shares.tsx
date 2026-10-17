@@ -19,6 +19,95 @@ const permissions = [
   { value: 'full', label: '完全控制（含权限管理）' },
   { value: 'remove', label: '移除直接授权' },
 ];
+
+/** 回收站保留策略：写入由 API 直接透传 agent（无操作队列），此处独立管理状态 */
+function RecycleSettings({ canWrite }: { canWrite: boolean }) {
+  const [days, setDays] = useState<number | null>(null);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
+  const load = () => {
+    void api
+      .get('/samba/recycle')
+      .then((r) => {
+        const value = r.data?.enabled === false ? null : r.data?.retention_days;
+        setDays(value ?? null);
+        setDraft(value != null ? String(value) : '');
+        setError('');
+      })
+      .catch(() => setDays(null));
+  };
+  useEffect(load, []);
+  const save = () => {
+    const parsed = Number(draft);
+    if (!Number.isInteger(parsed) || parsed < 1 || parsed > 3650) {
+      setError('保留天数需为 1–3650 的整数');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    api
+      .put('/samba/recycle', { retention_days: parsed })
+      .then(() => {
+        setDays(parsed);
+        setNotice('回收站保留策略已更新，清理任务将按新保留期执行');
+        setTimeout(() => setNotice(''), 4000);
+      })
+      .catch((e) =>
+        setError(
+          (e as { response?: { data?: { message?: string } } })?.response?.data
+            ?.message || '保存失败，请重试',
+        ),
+      )
+      .finally(() => setBusy(false));
+  };
+  return (
+    <section className={card + ' p-5'}>
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div>
+          <h3 className="font-medium">回收站保留策略</h3>
+          <p className="mt-1 text-sm text-gray-500">
+            {days == null
+              ? '未启用内置清理（各共享的 .recycle 目录不会被自动清空）'
+              : `各共享回收站中的文件保留 ${days} 天，超期后由文件服务器自动清理。删除的文件可在保留期内从 .recycle 目录找回。`}
+          </p>
+        </div>
+        <div className="flex items-end gap-2">
+          <label className="text-sm">
+            <span className="mb-1 block text-gray-500">保留天数</span>
+            <input
+              className={
+                'min-h-10 w-28 rounded-lg border border-gray-300 bg-white px-3 text-sm dark:border-gray-700 dark:bg-gray-900 ' +
+                (days == null && !canWrite ? 'opacity-50' : '')
+              }
+              type="number"
+              min={1}
+              max={3650}
+              value={draft}
+              disabled={!canWrite || busy}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+          </label>
+          <button className={button} disabled={!canWrite || busy || days == null} onClick={save}>
+            {busy ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </div>
+      {notice && (
+        <p role="status" className="mt-3 text-sm text-green-700 dark:text-green-300">
+          {notice}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="mt-3 text-sm text-red-600 dark:text-red-400">
+          {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
 export function Shares({
   snapshot,
   canWrite,
@@ -156,6 +245,8 @@ export function Shares({
     });
   if (!id)
     return (
+      <div className="space-y-6">
+      <RecycleSettings canWrite={canWrite} />
       <DataTable
         label="共享目录"
         rows={snapshot.shares}
@@ -204,6 +295,7 @@ export function Shares({
           },
         ]}
       />
+      </div>
     );
   if (!share) return <p>目录不存在或不在管理范围内。</p>;
   if (share.id && id !== share.id)

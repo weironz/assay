@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Query, Req } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, HttpCode, Param, Post, Put, Query, Req } from '@nestjs/common';
 import type { Request } from 'express';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import type { AuthUser } from '../auth/auth.types';
@@ -18,6 +18,10 @@ export class SambaController {
   @Get('audit') @RequirePermissions('samba:read') audit() { return this.samba.audit(); }
   @Get('dns') @RequirePermissions('samba:read') dns(@Query('zone') zone?: string) { return this.samba.dns(zone); }
   @Get('sessions') @RequirePermissions('samba:read') sessions() { return this.samba.sessions(); }
+  @Get('recycle') @RequirePermissions('samba:read') recycle() { return this.samba.recycle(); }
+  @Put('recycle') @RequirePermissions('samba:manage') async setRecycle(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
+    await this.stepUp.consume(req, user, 'samba'); return this.samba.setRecycle(body);
+  }
   @Get('operations/:id') @RequirePermissions('samba:read') operation(@Param('id') id: string) { return this.samba.operation(id); }
   @Post('commands') @RequirePermissions('samba:manage') async command(@Req() req: Request, @CurrentUser() user: AuthUser, @Body() body: unknown) {
     await this.stepUp.consume(req, user, 'samba'); return this.samba.command(user, body);
