@@ -115,7 +115,7 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 
 阿里云只填 `PUBLIC_DOMAIN`，Compose 推导 HTTPS 的 `PUBLIC_URL`、`AUTH_BASE_URL` 和 `APP_URL`；信任来源显式使用 `.env` 中的 `AUTH_TRUST_ORIGINS`，可选旧域名由 `LEGACY_PUBLIC_DOMAIN` 配置。没有生产域名写死在模板里。阿里云 API 日常启动仅迁移数据库并启动服务；全新空库需要显式执行一次 `docker compose exec api node dist/seed.js`，升级时不运行 seed。
 
-现有部署更新模板前先备份、比较数据卷及镜像；如果 RustFS 数据卷由其他版本创建，先在 `.env` 设置当前 `RUSTFS_IMAGE`，不要使用模板默认值直接降级。公共 Traefik 是另一个项目，已有代理保持原配置与证书卷。具体步骤见 [部署文档 §2](docs/05-部署文档.md#2-阿里云环境traefik--域名--自动-https)。
+现有部署更新模板前先备份、比较数据卷及镜像；在 `.env` 设置当前 `POSTGRES_IMAGE`、`REDIS_IMAGE`、`RUSTFS_IMAGE` 完整引用，避免本机同名标签漂移或使用模板默认值降级。公共 Traefik 是另一个项目，已有代理保持原配置与证书卷。具体步骤见 [部署文档 §2](docs/05-部署文档.md#2-阿里云环境traefik--域名--自动-https)。
 
 ### 发版（GitHub Actions 自动完成）
 

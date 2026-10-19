@@ -20,7 +20,7 @@ class AliyunDeployment(unittest.TestCase):
             (target / '.env').write_text(text + '\n' + extra)
             env = os.environ.copy()
             # Shell values override .env; make this a controlled deployment fixture.
-            for key in ['PUBLIC_DOMAIN', 'PUBLIC_URL', 'AUTH_TRUST_ORIGINS', 'LEGACY_PUBLIC_DOMAIN', 'COMPOSE_PROJECT_NAME', 'COMPOSE_FILE', 'COMPOSE_ENV_FILES', 'COMPOSE_DISABLE_ENV_FILE', 'REGISTRY', 'IMAGE_TAG', 'RUSTFS_IMAGE']:
+            for key in ['PUBLIC_DOMAIN', 'PUBLIC_URL', 'AUTH_TRUST_ORIGINS', 'LEGACY_PUBLIC_DOMAIN', 'COMPOSE_PROJECT_NAME', 'COMPOSE_FILE', 'COMPOSE_ENV_FILES', 'COMPOSE_DISABLE_ENV_FILE', 'REGISTRY', 'IMAGE_TAG', 'RUSTFS_IMAGE', 'POSTGRES_IMAGE', 'REDIS_IMAGE']:
                 env.pop(key, None)
             return subprocess.run(['docker', 'compose', '--project-directory', str(target), '--env-file', str(target / '.env'), '-f', str(target / 'docker-compose.yaml'), 'config', '--format', 'json'], env=env, capture_output=True, text=True)
 
@@ -44,12 +44,14 @@ class AliyunDeployment(unittest.TestCase):
         self.assertIn('Host(`previous.example.test`)', config['services']['web']['labels']['traefik.http.routers.assay.rule'])
 
     def test_volume_identity_and_proxy_isolation_survive_directory_rename(self):
-        config = self.config(extra='RUSTFS_IMAGE=rustfs/rustfs:fixture-existing\n')
+        config = self.config(extra='POSTGRES_IMAGE=postgres:fixture-existing\nREDIS_IMAGE=redis:fixture-existing\nRUSTFS_IMAGE=rustfs/rustfs:fixture-existing\n')
         self.assertEqual(config['name'], 'assay')
         for service, logical, target in [('postgres', 'pg-data', '/var/lib/postgresql/data'), ('redis', 'redis-data', '/data'), ('rustfs', 'rustfs-data', '/data')]:
             self.assertEqual(config['volumes'][logical]['name'], 'assay_' + logical)
             self.assertEqual(config['services'][service]['volumes'][0]['source'], logical)
             self.assertEqual(config['services'][service]['volumes'][0]['target'], target)
+        self.assertEqual(config['services']['postgres']['image'], 'postgres:fixture-existing')
+        self.assertEqual(config['services']['redis']['image'], 'redis:fixture-existing')
         self.assertEqual(config['services']['rustfs']['image'], 'rustfs/rustfs:fixture-existing')
         self.assertTrue(config['networks']['traefik-network']['external'])
         self.assertEqual(config['services']['web'].get('ports', []), [])
