@@ -60,7 +60,10 @@ docker compose logs --since 10m --tail 100
 如需固定版本，可以通过 `.env` 的 `CLOUDFLARED_IMAGE` 指定官方版本标签。
 升级时先保留当前镜像引用，再执行 `docker compose pull && docker compose up -d` 并验收。
 
-轮换令牌后，安全更新 `secrets/tunnel-token`，保持容器用户可读，执行
-`docker compose restart cloudflared`，随后验证新连接与公网访问。
+轮换令牌后，可在服务器终端运行 `sudo python3 /data/cloudflared/update-token.py`。
+工具会隐藏令牌输入，更新当前 Compose 引用的令牌文件并保留文件所有权，
+重启该连接器后等待 Tunnel 就绪；其他 Assay 服务不会重启。
+手动更新令牌文件时需保持容器用户可读，再执行 `docker compose restart cloudflared`。
+Tunnel 就绪后仍需验证已发布应用路由、DNS 和公网访问。
 回退时停止新 Compose 服务，再将保留的旧容器改回原名称并启动；
 已撤销的旧令牌不能用于恢复连接。
