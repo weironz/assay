@@ -1,0 +1,34 @@
+name: cloudflared
+
+services:
+  cloudflared:
+    image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
+    container_name: cloudflared
+    restart: unless-stopped
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token-file
+      - /run/secrets/tunnel_token
+    secrets:
+      - tunnel_token
+    dns:
+      - ${CLOUDFLARED_DNS_PRIMARY:-223.5.5.5}
+      - ${CLOUDFLARED_DNS_SECONDARY:-1.1.1.1}
+    networks:
+      - origin
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+secrets:
+  tunnel_token:
+    file: ${CLOUDFLARED_TOKEN_FILE:-./secrets/tunnel-token}
+
+networks:
+  origin:
+    external: true
+    name: ${CLOUDFLARED_NETWORK:-traefik-network}
