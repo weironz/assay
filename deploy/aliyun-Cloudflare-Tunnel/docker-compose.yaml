@@ -1,0 +1,114 @@
+# 阿里云 Cloudflare Tunnel：Web 仅通过 Docker 网络供连接器访问。
+# 安装到原 /data/assay 时保留项目名、数据卷、凭据及镜像引用。
+
+name: assay
+
+services:
+  postgres:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-assay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+      POSTGRES_DB: ${POSTGRES_DB:-assay}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assay}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    image: ${REDIS_IMAGE:-redis:7-alpine}
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  rustfs:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff}
+    restart: always
+    command: ["/data"]
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:?}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:?}
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "false"
+    volumes:
+      - rustfs-data:/data
+    networks: [internal]
+
+  api:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-api:${IMAGE_TAG:-latest}
+    restart: always
+    env_file: .env
+    # 首次安装单独执行 seed；日常重启/发布不重新初始化业务角色。
+    command: ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-assay}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_URL: redis://redis:6379
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://rustfs:9000
+      PUBLIC_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+      AUTH_BASE_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+      AUTH_TRUST_ORIGINS: ${AUTH_TRUST_ORIGINS:?set AUTH_TRUST_ORIGINS}
+      APP_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+    networks: [internal]
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rustfs: {condition: service_started}
+
+  web:
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-web:${IMAGE_TAG:-latest}
+    restart: always
+    networks: [internal, tunnel-network]
+    depends_on: [api]
+    labels:
+      traefik.enable: "false"
+
+networks:
+  internal:
+  tunnel-network:
+    external: true
+    name: ${CLOUDFLARED_NETWORK:-assay-tunnel}
+
+volumes:
+  pg-data:
+  redis-data:
+  rustfs-data:

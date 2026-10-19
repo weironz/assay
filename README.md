@@ -20,7 +20,7 @@ GreenStor Company Operations Platform（公司运营服务平台）。在现有 
 - **REST API 文档**：[docs/04-API.md](docs/04-API.md)（49 个接口，含认证方式与调用示例）
 - **CLI 与 MCP 文档**：[docs/06-Assay CLI.md](docs/06-Assay%20CLI.md)（安装、命令参数、`assay update`、本地 MCP）
 - **工单分享链接**：[docs/08-工单分享链接实现与运维.md](docs/08-工单分享链接实现与运维.md)（外部只读分享、权限边界、安全与运维）
-- **部署文档**：[docs/05-部署文档.md](docs/05-部署文档.md)（IP 直连 / Traefik 域名两种方式，含备份与排错）
+- **部署文档**：[docs/05-部署文档.md](docs/05-部署文档.md)（IP 直连 / Traefik / Cloudflare Tunnel，含备份与排错）
 
 ## 目录结构
 
@@ -31,6 +31,7 @@ docker-compose.dev.yml     开发环境：pg + redis + rustfs + adminer + mailpi
 docker-compose.yaml        独立部署模板：直接暴露端口，CI 冒烟测试也用这份
 deploy/aliyun/docker-compose.yaml 阿里云环境应用栈（Traefik 路由，保留生产卷名）
 deploy/aliyun/traefik.compose.yaml 公共代理的可选初始化模板（已有代理不覆盖）
+deploy/aliyun-Cloudflare-Tunnel/ 阿里云 Tunnel 应用栈、独立连接器与安装说明
 ```
 
 ## 快速开始（开发环境一键拉起）
@@ -111,11 +112,13 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 
 ### 阿里云环境
 
-应用栈统一放在 [deploy/aliyun/docker-compose.yaml](deploy/aliyun/docker-compose.yaml)，环境变量模板为 [deploy/aliyun/.env.example](deploy/aliyun/.env.example)。安装到服务器时分别复制为 `/data/assay/docker-compose.yaml` 与 `/data/assay/.env`。
+Traefik 应用栈放在 [deploy/aliyun/docker-compose.yaml](deploy/aliyun/docker-compose.yaml)，环境变量模板为 [deploy/aliyun/.env.example](deploy/aliyun/.env.example)。安装到服务器时分别复制为 `/data/assay/docker-compose.yaml` 与 `/data/assay/.env`。
 
 阿里云只填 `PUBLIC_DOMAIN`，Compose 推导 HTTPS 的 `PUBLIC_URL`、`AUTH_BASE_URL` 和 `APP_URL`；信任来源显式使用 `.env` 中的 `AUTH_TRUST_ORIGINS`，可选旧域名由 `LEGACY_PUBLIC_DOMAIN` 配置。没有生产域名写死在模板里。阿里云 API 日常启动仅迁移数据库并启动服务；全新空库需要显式执行一次 `docker compose exec api node dist/seed.js`，升级时不运行 seed。
 
 现有部署更新模板前先备份、比较数据卷及镜像；在 `.env` 设置当前 `POSTGRES_IMAGE`、`REDIS_IMAGE`、`RUSTFS_IMAGE` 完整引用，避免本机同名标签漂移或使用模板默认值降级。公共 Traefik 是另一个项目，已有代理保持原配置与证书卷。具体步骤见 [部署文档 §2](docs/05-部署文档.md#2-阿里云环境traefik--域名--自动-https)。
+
+Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](deploy/aliyun-Cloudflare-Tunnel/README.md)，包含无主机端口的应用栈、连接器和令牌更新工具。说明覆盖 `ticket.greenstor.ai` 主入口、备用域名、多连接器及现有生产卷的迁移方式。
 
 ### 发版（GitHub Actions 自动完成）
 

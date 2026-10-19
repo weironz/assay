@@ -1,9 +1,9 @@
-name: cloudflared
+name: ${CLOUDFLARED_PROJECT:-cloudflared}
 
 services:
   cloudflared:
     image: ${CLOUDFLARED_IMAGE:-cloudflare/cloudflared:latest}
-    container_name: cloudflared
+    container_name: ${CLOUDFLARED_CONTAINER_NAME:-cloudflared}
     restart: unless-stopped
     command:
       - tunnel
@@ -31,4 +31,4 @@ secrets:
 networks:
   origin:
     external: true
-    name: ${CLOUDFLARED_NETWORK:-traefik-network}
+    name: ${CLOUDFLARED_NETWORK:-assay-tunnel}

@@ -49,7 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: 环境参数与生产数据卷兼容性
-        run: python3 -m unittest discover -s deploy/aliyun/tests -p 'test_*.py'
+        run: |
+          python3 -m unittest discover -s deploy/aliyun/tests -p 'test_*.py'
+          python3 -m unittest discover -s deploy/aliyun-Cloudflare-Tunnel/tests -p 'test_*.py'
       - name: 备份项目、配置与卷边界
         run: bash scripts/test-backup.sh
 
