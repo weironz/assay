@@ -29,7 +29,8 @@ apps/api   NestJS 后端（Prisma / 存储抽象 / 健康检查）
 apps/web   React 前端（Vite / Tailwind v4 / TanStack Query）
 docker-compose.dev.yml     开发环境：pg + redis + rustfs + adminer + mailpit + api + web（热更新）
 docker-compose.yaml        独立部署模板：直接暴露端口，CI 冒烟测试也用这份
-docker-compose.traefik.yaml 生产实际在跑的那份（Traefik 路由 + 自动证书）
+deploy/aliyun/docker-compose.yaml 阿里云环境应用栈（Traefik 路由，保留生产卷名）
+deploy/aliyun/traefik.compose.yaml 公共代理的可选初始化模板（已有代理不覆盖）
 ```
 
 ## 快速开始（开发环境一键拉起）
@@ -108,6 +109,14 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 - 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `1.1.0`）
 - 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
 
+### 阿里云环境
+
+应用栈统一放在 [deploy/aliyun/docker-compose.yaml](deploy/aliyun/docker-compose.yaml)，环境变量模板为 [deploy/aliyun/.env.example](deploy/aliyun/.env.example)。安装到服务器时分别复制为 `/data/assay/docker-compose.yaml` 与 `/data/assay/.env`。
+
+阿里云只填 `PUBLIC_DOMAIN`，Compose 推导 HTTPS 的 `PUBLIC_URL`、`AUTH_BASE_URL` 和 `APP_URL`；信任来源显式使用 `.env` 中的 `AUTH_TRUST_ORIGINS`，可选旧域名由 `LEGACY_PUBLIC_DOMAIN` 配置。没有生产域名写死在模板里。阿里云 API 日常启动仅迁移数据库并启动服务；全新空库需要显式执行一次 `docker compose exec api node dist/seed.js`，升级时不运行 seed。
+
+现有部署更新模板前先备份、比较数据卷及镜像；如果 RustFS 数据卷由其他版本创建，先在 `.env` 设置当前 `RUSTFS_IMAGE`，不要使用模板默认值直接降级。公共 Traefik 是另一个项目，已有代理保持原配置与证书卷。具体步骤见 [部署文档 §2](docs/05-部署文档.md#2-阿里云环境traefik--域名--自动-https)。
+
 ### 发版（GitHub Actions 自动完成）
 
 推送**只跑测试**（类型检查 + 编译 + 整栈冒烟测试），不会自动发版。
@@ -131,12 +140,12 @@ gh run watch                                       # 跟踪进度
 生产默认从 ACR 拉取；想改用 Docker Hub 就在 `.env` 里加 `REGISTRY=willdockerhub`。
 
 > **改 compose 要当心**：流水线只做 `docker compose pull && up -d`（只换镜像），
-> 不会自动同步 compose 文件——这是有意为之。生产用的是 `docker-compose.traefik.yaml`
+> 不会自动同步 compose 文件——这是有意为之。阿里云环境使用 `deploy/aliyun/docker-compose.yaml`
 > 那套卷名（`pg-data` 等），而 `docker-compose.yaml` 用的是 `*-prod` 卷名；
 > 拿后者覆盖服务器会挂载一组空卷，看起来就像数据全没了。同步前务必先 diff。
 
 需要的 GitHub Secrets：`DOCKERHUB_USERNAME` `DOCKERHUB_TOKEN` `ACR_URL` `ACR_USERNAME` `ACR_PASSWORD`
-`DEPLOY_HOST` `DEPLOY_USER` `DEPLOY_SSH_KEY` `DEPLOY_KNOWN_HOSTS` `DEPLOY_PUBLIC_URL`。
+`DEPLOY_HOST` `DEPLOY_USER` `DEPLOY_SSH_KEY` `DEPLOY_KNOWN_HOSTS`。站点地址从运行中的 API 配置读取，不再另设域名 Secret。
 
 手动构建（应急用）：
 

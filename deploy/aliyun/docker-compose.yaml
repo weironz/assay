@@ -1,17 +1,9 @@
-# 场景 2：带 Traefik 的域名部署（也是生产环境实际在用的这一份）
-#
-# 域名由 .env 的 PUBLIC_DOMAIN 决定；不设则回落到 assay.cloudcele.com，
-# 因此与服务器上那份的渲染结果一致。部署步骤见 docs/05-部署文档.md。
-#
-# 与同目录 docker-compose.yaml 的区别：
-#   - web 不暴露端口，改由 Traefik 按域名路由并签发证书（外部网络 traefik-network）
-#   - 数据卷名为 pg-data / redis-data / rustfs-data（生产数据就在这几个卷里）
-#
-# ⚠️ 不要用 docker-compose.yaml 覆盖服务器上的这份：那份用的是 *-prod 卷名，
-#    覆盖后 compose 会挂载一组空卷，看起来就像数据全没了。
-#    改动 compose 请先 diff，确认卷名与网络一致再同步。
-#
-# 应用发布只拉取和重建 api/web，不自动同步本文件，也不更新 RustFS。
+# 阿里云环境：Assay 应用栈，经已有 Traefik 提供 HTTPS。
+# 同目录 .env 只填写 PUBLIC_DOMAIN，容器 URL 由 https:// + 域名推导。
+# AUTH_TRUST_ORIGINS 与可选 LEGACY_PUBLIC_DOMAIN 也由 .env 提供。
+# 安装时复制本文件及 .env 到 /data/assay；项目名和数据卷保持历史生产名称。
+# 公共 Traefik 单独使用 traefik.compose.yaml；已有代理无需重启。
+# 应用发布只更新 api/web；数据库和 RustFS 的镜像、卷迁移须单独验证。
 
 name: assay
 
@@ -60,7 +52,7 @@ services:
       options:
         max-size: "50m"
         max-file: "3"
-    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+    image: ${RUSTFS_IMAGE:-rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff}
     restart: always
     command: ["/data"]
     environment:
@@ -81,6 +73,8 @@ services:
     image: ${REGISTRY:-registry.cn-shenzhen.aliyuncs.com/willspace}/assay-api:${IMAGE_TAG:-latest}
     restart: always
     env_file: .env
+    # 首次安装单独执行 seed；日常重启/发布不重新初始化业务角色。
+    command: ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && exec node dist/main.js"]
     environment:
       NODE_ENV: production
       DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-assay}?schema=public
@@ -89,9 +83,10 @@ services:
       REDIS_URL: redis://redis:6379
       STORAGE_DRIVER: s3
       S3_ENDPOINT: http://rustfs:9000
-      AUTH_BASE_URL: ${PUBLIC_URL:?}
-      AUTH_TRUST_ORIGINS: ${PUBLIC_URL}
-      APP_URL: ${PUBLIC_URL}
+      PUBLIC_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+      AUTH_BASE_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
+      AUTH_TRUST_ORIGINS: ${AUTH_TRUST_ORIGINS:?set AUTH_TRUST_ORIGINS}
+      APP_URL: https://${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}
     networks: [internal]
     depends_on:
       postgres: {condition: service_healthy}
@@ -111,7 +106,9 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=traefik-network"
-      - "traefik.http.routers.assay.rule=Host(`${PUBLIC_DOMAIN:-assay.cloudcele.com}`)"
+      # 没有旧域名时第二项回落到主域名，不引入额外的占位域名。
+      - "traefik.http.routers.assay.rule=Host(`${PUBLIC_DOMAIN:?set PUBLIC_DOMAIN}`) || Host(`${LEGACY_PUBLIC_DOMAIN:-${PUBLIC_DOMAIN}}`)"
+      - "traefik.http.routers.assay.service=assay"
       - "traefik.http.routers.assay.entrypoints=websecure"
       - "traefik.http.routers.assay.tls=true"
       - "traefik.http.routers.assay.tls.certresolver=letsencrypt"
@@ -120,11 +117,6 @@ services:
 networks:
   internal:
   traefik-network:
-    logging:
-      driver: json-file
-      options:
-        max-size: "50m"
-        max-file: "3"
     external: true
 
 volumes:

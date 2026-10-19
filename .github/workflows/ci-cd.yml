@@ -43,6 +43,16 @@ env:
   HUB_AGENT: willdockerhub/assay-samba-agent
 
 jobs:
+  deployment:
+    name: 阿里云部署配置与备份契约
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 环境参数与生产数据卷兼容性
+        run: python3 -m unittest discover -s deploy/aliyun/tests -p 'test_*.py'
+      - name: 备份项目、配置与卷边界
+        run: bash scripts/test-backup.sh
+
   samba_agent:
     name: Samba Agent · 原生 Rust 检查
     runs-on: ubuntu-latest
@@ -290,7 +300,7 @@ jobs:
     name: 构建并推送镜像
     # 只有类型检查、编译、整栈冒烟测试全过，才允许构建发布镜像；
     # 且必须是手动触发——推代码不会自动发版
-    needs: [cli, web, api, smoke, samba_agent]
+    needs: [cli, web, api, smoke, samba_agent, deployment]
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs:
@@ -443,7 +453,7 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    name: 部署到生产
+    name: 部署到阿里云
     needs: build
     if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_deploy }}
     runs-on: ubuntu-latest
@@ -550,11 +560,10 @@ jobs:
               old_tag=${old_tag:-latest}
             fi
             [[ "$old_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo '::error::原 IMAGE_TAG 格式无效'; exit 1; }
-            mapfile -t url_lines < <(grep '^PUBLIC_URL=' .env || true)
-            [ "${#url_lines[@]}" -eq 1 ] || { echo '::error::PUBLIC_URL 缺失或重复'; exit 1; }
-            public_url=${url_lines[0]#PUBLIC_URL=}
+            # 环境只维护 PUBLIC_DOMAIN；完整 URL 从已解析的应用配置取得。
+            public_url=$(docker compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["api"]["environment"]["AUTH_BASE_URL"])')
             public_url=${public_url%/}
-            case "$public_url" in http://*|https://*) ;; *) echo '::error::PUBLIC_URL 格式无效'; exit 1;; esac
+            case "$public_url" in https://*) ;; *) echo '::error::阿里云 AUTH_BASE_URL 必须为 HTTPS'; exit 1;; esac
 
             old_api_ref=$(image_ref api "$old_tag")
             old_web_ref=$(image_ref web "$old_tag")
@@ -636,6 +645,17 @@ jobs:
               any(.[]; .Service == "web" and .State == "running" and .Health == "healthy" and .Image == $web)
             '
 
+      - name: 读取实际部署站点
+        id: deployed_site
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          public_url=$(ssh -o BatchMode=yes "$USER@$HOST" 'cd /data/assay && docker compose exec -T api node -p process.env.AUTH_BASE_URL')
+          [[ "$public_url" == https://* && "$public_url" != *$'\n'* ]] || exit 1
+          printf 'url=%s\n' "$public_url" >> "$GITHUB_OUTPUT"
+
       - name: 部署摘要
         if: always()
         run: |
@@ -643,7 +663,7 @@ jobs:
             echo "### 部署结果"
             echo ""
             echo "- 镜像标签：\`${{ needs.build.outputs.tag }}\`"
-            echo "- 站点：${{ secrets.DEPLOY_PUBLIC_URL }}"
+            echo "- 站点：${{ steps.deployed_site.outputs.url }}"
             echo "- 结果：${{ job.status }}"
           } >> "$GITHUB_STEP_SUMMARY"
 

@@ -6,11 +6,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 TEST_DIR="$(mktemp -d)"
 case "$TEST_DIR" in /tmp/tmp.*|/tmp/assay-backup-*) ;; *) echo "不安全的测试目录：$TEST_DIR" >&2; exit 1 ;; esac
 trap 'rm -rf -- "$TEST_DIR"' EXIT
-mkdir -p "$TEST_DIR/project/scripts" "$TEST_DIR/bin"
+mkdir -p "$TEST_DIR/project/scripts" "$TEST_DIR/project/deploy/aliyun" "$TEST_DIR/bin"
 cp "$SCRIPT_DIR/backup.sh" "$TEST_DIR/project/scripts/backup.sh"
 printf 'AUTH_SECRET=fixture-secret\n' > "$TEST_DIR/project/.env"
 printf 'name: standard-fixture\n' > "$TEST_DIR/project/docker-compose.yaml"
-printf 'name: traefik-fixture\n' > "$TEST_DIR/project/docker-compose.traefik.yaml"
+printf 'name: aliyun-fixture\n' > "$TEST_DIR/project/deploy/aliyun/docker-compose.yaml"
+printf 'AUTH_SECRET=aliyun-fixture-secret\n' > "$TEST_DIR/project/deploy/aliyun/.env"
 printf 'name: dev-fixture\n' > "$TEST_DIR/project/docker-compose.dev.yml"
 
 cat > "$TEST_DIR/bin/docker" <<'MOCK'
@@ -21,7 +22,7 @@ if [[ "$1" == compose ]]; then
   file="$3"
   shift 3
   case "$file" in
-    *traefik*) logical=rustfs-data; pg_logical=pg-data ;;
+    *aliyun*) logical=rustfs-data; pg_logical=pg-data ;;
     *) logical=rustfs-data-prod; pg_logical=pg-data-prod ;;
   esac
   project="${COMPOSE_PROJECT_NAME:-assay}"
@@ -72,13 +73,13 @@ elif [[ "$1" == inspect ]]; then
     *Mounts*)
       if [[ "$id" == postgres-id && "$MOCK_SCENARIO" == wrong-pg-mount ]]; then
         echo 'volume another_project_pg-data'
-      elif [[ "$id" == postgres-id && "$MOCK_FILE" == *traefik* ]]; then
+      elif [[ "$id" == postgres-id && "$MOCK_FILE" == *aliyun* ]]; then
         echo "volume ${project}_pg-data"
       elif [[ "$id" == postgres-id ]]; then
         echo "volume ${project}_pg-data-prod"
       elif [[ "$MOCK_SCENARIO" == wrong-mount ]]; then
         echo 'volume another_project_rustfs-data'
-      elif [[ "$MOCK_FILE" == *traefik* ]]; then
+      elif [[ "$MOCK_FILE" == *aliyun* ]]; then
         echo "volume ${project}_rustfs-data"
       else
         echo "volume ${project}_rustfs-data-prod"
@@ -144,6 +145,7 @@ run_case() {
     grep -Fxq 'postgres_db=fixture_db' "$backup_dir/backup-info.txt"
     grep -Fq 'pg_dump -U fixture_user fixture_db' "$MOCK_LOG"
     cmp -s "$TEST_DIR/project/$compose_file" "$backup_dir/compose.yaml"
+    cmp -s "$(dirname "$MOCK_SELECTED_PATH")/.env" "$backup_dir/deployment.env"
     grep -Eq '^[[:xdigit:]]{64} [ *]compose\.yaml$' "$backup_dir/SHA256SUMS"
     (cd "$backup_dir" && sha256sum -c SHA256SUMS >/dev/null)
   else
@@ -163,20 +165,20 @@ run_case() {
 
 run_case standard ok docker-compose.yaml pass
 grep -q 'assay_rustfs-data-prod' "$TEST_DIR/standard.stdout"
-run_case traefik ok docker-compose.traefik.yaml pass
-grep -q 'assay_rustfs-data' "$TEST_DIR/traefik.stdout"
+run_case aliyun ok deploy/aliyun/docker-compose.yaml pass
+grep -q 'assay_rustfs-data' "$TEST_DIR/aliyun.stdout"
 export COMPOSE_PROJECT_NAME=assay-fixture-override
 run_case project_override ok docker-compose.yaml pass
 grep -q 'assay-fixture-override_rustfs-data-prod' "$TEST_DIR/project_override.stdout"
 unset COMPOSE_PROJECT_NAME
 run_case missing_volume missing-volume docker-compose.yaml fail
 run_case missing_pg_volume missing-pg-volume docker-compose.yaml fail
-run_case wrong_mount wrong-mount docker-compose.traefik.yaml fail
-run_case wrong_pg_mount wrong-pg-mount docker-compose.traefik.yaml fail
+run_case wrong_mount wrong-mount deploy/aliyun/docker-compose.yaml fail
+run_case wrong_pg_mount wrong-pg-mount deploy/aliyun/docker-compose.yaml fail
 run_case wrong_project wrong-project docker-compose.yaml fail
-run_case wrong_config_rustfs wrong-config-rustfs-id docker-compose.traefik.yaml fail
-run_case wrong_config_postgres wrong-config-postgres-id docker-compose.traefik.yaml fail
-run_case wrong_config_api wrong-config-api-id docker-compose.traefik.yaml fail
+run_case wrong_config_rustfs wrong-config-rustfs-id deploy/aliyun/docker-compose.yaml fail
+run_case wrong_config_postgres wrong-config-postgres-id deploy/aliyun/docker-compose.yaml fail
+run_case wrong_config_api wrong-config-api-id deploy/aliyun/docker-compose.yaml fail
 run_case bucket_failure bucket-fail docker-compose.yaml fail
 run_case sync_failure sync-fail docker-compose.yaml fail
 run_case pg_failure pg-fail docker-compose.yaml fail

@@ -1,19 +1,12 @@
-# Traefik 反向代理 —— 场景 2 的前置组件
-#
-# 已经有 Traefik 的话跳过这份，只要确保：
-#   1. 存在名为 traefik-network 的外部网络
-#   2. 有名为 websecure 的 HTTPS 入口
-#   3. 有名为 letsencrypt 的证书解析器
-# 这三个名字要和 assay 的 docker-compose.traefik.yaml 里的标签对得上。
-#
-# 用法：
-#   docker network create traefik-network
-#   cp .env.example .env && 填入 ACME_EMAIL
-#   docker compose up -d
+# 阿里云环境可选的公共 Traefik。已有代理时不安装、不覆盖。
+# 在独立目录部署；不能与 Assay 共用 .env 或默认 Compose 项目名。
+# cp traefik.env.example .env
+# docker network create traefik-network
+# docker compose -p traefik -f traefik.compose.yaml up -d
 
 services:
   traefik:
-    image: traefik:v3.3
+    image: ${TRAEFIK_IMAGE:-traefik:v3.6.10}
     restart: always
     command:
       - "--providers.docker=true"
@@ -22,11 +15,10 @@ services:
       - "--providers.docker.network=traefik-network"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.websecure.address=:443"
-      # 80 端口只用于跳转和 ACME 校验，业务一律走 HTTPS
+      # 80 端口仅做 HTTPS 跳转；证书通过 443 的 TLS-ALPN-01 校验
       - "--entrypoints.web.http.redirections.entrypoint.to=websecure"
       - "--entrypoints.web.http.redirections.entrypoint.scheme=https"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge=true"
-      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
       - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:?set ACME_EMAIL}"
       - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
     ports:

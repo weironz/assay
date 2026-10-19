@@ -15,7 +15,8 @@ need gzip
 need sha256sum
 need mktemp
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+ROOT="$SCRIPT_ROOT"
 OUT_DIR="${1:-$ROOT/../assay-backups}"
 COMPOSE_FILE="${2:-docker-compose.yaml}"
 AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:2}"
@@ -23,8 +24,9 @@ case "$OUT_DIR" in /*) ;; *) OUT_DIR="$PWD/$OUT_DIR" ;; esac
 case "$COMPOSE_FILE" in /*) ;; *) COMPOSE_FILE="$ROOT/$COMPOSE_FILE" ;; esac
 
 [[ -f "$COMPOSE_FILE" ]] || die "Compose 文件不存在：$COMPOSE_FILE"
-[[ "$(cd "$(dirname "$COMPOSE_FILE")" && pwd -P)" == "$ROOT" ]] ||
-  die "Compose 文件必须位于部署目录 $ROOT，以确保备份同目录的 .env"
+# 已明确选择文件时，以文件所在目录为部署目录；支持 deploy/aliyun 的仓库布局。
+# Compose 与备份都读取这一目录的 .env，禁止误备份仓库根目录的开发配置。
+ROOT="$(cd "$(dirname "$COMPOSE_FILE")" && pwd -P)"
 COMPOSE_FILE="$ROOT/$(basename "$COMPOSE_FILE")"
 [[ -f "$ROOT/.env" ]] || die "缺少 $ROOT/.env（需要备份部署配置和 AUTH_SECRET）"
 [[ ! -L "$OUT_DIR" ]] || die "输出目录不能是符号链接：$OUT_DIR"
