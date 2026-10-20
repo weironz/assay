@@ -127,7 +127,7 @@ if (!isolated) {
   }));
   const start = async (profile, mode = '', cookie = '', linkToken) => {
     selected = profile; fault = mode;
-    const res = await request(linkToken ? '/oidc/link' : '/sign-in/oidc', { callbackURL: `http://localhost:5173/${linkToken ? 'settings' : 'dashboard'}` }, cookie, linkToken ? { 'x-step-up-token': linkToken } : {});
+    const res = await request(linkToken ? '/oidc/link' : '/sign-in/oidc', { callbackURL: `http://localhost:5173/${linkToken ? 'settings' : 'dashboard'}` }, cookie, typeof linkToken === 'string' ? { 'x-step-up-token': linkToken } : {});
     assert.equal(res.status, 200, await res.clone().text());
     const { url } = await res.json();
     const authorize = await fetch(url, { redirect: 'manual' });
@@ -163,7 +163,7 @@ if (!isolated) {
     assert.deepEqual(user.roles.map(r => r.role.name), ['requester']);
     assert.equal(user.accounts[0].providerId, settings.providerId);
     for (const field of ['accessToken', 'refreshToken', 'idToken', 'password']) assert.equal(user.accounts[0][field], null);
-    assert.equal((await request('/unlink-account', { providerId: settings.providerId }, first.cookie)).status, 403, 'unlinking also requires fresh account step-up');
+    assert.equal((await request('/unlink-account', { providerId: settings.providerId }, first.cookie)).status, 400, 'the sole login identity remains protected by Better Auth, not a second challenge');
     const second = await login({ ...profile, email: `renamed-${randomUUID()}@example.test` });
     assert.equal(second.current.user.id, first.current.user.id, 'identity uses issuer + sub, not mutable email');
   });
@@ -196,7 +196,7 @@ if (!isolated) {
     assert.equal(tokenRequests, before + 1);
     assert.equal((await callback(flow)).headers.get('location'), 'http://localhost:5173/login?oidc_error=1');
   });
-  test('same-email local accounts cannot be implicitly linked; explicit linking requires one-time step-up and the same session', async () => {
+  test('same-email accounts need explicit trusted-session linking; no second challenge and legacy proof replay is still rejected', async () => {
     const profile = uniqueProfile();
     const signup = await request('/sign-up/email', { email: profile.email, name: 'Local fixture', password: 'local-test-password' });
     assert.equal(signup.status, 200, await signup.clone().text());
@@ -204,15 +204,17 @@ if (!isolated) {
     await db.user.update({ where: { id: current.user.id }, data: { emailVerified: true } });
     const failed = await callback(await start(profile));
     assert.equal(failed.headers.get('location'), 'http://localhost:5173/login?oidc_error=1');
-    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' }, cookie)).status, 403);
-    const token = await issueStepUp(current.user.id, current.session.token, 'account');
-    const flow = await start(profile, '', cookie, token);
-    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' }, cookie, { 'x-step-up-token': token })).status, 403);
+    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' })).status, 401);
+    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' }, cookie, { origin: 'https://untrusted.test' })).status, 403);
+    const flow = await start(profile, '', cookie, true);
     const linked = await callback(flow);
     assert.equal(linked.headers.get('location'), 'http://localhost:5173/settings?tab=security&oidc_linked=1');
     assert.equal((await login(profile)).current.user.id, current.user.id);
     const info = await request('/oidc/account', undefined, cookie);
     assert.equal((await info.json()).linked, true);
+    const token = await issueStepUp(current.user.id, current.session.token, 'account');
+    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' }, cookie, { 'x-step-up-token': token })).status, 200);
+    assert.equal((await request('/oidc/link', { callbackURL: 'http://localhost:5173/settings' }, cookie, { 'x-step-up-token': token })).status, 403);
   });
   test('link callback rejects different email and an expired initiating session', async () => {
     for (const invalidate of ['email', 'expired', 'replaced']) {
