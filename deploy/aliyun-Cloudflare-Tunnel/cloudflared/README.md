@@ -9,8 +9,6 @@
 将本目录中的 `docker-compose.yaml` 和 `.env.example` 复制到目标目录。
 先确认 `.env` 中的外部网络名称与 Assay Web 所在网络一致。
 新安装默认 `assay-tunnel`；现有服务器使用 `traefik-network` 时在 `.env` 中保留该值。
-第二个连接器需要不同的 `CLOUDFLARED_PROJECT` 和 `CLOUDFLARED_CONTAINER_NAME`，
-例如均设为 `cloudflared-will`，各自维护独立令牌文件。
 
 ```bash
 cd /data/cloudflared

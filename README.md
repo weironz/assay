@@ -118,7 +118,7 @@ Traefik 应用栈放在 [deploy/aliyun/docker-compose.yaml](deploy/aliyun/docker
 
 现有部署更新模板前先备份、比较数据卷及镜像；在 `.env` 设置当前 `POSTGRES_IMAGE`、`REDIS_IMAGE`、`RUSTFS_IMAGE` 完整引用，避免本机同名标签漂移或使用模板默认值降级。公共 Traefik 是另一个项目，已有代理保持原配置与证书卷。具体步骤见 [部署文档 §2](docs/05-部署文档.md#2-阿里云环境traefik--域名--自动-https)。
 
-Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](deploy/aliyun-Cloudflare-Tunnel/README.md)，包含无主机端口的应用栈、连接器和令牌更新工具。说明覆盖 `ticket.greenstor.ai` 主入口、备用域名、多连接器及现有生产卷的迁移方式。
+Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](deploy/aliyun-Cloudflare-Tunnel/README.md)，包含无主机端口的应用栈、连接器和令牌更新工具。说明覆盖 `ticket.greenstor.ai` 入口和现有生产卷的迁移方式。
 
 ### 发版（GitHub Actions 自动完成）
 

@@ -21,7 +21,7 @@ Web 不发布主机端口，显式关闭本模板中的 Traefik 自动发现，�
 
 ## 1. 全新安装
 
-以下命令从仓库根目录执行，目录均为安装示例；已有生产环境先阅读第 4 节。
+以下命令从仓库根目录执行，目录均为安装示例；已有生产环境先阅读第 3 节。
 
 ```bash
 install -d -m 700 /data/assay /data/cloudflared
@@ -85,36 +85,7 @@ docker compose logs --since 10m --tail 100
 `hostname` / `service` 路由，并从公网检查页面、登录请求和附件操作。
 `/api/me` 未登录时返回 401 属于正常认证行为。
 
-## 3. 增加测试域名，保留主域名
-
-例如增加 `ticket.cloudscele.com`，应用环境配置为：
-
-```dotenv
-PUBLIC_DOMAIN=ticket.greenstor.ai
-SECONDARY_DOMAIN=ticket.cloudscele.com
-AUTH_TRUST_ORIGINS=https://${PUBLIC_DOMAIN},https://${SECONDARY_DOMAIN}
-```
-
-变量引用按文件顺序展开，因此先声明两个域名，再声明信任来源。
-只增加备用入口时，`PUBLIC_DOMAIN` 保持原主域名。邮件链接和系统生成的认证回调仍以
-主域名为准；OIDC 服务端的允许回调也需要与实际回调地址一致。
-修改应用环境需要按现有发布流程重建 API；已经信任该来源时，启动备用连接器即可。
-
-备用域名可与主域名共用一个 Tunnel，也可使用 `/data/cloudflared-will` 的独立 Tunnel。
-两个连接器独立部署时，第二份 `.env` 设置不同项目名、容器名及独立令牌文件：
-
-```dotenv
-CLOUDFLARED_PROJECT=cloudflared-will
-CLOUDFLARED_CONTAINER_NAME=cloudflared-will
-CLOUDFLARED_NETWORK=assay-tunnel
-CLOUDFLARED_TOKEN_FILE=./secrets/tunnel-token
-```
-
-两个连接器与 Web 必须共享指定网络。每个域名的 DNS 和应用路由需对应到它实际使用的
-Tunnel。一个域名同时访问同一套 Assay 时仍共享数据库；测试创建、修改、删除业务数据
-会影响其他域名看到的同一份数据。
-
-## 4. 从现有阿里云部署切换模板
+## 3. 从现有阿里云部署切换模板
 
 已经通过 Tunnel 正常访问的生产服务器，不需要仅因仓库新增目录而重建服务。
 服务器活动配置仍在原 `/data/assay`、`/data/cloudflared`，本目录是可复用的安装模板。
@@ -129,7 +100,7 @@ Tunnel。一个域名同时访问同一套 Assay 时仍共享数据库；测试�
 4. 先用 `docker compose config --quiet` 校验，再对比解析后的卷、镜像和凭据。
    `config --format json` 包含凭据，只在服务器本地检查。
 5. 只更新 API/Web：`docker compose up -d --no-deps --pull never --wait api web`。
-   核对应用健康、主域名与备用域名、登录、工单及附件。
+   核对应用健康、访问域名、登录、工单及附件。
 
 此模板的 Web 关闭 Traefik 路由，切换会移除该 Web 服务原来的直连 Traefik 入口。
 若仍需同时保留 Traefik 和 Tunnel 入口，应继续使用原 `deploy/aliyun` 应用模板，
@@ -139,7 +110,7 @@ Tunnel。一个域名同时访问同一套 Assay 时仍共享数据库；测试�
 应用模板切换不移动数据目录，不运行 `down -v`，不重新 seed 生产库。
 令牌撤销或 Tunnel 删除需要在控制台恢复有效连接信息，恢复旧容器不能恢复已撤销的令牌。
 
-## 5. 网络与发布
+## 4. 网络与发布
 
 Tunnel 通过出站连接访问 Cloudflare；本模板不要求为 Web 开放主机的 80/443 端口。
 需允许 Cloudflare Tunnel 的出站 DNS 和隧道连接，具体协议与端口按 Cloudflare 官方要求配置。

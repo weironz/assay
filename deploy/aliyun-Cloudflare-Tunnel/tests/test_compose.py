@@ -22,7 +22,7 @@ def render(source=SOURCE, extra='', env_source=None):
         (target / '.env').write_text(text)
         environment = os.environ.copy()
         keys = set(re.findall(r'^([A-Z][A-Z0-9_]*)=', text, re.M))
-        keys.update({'PUBLIC_URL', 'LEGACY_PUBLIC_DOMAIN', 'SECONDARY_DOMAIN',
+        keys.update({'PUBLIC_URL', 'LEGACY_PUBLIC_DOMAIN',
                      'POSTGRES_IMAGE', 'REDIS_IMAGE', 'RUSTFS_IMAGE', 'REGISTRY'})
         for key in list(environment):
             if key in keys or key.startswith(('COMPOSE_', 'CLOUDFLARED_')):
@@ -62,15 +62,6 @@ class TunnelDeployment(unittest.TestCase):
         self.assertTrue(network['external'])
         self.assertEqual(network['name'], 'existing-production-network')
         self.assertNotIn('traefik-network', config['networks'])
-
-    def test_secondary_origin_does_not_replace_canonical_domain(self):
-        config = render(extra=('SECONDARY_DOMAIN=alternate.example.test\n'
-                               'AUTH_TRUST_ORIGINS=https://${PUBLIC_DOMAIN},https://${SECONDARY_DOMAIN}\n'))
-        api = config['services']['api']['environment']
-        for key in ['PUBLIC_URL', 'AUTH_BASE_URL', 'APP_URL']:
-            self.assertEqual(api[key], 'https://primary.example.test')
-        self.assertEqual(api['AUTH_TRUST_ORIGINS'],
-                         'https://primary.example.test,https://alternate.example.test')
 
     def test_connector_names_network_dns_and_token_file_are_configurable(self):
         config = render(SOURCE / 'cloudflared', extra=(
