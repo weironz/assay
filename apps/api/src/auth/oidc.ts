@@ -34,7 +34,10 @@ export function oidcPlugin(settings: OidcSettings | null, db: PrismaClient): Bet
       await assertSessionEpoch(db, session.session.token, session.user.id);
       const user = await db.user.findUnique({ where: { id: session.user.id } });
       if (!user || user.status !== 'ACTIVE' || !user.emailVerified) throw new APIError('FORBIDDEN', { message: 'Verified local account required' });
-      try { await consumeStepUp(ctx.headers?.get('x-step-up-token'), user.id, session.session.token, 'account'); }
+      try {
+        if (ctx.headers?.has('x-step-up-token')) await consumeStepUp(ctx.headers.get('x-step-up-token'), user.id, session.session.token, 'account');
+        else if (!config.origins.includes(ctx.headers?.get('origin') || '')) throw new Error('Untrusted origin');
+      }
       catch { throw new APIError('FORBIDDEN', { message: 'Fresh account verification required' }); }
       linking = { userId: user.id, epoch: user.sessionEpoch, sessionHash: createHash('sha256').update(session.session.token).digest('hex') };
     }

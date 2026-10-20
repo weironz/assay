@@ -5,6 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
+import { CodeBlockTail, CODE_BLOCK_OPTIONS } from '../lib/editor-code-block';
 
 interface Props {
   onChange: (html: string) => void;
@@ -92,7 +93,8 @@ export default function RichEditor({
 
   const editor = useEditor({
     extensions: [
-      StarterKit,
+      StarterKit.configure({ codeBlock: CODE_BLOCK_OPTIONS }),
+      CodeBlockTail,
       Image,
       Link.configure({ openOnClick: false }),
       // 占位符必须由扩展渲染：它负责给空段落加 is-editor-empty 和

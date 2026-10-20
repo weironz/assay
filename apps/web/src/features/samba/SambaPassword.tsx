@@ -11,7 +11,6 @@ export default function SambaPassword() {
   const [old, setOld] = useState('');
   const [next, setNext] = useState('');
   const [confirmation, setConfirmation] = useState('');
-  const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const submitting = useRef(false);
   const [changed, setChanged] = useState(false);
@@ -34,7 +33,7 @@ export default function SambaPassword() {
       const response = await fetch(`${apiOrigin}/api/samba/me/password`, {
         method: 'POST', credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requestId: crypto.randomUUID(), old_password: old, password: next, ...(user?.twoFactorEnabled ? { code } : {}) }),
+        body: JSON.stringify({ requestId: crypto.randomUUID(), old_password: old, password: next }),
       });
       const data = await response.json();
       if (!response.ok) {
@@ -54,7 +53,7 @@ export default function SambaPassword() {
     } catch (error: any) {
       setMessage(error.response?.data?.code ? new OperationError(error.response.data.code).message : error.message || '修改失败，请核对当前密码与公司密码策略');
     } finally {
-      setCode(''); setBusy(false); submitting.current = false;
+      setBusy(false); submitting.current = false;
     }
   };
 
@@ -71,7 +70,6 @@ export default function SambaPassword() {
           <span>{label}</span>
           <input className="mt-1 min-h-11 w-full rounded-md border border-gray-300 bg-transparent px-3" type="password" minLength={8} maxLength={512} required autoComplete={label === '当前 AD 密码' ? 'current-password' : 'new-password'} value={value} onChange={e => setter(e.target.value)} />
         </label>)}
-        {user?.twoFactorEnabled && <label className="block text-sm"><span>动态验证码</span><input className="mt-1 min-h-11 w-full rounded-md border border-gray-300 bg-transparent px-3" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" maxLength={6} required value={code} onChange={e => setCode(e.target.value)} /></label>}
         <button disabled={busy} className="min-h-11 rounded-md bg-brand-700 px-4 text-sm text-white disabled:opacity-60" type="submit">{busy ? '正在修改…' : '修改公司密码'}</button>
       </fieldset>
     </form>}

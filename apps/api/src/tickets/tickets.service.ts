@@ -333,7 +333,21 @@ export class TicketsService {
     if (q.status) filters.push({ status: q.status as TicketStatus });
     if (q.priority) filters.push({ priority: q.priority as any });
     if (q.queueId) filters.push({ queueId: q.queueId });
-    if (q.assigneeId) filters.push({ assigneeId: q.assigneeId });
+    if (q.assigneeId) filters.push({ assigneeId: q.assigneeId === '__none__' ? null : q.assigneeId });
+    if (q.datacenterId) filters.push({ datacenterId: q.datacenterId === '__none__' ? null : q.datacenterId });
+    if (q.createdFrom && q.createdTo && new Date(q.createdFrom) >= new Date(q.createdTo)) {
+      throw new BadRequestException('创建日期范围无效');
+    }
+    if (q.createdFrom || q.createdTo) filters.push({ createdAt: {
+      ...(q.createdFrom ? { gte: new Date(q.createdFrom) } : {}),
+      ...(q.createdTo ? { lt: new Date(q.createdTo) } : {}),
+    } });
+    const activeStates = { notIn: [...TERMINAL_STATUSES, 'PENDING' as TicketStatus] };
+    if (q.slaState === 'overdue') filters.push({ status: activeStates, slaDueAt: { lt: new Date() } });
+    if (q.slaState === 'within') filters.push({ status: activeStates, slaDueAt: { gte: new Date() } });
+    if (q.slaState === 'paused') filters.push({ status: 'PENDING', slaDueAt: { not: null } });
+    if (q.slaState === 'completed') filters.push({ status: { in: TERMINAL_STATUSES } });
+    if (q.slaState === 'unset') filters.push({ slaDueAt: null, status: { notIn: TERMINAL_STATUSES } });
     if (q.requesterId) filters.push({ requesterId: q.requesterId });
     if (q.categoryId) filters.push({ categoryId: q.categoryId });
     if (q.ticketNo) {
@@ -352,7 +366,7 @@ export class TicketsService {
     } else if (q.scope === 'overdue') {
       filters.push({
         slaDueAt: { lt: new Date() },
-        status: { notIn: TERMINAL_STATUSES },
+        status: { notIn: [...TERMINAL_STATUSES, 'PENDING'] },
       });
     }
 
@@ -378,6 +392,7 @@ export class TicketsService {
           queue: { select: { id: true, name: true } },
           type: { select: { id: true, name: true } },
           category: { select: { id: true, name: true } },
+          datacenter: { select: { id: true, name: true } },
         },
         orderBy: { [q.sort ?? 'createdAt']: q.order ?? 'desc' },
         skip: (page - 1) * pageSize,

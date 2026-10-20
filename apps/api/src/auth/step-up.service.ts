@@ -11,9 +11,9 @@ import {
   reserveTotpCode, releaseSuccessfulStepUpAttempt, StepUpPurpose, STEP_UP_TTL_SECONDS,
 } from './step-up-store';
 
-// Global administrators authorize management operations with their active Web
-// session. Personal account recovery and MFA changes keep their own proof.
-const ADMIN_MANAGEMENT_PURPOSES: StepUpPurpose[] = ['roles', 'api-tokens', 'samba'];
+// Authorization comes from the active login session and current route RBAC,
+// not a second password/TOTP challenge on each operation.
+const SESSION_PURPOSES: StepUpPurpose[] = ['roles', 'api-tokens', 'samba', 'account', 'two-factor'];
 
 @Injectable()
 export class StepUpService {
@@ -40,7 +40,7 @@ export class StepUpService {
       enrollmentRequired,
       stepUpTtlSeconds: STEP_UP_TTL_SECONDS,
       purposes: ['roles', 'api-tokens', 'two-factor', 'account', 'samba'],
-      stepUpExemptPurposes: user.roles.includes('admin') && !enrollmentRequired ? ADMIN_MANAGEMENT_PURPOSES : [],
+      stepUpExemptPurposes: !enrollmentRequired ? SESSION_PURPOSES : [],
     };
   }
 
@@ -63,16 +63,15 @@ export class StepUpService {
   }
 
   // The AD self-change operation verifies the form's old password itself.
-  // Keep Web-session, origin, throttling and enrolled MFA checks without asking
+  // Keep Web-session, origin and throttling checks without asking
   // for the same password again (or for a separate local Assay password).
-  async preparePasswordChange(req: Request, user: AuthUser, code?: string) {
+  async preparePasswordChange(req: Request, user: AuthUser, _code?: string) {
     await this.session(req, user);
     const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
     if (!req.headers.origin || !origins.includes(req.headers.origin)) {
       throw new ForbiddenException('密码修改来源校验失败');
     }
     await checkStepUpRate(user.id);
-    await this.verifySecondFactor(req, user, code);
   }
 
   private async verifySecondFactor(req: Request, user: AuthUser, code?: string) {
@@ -99,12 +98,12 @@ export class StepUpService {
 
   async consume(req: Request, user: AuthUser, purpose: StepUpPurpose) {
     const session = await this.session(req, user);
-    if (user.roles.includes('admin') && ADMIN_MANAGEMENT_PURPOSES.includes(purpose) && !req.headers['x-step-up-token']) {
+    if (req.headers['x-step-up-token'] === undefined) {
       // The session and current RBAC are checked by the guards. A trusted Origin
       // still prevents another site from submitting cookie-authenticated writes.
       const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
       if (!req.headers.origin || !origins.includes(req.headers.origin)) {
-        throw new ForbiddenException('管理操作来源校验失败');
+        throw new ForbiddenException('操作来源校验失败');
       }
       return;
     }

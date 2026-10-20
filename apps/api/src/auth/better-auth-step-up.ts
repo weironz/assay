@@ -47,10 +47,14 @@ export async function enforceBetterAuthSensitiveStepUp(
     throw new APIError('FORBIDDEN', { message: '强制 MFA 模式下需先移除特权角色才能停用 TOTP' });
   }
   try {
-    await (lookup.consume ?? consumeStepUp)(
+    if (headers.has('x-step-up-token')) await (lookup.consume ?? consumeStepUp)(
       headers.get('x-step-up-token'), current.user.id, current.session.token,
       path === '/delete-user' || path === '/unlink-account' ? 'account' : 'two-factor',
     );
+    else {
+      const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+      if (!origins.includes(headers.get('origin') || '')) throw new Error('Untrusted origin');
+    }
   } catch {
     throw new APIError('FORBIDDEN', { message: '需要有效且未使用的安全验证' });
   }

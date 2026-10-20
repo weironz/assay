@@ -37,7 +37,6 @@ export default function TicketShareDialog({
   const { data: shares } = useTicketShares(ticketId, open);
   const create = useCreateTicketShare();
   const revoke = useRevokeTicketShare();
-  const [label, setLabel] = useState('');
   const [expiry, setExpiry] = useState<Expiry>('7');
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -61,13 +60,11 @@ export default function TicketShareDialog({
     create.mutate(
       {
         ticketId,
-        label: label.trim() || undefined,
         expiresInDays: expiry === 'never' ? undefined : Number(expiry),
       },
       {
         onSuccess: (share) => {
           setCreatedUrl(`${window.location.origin}/share/${share.token}`);
-          setLabel('');
         },
         onError: () => setError(t('share.createFailed')),
       },
@@ -158,16 +155,6 @@ export default function TicketShareDialog({
 
           <section className="space-y-3">
             <h3 className="text-sm font-medium text-gray-800 dark:text-gray-100">{t('share.createTitle')}</h3>
-            <label className="block text-sm text-gray-600 dark:text-gray-300">
-              {t('share.nameLabel')}
-              <input
-                value={label}
-                maxLength={80}
-                onChange={(event) => setLabel(event.target.value)}
-                placeholder={t('share.namePlaceholder')}
-                className="mt-1.5 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm outline-none transition-shadow focus:border-brand-500 focus:ring-2 focus:ring-brand-100 dark:border-gray-700 dark:bg-gray-800 dark:focus:ring-brand-950"
-              />
-            </label>
             <label className="block text-sm text-gray-600 dark:text-gray-300">
               {t('share.expiryLabel')}
               <select

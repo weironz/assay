@@ -56,6 +56,7 @@ export async function uploadDraft(
 // —— 逻辑层：数据请求 hooks（界面组件只调用，不含 fetch 细节）——
 
 export interface TicketListItem {
+  datacenter: { id: string; name: string } | null;
   id: string;
   ticketNo: string;
   title: string;
@@ -109,6 +110,10 @@ export interface TicketDetail extends TicketListItem {
 }
 
 export interface TicketQuery {
+  datacenterId?: string;
+  slaState?: 'overdue' | 'within' | 'paused' | 'completed' | 'unset';
+  createdFrom?: string;
+  createdTo?: string;
   status?: string;
   scope?: 'open' | 'completed' | 'mine' | 'unassigned' | 'overdue';
   priority?: string;

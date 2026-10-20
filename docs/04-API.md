@@ -188,8 +188,12 @@ GET /api/tickets
 | `status` | string | 状态枚举，见 §7 |
 | `priority` | string | `LOW` `MEDIUM` `HIGH` `URGENT` |
 | `queueId` | string | 队列 id |
+| `datacenterId` | string | 机房 id；`__none__` 筛选未指定机房 |
+| `slaState` | string | `overdue` 已超时、`within` 未超时、`paused` 挂起、`completed` 已结束、`unset` 无 SLA；已结束/挂起不参与超时筛选 |
+| `createdFrom` | ISO 8601 | 创建时间下界（含），Web 按操作者本地日期换算为 UTC 时刻 |
+| `createdTo` | ISO 8601 | 创建时间上界（不含）；Web 的结束日期包含当天，实际提交下一天本地零点 |
 | `scope` | string | 快捷范围：`open`、`completed`、`mine`、`unassigned`、`overdue` |
-| `assigneeId` | string | 处理人 id |
+| `assigneeId` | string | 处理人 id；`__none__` 表示未指派 |
 | `requesterId` | string | 提单人 id |
 | `categoryId` | string | 分类 id |
 | `ticketNo` | string | 模糊匹配工单号，可与其他筛选组合 |
@@ -284,6 +288,10 @@ GET /api/tickets/:id
 ```
 权限：`ticket:read`
 
+Web 列表采用“列名 + 筛选图标”，点击展开该列条件，不再常驻第二行输入框。
+有条件的图标高亮，可单列清除；机房列紧随标题，SLA、创建日期也可筛选。
+手机端使用折叠筛选区。条件保存在 URL 和已保存视图中，浏览器前进/后退同步。
+
 在列表字段基础上额外包含：`messages`（往来消息，**提单人和关注人看不到内部备注**）、
 `participants`（协作成员 / 关注人）、`availableActions`（当前用户可执行的流转动作）、`type`、`datacenter`、
 `serialNumber`、`contact`、`firstResponseAt`、`firstResponseDueAt`。
@@ -312,8 +320,22 @@ GET /api/tickets/:id
 `label` 选填（≤80 字符）；`expiresInDays` 可填 `1`–`365`，不传即永不过期。创建成功后，
 前端拼接为 `https://assay.cloudcele.com/share/<token>`。
 
+Web 创建分享时不再要求或展示“链接名称”输入框，只选择有效期后创建、复制；
+`label` 仅为旧客户端兼容而保留，原有链接及其撤销、到期规则不变。
+
 公开接口只包含工单号、标题、状态、优先级、类型/分类/IDC 定位信息和**公开回复**；不返回内部备注、
 联系方式、提单人/处理人的邮箱、队列、协作成员或普通附件。公开回复正文引用的内联图片会经受控地址展示。
+
+### 管理员维护机房预设
+
+入口：「设置 → 工单字段」。`GET /api/datacenters` 登录可读；管理员且具备
+`user:manage` 可使用 `POST /api/datacenters`、`PATCH /api/datacenters/:id`
+（请求体 `{ "name": "BKK-DC02" }`）和 `DELETE /api/datacenters/:id`。
+名称 trim 后为 1–80 字符；重复返回 409，不存在返回 404。删除会锁定选项并核查
+工单、资产、集群引用，已使用的选项返回 409，不清空历史关联。
+
+维护只修改数据库选项，不修改代码，无需重新发版。新增机房会进入提单、属性编辑
+和列表筛选菜单；重命名后仍使用原 ID，旧工单随关联显示新名称。
 
 ### 3.5 修改工单
 

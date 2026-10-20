@@ -11,6 +11,7 @@ import {
   MinLength,
   ValidateNested,
   ValidateIf,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { TicketContactDto } from './contact';
@@ -175,6 +176,22 @@ export class AddParticipantDto {
 }
 
 export class ListTicketsQuery {
+  @IsOptional()
+  @IsString()
+  datacenterId?: string;
+
+  @IsOptional()
+  @IsIn(['overdue', 'within', 'paused', 'completed', 'unset'])
+  slaState?: string;
+
+  @IsOptional()
+  @IsDateString()
+  createdFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  createdTo?: string;
+
   @IsOptional()
   @IsString()
   status?: string;

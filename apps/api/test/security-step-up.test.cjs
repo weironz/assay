@@ -125,7 +125,7 @@ test('direct Better Auth guard covers disable, secret disclosure, replacement an
     await assert.rejects(enforceBetterAuthSensitiveStepUp(path, new Headers(), lookup), { status: 'FORBIDDEN' });
     await enforceBetterAuthSensitiveStepUp(path, new Headers({ 'x-step-up-token': 'valid' }), lookup);
   }
-  assert.equal(calls.length, 8);
+  assert.equal(calls.length, 4);
   assert.deepEqual(calls.at(-1), ['valid', 'u', 's', 'two-factor']);
   await assert.rejects(enforceBetterAuthSensitiveStepUp('/two-factor/disable', undefined, lookup), { status: 'UNAUTHORIZED' });
   await assert.rejects(enforceBetterAuthSensitiveStepUp('/two-factor/get-totp-uri', new Headers(), { ...lookup, session: async () => null }), { status: 'UNAUTHORIZED' });
@@ -199,12 +199,12 @@ test('an active administrator Web session authorizes management without another 
   const origin = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim();
   const req = { headers: { origin } };
   t.mock.method(auth.api, 'getSession', async () => ({ user: { id: user.id }, session: { token: 'active-session' } }));
-  assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, ['roles', 'api-tokens', 'samba']);
-  for (const purpose of ['roles', 'api-tokens', 'samba']) await service.consume(req, user, purpose);
-  for (const purpose of ['account', 'two-factor']) await assert.rejects(service.consume(req, user, purpose), { status: 403 });
+  assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, ['roles', 'api-tokens', 'samba', 'account', 'two-factor']);
+  for (const purpose of ['roles', 'api-tokens', 'samba', 'account', 'two-factor']) await service.consume(req, user, purpose);
   for (const headers of [{}, { origin: 'https://untrusted.example' }, { origin: 'null' }]) {
     await assert.rejects(service.consume({ headers }, user, 'samba'), { status: 403 });
   }
+  await assert.rejects(service.consume({ headers: { origin, 'x-step-up-token': '' } }, user, 'roles'), { status: 403 });
   await assert.rejects(service.consume({ headers: { origin, authorization: 'Bearer fake' } }, user, 'samba'), { status: 401 });
   const legacy = { headers: { 'x-step-up-token': await store.issueStepUp(user.id, 'active-session', 'samba') } };
   await service.consume(legacy, user, 'samba');
@@ -221,14 +221,15 @@ test('an active administrator Web session authorizes management without another 
   }
 });
 
-test('delegated managers and users whose admin role was removed still need a matching one-use proof', async (t) => {
+test('all Web roles can authorize their permitted operations with a trusted-origin session, not a second credential', async (t) => {
   const service = new StepUpService({});
-  const req = { headers: {} };
+  const req = { headers: { origin: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim() } };
   t.mock.method(auth.api, 'getSession', async () => ({ user: { id: 'u' }, session: { token: 's' } }));
   for (const role of ['requester', 'supervisor', 'samba_manager', 'asset_manager', 'inventory_manager']) {
     const user = { id: 'u', authType: 'session', roles: [role] };
-    assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, []);
-    await assert.rejects(service.consume(req, user, 'samba'), { status: 403 });
+    assert.deepEqual((await service.status(req, user)).stepUpExemptPurposes, ['roles', 'api-tokens', 'samba', 'account', 'two-factor']);
+    for (const purpose of ['roles', 'api-tokens', 'samba']) await service.consume(req, user, purpose);
+    await assert.rejects(service.consume({ headers: { origin: 'https://evil.test' } }, user, 'samba'), { status: 403 });
     req.headers['x-step-up-token'] = await store.issueStepUp('u', 's', 'samba');
     await service.consume(req, user, 'samba');
     await assert.rejects(service.consume(req, user, 'samba'), { status: 403 });
@@ -243,6 +244,40 @@ test('admin exemption cannot authorize an absent, expired or different user sess
   await assert.rejects(service.consume({ headers: {} }, user, 'samba'), { status: 401 });
   getSession.mock.mockImplementation(async () => ({ user: { id: 'other' }, session: { token: 's' } }));
   await assert.rejects(service.consume({ headers: {} }, user, 'roles'), { status: 401 });
+});
+
+test('HTTP role assignment uses the admin session once without step-up, but denies readers, expired sessions and untrusted origins', async (t) => {
+  const { NestFactory, Reflector } = require('@nestjs/core');
+  const { Module, ValidationPipe } = require('@nestjs/common');
+  const { UsersService } = require('../dist/users/users.service');
+  const { PermissionsGuard } = require('../dist/auth/permissions.guard');
+  const origin = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim();
+  let writes = 0;
+  const principal = cookie => ({ id: 'actor', status: 'ACTIVE', authType: 'session', roles: [cookie === 'reader' ? 'requester' : 'admin'], permissions: cookie === 'reader' ? [] : ['user:manage'], twoFactorEnabled: true });
+  t.mock.method(auth.api, 'getSession', async ({ headers }) => headers.get('cookie') === 'expired' ? null : { user: { id: 'actor' }, session: { token: 'admin-web-session' } });
+  class FixtureModule {}
+  Module({ controllers: [UsersController], providers: [
+    { provide: StepUpService, useValue: new StepUpService({}) },
+    { provide: UsersService, useValue: { update: async (id, dto) => { writes++; return { id, ...dto }; } } },
+  ] })(FixtureModule);
+  const reflector = new Reflector();
+  const app = await NestFactory.create(FixtureModule, { logger: false });
+  app.setGlobalPrefix('api'); app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true }));
+  app.useGlobalGuards(new SessionGuard(reflector, { getUserFromRequest: async req => req.headers.cookie ? principal(req.headers.cookie) : null }), new PermissionsGuard(reflector));
+  await app.listen(0, '127.0.0.1');
+  const base = await app.getUrl();
+  const call = (cookie, webOrigin = origin) => fetch(`${base}/api/users/will-fixture`, { method: 'PATCH', headers: { ...(cookie ? { cookie } : {}), origin: webOrigin, 'content-type': 'application/json' }, body: JSON.stringify({ roleNames: ['supervisor'] }) });
+  try {
+    assert.equal((await call(null)).status, 401);
+    assert.equal((await call('reader')).status, 403);
+    assert.equal((await call('admin', 'https://untrusted.test')).status, 403);
+    assert.equal((await call('expired')).status, 401);
+    assert.equal(writes, 0);
+    const response = await call('admin');
+    assert.equal(response.status, 200);
+    assert.deepEqual((await response.json()).roleNames, ['supervisor']);
+    assert.equal(writes, 1);
+  } finally { await app.close(); }
 });
 
 test('privileged MFA enforcement blocks app routes only when opted in', async () => {
@@ -303,7 +338,7 @@ test('self-password authorization preserves session, origin and throttling witho
   await assert.rejects(service.preparePasswordChange({ headers: { origin } }, user), { status: 429 });
 });
 
-test('self-password authorization still requires enrolled TOTP even when the UI user data is stale', async (t) => {
+test('self-password form does not repeat login TOTP; it preserves the session and trusts the old-password operation', async (t) => {
   const user = { id: 'self-password-mfa', authType: 'session', roles: [], twoFactorEnabled: false };
   const service = new StepUpService({
     user: { findUnique: async () => ({ status: 'ACTIVE', twoFactorEnabled: true }) },
@@ -312,11 +347,11 @@ test('self-password authorization still requires enrolled TOTP even when the UI 
   t.mock.method(auth.api, 'getSession', async () => ({ user: { id: user.id }, session: { token: 'active' } }));
   const verify = t.mock.method(auth.api, 'verifyTOTP', async () => ({}));
   const req = { headers: { origin: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',')[0].trim() } };
-  await assert.rejects(service.preparePasswordChange(req, user), { status: 401 });
+  await service.preparePasswordChange(req, user);
   assert.equal(verify.mock.callCount(), 0);
   await service.preparePasswordChange(req, user, '987654');
-  assert.equal(verify.mock.callCount(), 1);
-  await assert.rejects(service.preparePasswordChange(req, user, '987654'), { status: 403 });
+  assert.equal(verify.mock.callCount(), 0);
+  await service.preparePasswordChange(req, user, '987654');
 });
 
 test('self-password endpoint uses the existing old-password operation while management keeps its own proof', async () => {

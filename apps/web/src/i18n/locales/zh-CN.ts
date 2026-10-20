@@ -1,9 +1,11 @@
 import { workbenchCn } from '../../features/workbench/strings';
+import { ticketUiZhCN } from '../../features/tickets/strings';
 import { copZhCN } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 简体中文 */
 const zhCN: Resource = {
+  ticketUi: ticketUiZhCN,
   workbench: workbenchCn,
   cop: copZhCN,
   common: {

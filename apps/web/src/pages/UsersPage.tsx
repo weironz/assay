@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
 import { type Msg, useMsg } from '../lib/messages';
 import StepUpDialog from '../components/StepUpDialog';
-import { guardedApi } from '../lib/security-step-up';
+import { guardedApi, securityErrorKey } from '../lib/security-step-up';
 
 interface UserRow {
   id: string;
@@ -47,6 +47,9 @@ export default function UsersPage() {
   const [msg, setMsg] = useState<Msg>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [editRoles, setEditRoles] = useState<string[]>([]);
+  const [roleBusy, setRoleBusy] = useState(false);
+  const [roleError, setRoleError] = useState('');
+  const roleSaving = useRef(false);
   const [challenge, setChallenge] = useState<{ title: string; run: (token: string) => Promise<void> } | null>(null);
   const rolePanel = useRef<HTMLDivElement>(null);
   const roleOpener = useRef<HTMLButtonElement>(null);
@@ -58,7 +61,7 @@ export default function UsersPage() {
     return () => { if (previous?.isConnected && !document.querySelector('[data-step-up-dialog]')) previous.focus(); };
   }, [editing]);
   const roleKeys = (event: KeyboardEvent) => {
-    if (challenge) return;
+    if (roleBusy) return;
     if (event.key === 'Escape') { event.preventDefault(); setEditing(null); return; }
     if (event.key !== 'Tab') return;
     const controls = [...(rolePanel.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)') || [])];
@@ -75,6 +78,16 @@ export default function UsersPage() {
     roleOpener.current = opener;
     setEditing(u);
     setEditRoles(u.roles);
+    setRoleError('');
+  };
+  const saveRoles = async () => {
+    if (!editing || roleSaving.current) return;
+    roleSaving.current = true; setRoleBusy(true); setRoleError('');
+    try {
+      await guardedApi('PATCH', `/users/${editing.id}`, '', { roleNames: [...editRoles] });
+      refreshUsers(); setEditing(null);
+    } catch (error) { setRoleError(securityErrorKey(error)); }
+    finally { roleSaving.current = false; setRoleBusy(false); }
   };
   const toggleEditRole = (name: string) =>
     setEditRoles((r) =>
@@ -246,15 +259,13 @@ export default function UsersPage() {
       {/* 编辑角色弹窗 */}
       {editing && (
         <div
-          inert={!!challenge}
-          aria-hidden={challenge ? true : undefined}
           className="fixed inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/40 p-4"
-          onClick={() => setEditing(null)}
+          onClick={() => { if (!roleBusy) setEditing(null); }}
         >
           <div
             ref={rolePanel}
             role="dialog"
-            aria-modal={challenge ? undefined : true}
+            aria-modal="true"
             aria-labelledby="edit-roles-title"
             onKeyDown={roleKeys}
             onClick={(e) => e.stopPropagation()}
@@ -270,6 +281,7 @@ export default function UsersPage() {
                   <input
                     type="checkbox"
                     checked={editRoles.includes(r.name)}
+                    disabled={roleBusy}
                     onChange={() => toggleEditRole(r.name)}
                   />
                   <span>{r.description ?? r.name}</span>
@@ -282,17 +294,19 @@ export default function UsersPage() {
                 {t('users.noBusinessRoles')}
               </p>
             )}
+            {roleError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">{t(roleError)}</p>}
             <div className="flex gap-2 justify-end pt-1">
               <button
                 onClick={() => setEditing(null)}
+                disabled={roleBusy}
                 className="min-h-11 rounded-md border border-gray-300 dark:border-gray-700 px-4 py-2 text-sm focus-visible:ring-2 focus-visible:ring-brand-500"
               >
                 {t('common.cancel')}
               </button>
               <button
                 ref={roleSaveButton}
-                onClick={() => { if (!editing) return; const id = editing.id; const roleNames = [...editRoles]; setChallenge({ title: t('users.editRolesTitle', { name: editing.name }), run: async (token) => { await guardedApi('PATCH', `/users/${id}`, token, { roleNames }); refreshUsers(); setEditing(null); } }); }}
-                disabled={!!challenge}
+                onClick={() => void saveRoles()}
+                disabled={roleBusy}
                 className="min-h-11 rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500"
               >
                 {t('common.save')}

@@ -1,9 +1,11 @@
 import { workbenchTh } from '../../features/workbench/strings';
+import { ticketUiTh } from '../../features/tickets/strings';
 import { copTh } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** ไทย (Thai) */
 const th: Resource = {
+  ticketUi: ticketUiTh,
   workbench: workbenchTh,
   cop: copTh,
   common: {

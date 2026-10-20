@@ -48,7 +48,7 @@ class StatsController {
         where: {
           ...base,
           slaDueAt: { lt: new Date() },
-          status: { notIn: DONE as any },
+          status: { notIn: [...DONE, 'PENDING'] as any },
         },
       }),
       this.prisma.ticket.count({

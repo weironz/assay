@@ -1,9 +1,11 @@
 import { workbenchTw } from '../../features/workbench/strings';
+import { ticketUiZhTW } from '../../features/tickets/strings';
 import { copZhTW } from '../../features/cop/strings';
 import type { Resource } from '../types';
 
 /** 繁體中文（台港用語，非簡轉繁字元對映） */
 const zhTW: Resource = {
+  ticketUi: ticketUiZhTW,
   workbench: workbenchTw,
   cop: copZhTW,
   common: {

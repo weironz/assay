@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Patch, Post, Delete, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { Type } from 'class-transformer';
 import {
   IsHexColor,
@@ -8,9 +8,12 @@ import {
   Max,
   Min,
   MinLength,
+  MaxLength,
+  Matches,
 } from 'class-validator';
 import { PrismaService } from '../prisma/prisma.service';
-import { RequirePermissions } from '../auth/decorators';
+import { RequirePermissions, CurrentUser } from '../auth/decorators';
+import { AuthUser } from '../auth/auth.types';
 import { directoryRoleUserIds } from '../auth/directory-policy';
 
 class CategoryDto {
@@ -21,6 +24,14 @@ class CategoryDto {
   @IsOptional()
   @IsString()
   parentId?: string;
+}
+
+export class PresetNameDto {
+  @IsString()
+  @MinLength(1)
+  @MaxLength(80)
+  @Matches(/\S/)
+  name!: string;
 }
 
 class TagDto {
@@ -130,6 +141,50 @@ export class MetaController {
   @Get('datacenters')
   datacenters() {
     return this.prisma.datacenter.findMany({ orderBy: { name: 'asc' } });
+  }
+
+  private assertAdmin(user: AuthUser) {
+    if (!user.roles.includes('admin')) throw new ForbiddenException('仅管理员可维护工单字段');
+  }
+
+  private async presetWrite(operation: () => Promise<unknown>) {
+    try { return await operation(); }
+    catch (error: any) {
+      if (error.code === 'P2002') throw new ConflictException('名称已存在');
+      if (error.code === 'P2003') throw new ConflictException('选项已被业务记录引用，不能删除');
+      if (error.code === 'P2025') throw new NotFoundException('选项不存在');
+      throw error;
+    }
+  }
+
+  @Post('datacenters')
+  @RequirePermissions('user:manage')
+  createDatacenter(@CurrentUser() user: AuthUser, @Body() dto: PresetNameDto) {
+    this.assertAdmin(user);
+    return this.presetWrite(() => this.prisma.datacenter.create({ data: { name: dto.name.trim() } }));
+  }
+
+  @Patch('datacenters/:id')
+  @RequirePermissions('user:manage')
+  updateDatacenter(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: PresetNameDto) {
+    this.assertAdmin(user);
+    return this.presetWrite(() => this.prisma.datacenter.update({ where: { id }, data: { name: dto.name.trim() } }));
+  }
+
+  @Delete('datacenters/:id')
+  @RequirePermissions('user:manage')
+  removeDatacenter(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    this.assertAdmin(user);
+    return this.presetWrite(async () => {
+      // Prevent set-null relations from silently stripping old tickets/assets.
+      return this.prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM datacenters WHERE id = ${id} FOR UPDATE`;
+        const used = await tx.datacenter.findUnique({ where: { id }, include: { _count: { select: { tickets: true, assets: true, clusters: true } } } });
+        if (!used) throw new NotFoundException('选项不存在');
+        if (Object.values(used._count).some(count => count > 0)) throw new ConflictException('选项已被业务记录引用，不能删除');
+        return tx.datacenter.delete({ where: { id } });
+      });
+    });
   }
 
   /** 带 datacenterId 供前端按所选机房过滤集群 */
