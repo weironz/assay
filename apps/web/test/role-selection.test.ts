@@ -41,5 +41,6 @@ test('every language provides the same role labels, summaries and controls', () 
     expect(Object.keys(copy).sort()).toEqual(Object.keys(accessEn).sort());
     expect(Object.keys(copy.roles).sort()).toEqual(Object.keys(accessEn.roles).sort());
     expect(Object.keys(copy.summaries).sort()).toEqual(Object.keys(accessEn.summaries).sort());
+    expect(Object.keys(copy.create).sort()).toEqual(Object.keys(accessEn.create).sort());
   }
 });

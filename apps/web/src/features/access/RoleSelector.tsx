@@ -35,6 +35,7 @@ export default function RoleSelector({ roles, selected, onToggle, disabled, load
               <span className="sr-only">{t('access.search')}</span>
               <svg aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
               <input type="search" value={query} onChange={event => setQuery(event.target.value)} placeholder={t('access.search')}
+                onKeyDown={event => { if (event.key === 'Enter') event.preventDefault(); }}
                 disabled={disabled} className="min-h-11 w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-sm dark:border-gray-600 dark:bg-gray-950" />
             </label>
             <div className="flex shrink-0 rounded-md bg-gray-100 p-1 text-xs dark:bg-gray-800" role="group" aria-label={t('access.title')}>

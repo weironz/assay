@@ -1,4 +1,4 @@
-import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react';
+import { KeyboardEvent, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { api } from '../lib/api';
@@ -7,6 +7,8 @@ import StepUpDialog from '../components/StepUpDialog';
 import { guardedApi, securityErrorKey } from '../lib/security-step-up';
 import RoleSelector from '../features/access/RoleSelector';
 import { toggleRoleSelection, type AssignableRole } from '../features/access/role-selection';
+import CreateUserDrawer from '../features/access/CreateUserDrawer';
+import { filterUsers } from '../features/access/user-directory';
 
 interface UserRow {
   id: string;
@@ -26,7 +28,7 @@ export default function UsersPage() {
   const { t } = useTranslation();
   const showMsg = useMsg();
   const qc = useQueryClient();
-  const { data: users } = useQuery<UserRow[]>({
+  const { data: users, isPending: usersLoading, isError: usersFailed, refetch: retryUsers } = useQuery<UserRow[]>({
     queryKey: ['users'],
     queryFn: async () => (await api.get('/users')).data,
   });
@@ -35,12 +37,8 @@ export default function UsersPage() {
     queryFn: async () => (await api.get('/roles')).data,
   });
 
-  const [form, setForm] = useState({
-    email: '',
-    name: '',
-    password: '',
-    roleNames: [] as string[],
-  });
+  const [creating, setCreating] = useState(false);
+  const [userSearch, setUserSearch] = useState('');
   const [msg, setMsg] = useState<Msg>(null);
   const [editing, setEditing] = useState<UserRow | null>(null);
   const [editRoles, setEditRoles] = useState<string[]>([]);
@@ -105,81 +103,31 @@ export default function UsersPage() {
     } });
   };
 
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    setMsg(null);
-    const values = { ...form, roleNames: [...form.roleNames] };
-    setChallenge({ title: t('users.create'), run: async (token) => {
-      await guardedApi('POST', '/users', token, values);
-      refreshUsers();
-      setForm({ email: '', name: '', password: '', roleNames: [] });
-      setMsg({ key: 'users.created' });
-    } });
-  };
-
-  const toggleRole = (name: string) =>
-    setForm((f) => ({
-      ...f,
-      roleNames: toggleRoleSelection(f.roleNames, name),
-    }));
+  const visibleUsers = filterUsers(users ?? [], userSearch, roleLabel);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-xl font-semibold">{t('users.title')}</h1>
-
-      {/* 新建用户 */}
-      <form
-        inert={editing ? true : undefined}
-        onSubmit={submit}
-        className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
-      >
-        <label className="grid gap-1 text-sm font-medium">{t('users.emailPlaceholder')}<input
-          placeholder={t('users.emailPlaceholder')}
-          aria-label={t('users.emailPlaceholder')}
-          type="email"
-          required
-          value={form.email}
-          onChange={(e) => setForm({ ...form, email: e.target.value })}
-          className="min-h-11 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-brand-500"
-        /></label>
-        <label className="grid gap-1 text-sm font-medium">{t('users.namePlaceholder')}<input
-          placeholder={t('users.namePlaceholder')}
-          aria-label={t('users.namePlaceholder')}
-          required
-          value={form.name}
-          onChange={(e) => setForm({ ...form, name: e.target.value })}
-          className="min-h-11 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-brand-500"
-        /></label>
-        <label className="grid gap-1 text-sm font-medium">{t('users.passwordPlaceholder')}<input
-          placeholder={t('users.passwordPlaceholder')}
-          aria-label={t('users.passwordPlaceholder')}
-          type="password"
-          required
-          value={form.password}
-          onChange={(e) => setForm({ ...form, password: e.target.value })}
-          className="min-h-11 rounded-md border border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm focus-visible:ring-2 focus-visible:ring-brand-500"
-        /></label>
-        <button
-          type="submit"
-          disabled={!!challenge || rolesLoading || rolesFailed || form.roleNames.length === 0}
-          className="min-h-11 rounded-md bg-brand-700 px-4 text-white text-sm hover:bg-brand-800 disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500"
-        >
-          {t('users.create')}
-        </button>
-        <div className="min-w-0 md:col-span-4">
-          <RoleSelector roles={roles ?? []} selected={form.roleNames} onToggle={toggleRole} disabled={!!challenge}
-            loading={rolesLoading} failed={rolesFailed} onRetry={() => void retryRoles()} />
+      <div inert={creating || editing ? true : undefined} className="space-y-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><h1 className="text-xl font-semibold">{t('users.title')}</h1><p className="mt-1 text-sm text-gray-600 dark:text-gray-400">{t('access.create.listHint')}</p></div>
+          <button type="button" onClick={() => { setMsg(null); setCreating(true); }} disabled={!!challenge}
+            className="inline-flex min-h-11 items-center gap-2 rounded-md bg-brand-700 px-4 text-sm text-white hover:bg-brand-800 disabled:opacity-50">
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M8 2v12M2 8h12" /></svg>{t('users.create')}
+          </button>
         </div>
-        <p className="md:col-span-4 text-xs text-gray-500 dark:text-gray-400">
-          {t('access.readonly')}
-        </p>
-        {msg && (
-          <p role="alert" className="md:col-span-4 text-sm text-gray-700 dark:text-gray-200">{showMsg(msg)}</p>
-        )}
-      </form>
+        {msg && <p role="status" className="rounded-md border border-brand-200 bg-brand-50 px-4 py-3 text-sm text-brand-800 dark:border-brand-800 dark:bg-brand-950 dark:text-brand-300">{showMsg(msg)}</p>}
 
       {/* 用户列表 */}
-      <div inert={editing ? true : undefined} className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-x-auto">
+      <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 p-4 dark:border-gray-800">
+          <label className="relative w-full sm:max-w-md"><span className="sr-only">{t('access.create.searchUsers')}</span>
+            <svg aria-hidden="true" className="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-gray-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></svg>
+            <input type="search" value={userSearch} onChange={event => setUserSearch(event.target.value)} placeholder={t('access.create.searchUsers')}
+              className="min-h-11 w-full rounded-md border border-gray-300 bg-white py-2 pl-9 pr-3 text-base sm:text-sm dark:border-gray-600 dark:bg-gray-950" />
+          </label>
+          <p role="status" className="text-xs text-gray-500 dark:text-gray-400">{t('access.create.userCount', { count: visibleUsers.length, total: users?.length ?? 0 })}</p>
+        </div>
+        <div className="overflow-x-auto">
         <table className="w-full min-w-[48rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
@@ -191,7 +139,7 @@ export default function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {users?.map((u) => (
+            {visibleUsers.map((u) => (
               <tr
                 key={u.id}
                 className="border-t border-gray-100 dark:border-gray-800"
@@ -242,9 +190,18 @@ export default function UsersPage() {
                 </td>
               </tr>
             ))}
+            {(usersLoading || usersFailed || !visibleUsers.length) && <tr><td colSpan={5} className="px-4 py-12 text-center text-sm text-gray-600 dark:text-gray-400">
+              {usersLoading ? <p role="status">{t('common.loading')}</p> : usersFailed ? <div role="alert"><p>{t('access.create.usersFailed')}</p><button type="button" onClick={() => void retryUsers()} className="mt-2 min-h-11 px-3 text-brand-700 dark:text-brand-300">{t('access.retry')}</button></div> :
+                <><p>{t('access.create.noUsers')}</p>{userSearch && <button type="button" onClick={() => setUserSearch('')} className="mt-2 min-h-11 px-3 text-brand-700 dark:text-brand-300">{t('access.clear')}</button>}</>}
+            </td></tr>}
           </tbody>
         </table>
+        </div>
       </div>
+      </div>
+
+      {creating && <CreateUserDrawer roles={roles ?? []} loading={rolesLoading} failed={rolesFailed} onRetry={() => void retryRoles()}
+        onCancel={() => setCreating(false)} onCreated={() => { setCreating(false); setUserSearch(''); refreshUsers(); setMsg({ key: 'users.created' }); }} />}
 
       {/* 编辑角色弹窗 */}
       {editing && (

@@ -9,6 +9,12 @@ export const accessEn = {
   admin: 'Full platform access', adminHint: 'Administrator selected: includes user and role management. Assign only when needed.',
   readonly: 'Role permissions are read-only. This page assigns roles; it does not modify their policies.',
   inherited: 'Inherited from company account', inheritedHint: 'These roles are managed by the directory and cannot be removed here.',
+  create: {
+    hint: 'Create a local platform account, then assign the roles it needs.', basics: 'Basic information', roles: 'Assign roles', steps: 'Create user steps',
+    next: 'Next', back: 'Previous', nameHint: 'Enter at least 2 characters.', emailHint: 'Enter a valid email address.', passwordHint: 'Use at least 6 characters. Share the initial password securely.',
+    listHint: 'Manage platform accounts and their assigned roles.', searchUsers: 'Search name, email or role', userCount: '{{count}} of {{total}} users',
+    usersFailed: 'Could not load users. Please retry.', noUsers: 'No matching users.',
+  },
   roles: {
     requester: 'Requester', handler: 'Handler', supervisor: 'Supervisor', ticket_viewer_all: 'Ticket observer (global read-only)',
     asset_manager: 'Asset manager', inventory_manager: 'Inventory manager', cop_viewer: 'Operations observer',
@@ -27,11 +33,17 @@ export const accessCn: Copy = {
   title: '分配角色', hint: '按岗位分配角色，多个角色的权限会合并；工单归属与可见范围规则仍然生效。',
   search: '搜索角色名称、标识或权限', all: '全部角色', selected: '已选角色', count: '已选 {{count}} 项', results: '匹配 {{count}} 个角色',
   role: '角色', scope: '权限范围', permissions: '权限明细', permissionCount: '{{count}} 项权限', remove: '移除 {{name}}',
-  none: '尚未选择角色', noneHint: '从左侧列表选择需要授予的岗位角色。', noResults: '没有匹配的角色',
+  none: '尚未选择角色', noneHint: '从角色列表选择需要授予的岗位角色。', noResults: '没有匹配的角色',
   noResultsHint: '试试其他关键词，或清除搜索和筛选条件。', clear: '清除搜索与筛选', loading: '正在加载角色…', failed: '角色加载失败。', retry: '重试',
   admin: '平台完整管理权限', adminHint: '已选择管理员：包含用户与角色管理权限，请按需分配。',
   readonly: '角色权限仅供查看。此处只分配角色，不修改角色的权限策略。',
   inherited: '继承自公司账号', inheritedHint: '这些角色由目录统一管理，不能在此移除。',
+  create: {
+    hint: '先填写平台独立账号信息，再分配所需岗位角色。', basics: '基本信息', roles: '分配角色', steps: '新建用户步骤',
+    next: '下一步', back: '上一步', nameHint: '姓名至少 2 个字符。', emailHint: '请输入有效的邮箱地址。', passwordHint: '密码至少 6 位，请通过安全渠道告知用户。',
+    listHint: '管理平台账号及其岗位角色。', searchUsers: '搜索姓名、邮箱或角色', userCount: '显示 {{count}} / {{total}} 位用户',
+    usersFailed: '用户加载失败，请重试。', noUsers: '没有匹配的用户。',
+  },
   roles: { requester: '提单人', handler: '处理人', supervisor: '主管', ticket_viewer_all: '工单观察员（全局只读）', asset_manager: '资产管理员', inventory_manager: '仓库管理员', cop_viewer: '运营平台观察员', samba_manager: '公司账号与文件共享管理员', admin: '管理员' },
   summaries: {
     requester: '创建工单，跟进和回复自己提交的问题。', handler: '在可访问范围内处理、回复和更新工单。', supervisor: '查看全部工单、指派处理人并查看统计。',
@@ -47,6 +59,12 @@ export const accessTw: Copy = {
   noResultsHint: '試試其他關鍵字，或清除搜尋與篩選條件。', clear: '清除搜尋與篩選', loading: '正在載入角色…', failed: '角色載入失敗。', retry: '重試',
   admin: '平台完整管理權限', adminHint: '已選擇管理員：包含使用者與角色管理權限，請依需求分配。',
   readonly: '角色權限僅供檢視。此處只分配角色，不修改角色的權限原則。', inherited: '繼承自公司帳號', inheritedHint: '這些角色由目錄統一管理，無法在此移除。',
+  create: {
+    hint: '先填寫平台獨立帳號資訊，再分配所需職務角色。', basics: '基本資訊', roles: '分配角色', steps: '新增使用者步驟',
+    next: '下一步', back: '上一步', nameHint: '姓名至少 2 個字元。', emailHint: '請輸入有效的電子郵件地址。', passwordHint: '密碼至少 6 碼，請透過安全管道告知使用者。',
+    listHint: '管理平台帳號與其職務角色。', searchUsers: '搜尋姓名、電子郵件或角色', userCount: '顯示 {{count}} / {{total}} 位使用者',
+    usersFailed: '使用者載入失敗，請重試。', noUsers: '沒有符合的使用者。',
+  },
   roles: { requester: '提單人', handler: '處理人', supervisor: '主管', ticket_viewer_all: '工單觀察員（全域唯讀）', asset_manager: '資產管理員', inventory_manager: '倉庫管理員', cop_viewer: '營運平台觀察員', samba_manager: '公司帳號與檔案共用管理員', admin: '管理員' },
   summaries: {
     requester: '建立工單，追蹤與回覆自己提交的問題。', handler: '在可存取範圍內處理、回覆與更新工單。', supervisor: '檢視全部工單、指派處理人並檢視統計。',
@@ -62,6 +80,12 @@ export const accessTh: Copy = {
   noResultsHint: 'ลองคำค้นอื่น หรือล้างการค้นหาและตัวกรอง', clear: 'ล้างการค้นหาและตัวกรอง', loading: 'กำลังโหลดบทบาท…', failed: 'โหลดบทบาทไม่สำเร็จ', retry: 'ลองใหม่',
   admin: 'สิทธิ์จัดการแพลตฟอร์มทั้งหมด', adminHint: 'เลือกผู้ดูแลระบบแล้ว ซึ่งรวมสิทธิ์จัดการผู้ใช้และบทบาท โปรดมอบหมายเท่าที่จำเป็น',
   readonly: 'รายละเอียดสิทธิ์เป็นแบบอ่านอย่างเดียว หน้านี้ใช้กำหนดบทบาท ไม่ใช่แก้ไขนโยบาย', inherited: 'สืบทอดจากบัญชีบริษัท', inheritedHint: 'บทบาทเหล่านี้จัดการโดยไดเรกทอรีและไม่สามารถนำออกได้ที่นี่',
+  create: {
+    hint: 'กรอกข้อมูลบัญชีแพลตฟอร์มก่อน แล้วกำหนดบทบาทที่จำเป็น', basics: 'ข้อมูลพื้นฐาน', roles: 'กำหนดบทบาท', steps: 'ขั้นตอนสร้างผู้ใช้',
+    next: 'ถัดไป', back: 'ย้อนกลับ', nameHint: 'ชื่อต้องมีอย่างน้อย 2 ตัวอักษร', emailHint: 'กรอกอีเมลที่ถูกต้อง', passwordHint: 'รหัสผ่านอย่างน้อย 6 ตัวอักษร แจ้งผู้ใช้ผ่านช่องทางที่ปลอดภัย',
+    listHint: 'จัดการบัญชีแพลตฟอร์มและบทบาทของผู้ใช้', searchUsers: 'ค้นหาชื่อ อีเมล หรือบทบาท', userCount: 'แสดง {{count}} จาก {{total}} ผู้ใช้',
+    usersFailed: 'โหลดผู้ใช้ไม่สำเร็จ โปรดลองอีกครั้ง', noUsers: 'ไม่พบผู้ใช้ที่ตรงกัน',
+  },
   roles: { requester: 'ผู้แจ้ง', handler: 'ผู้ดำเนินการ', supervisor: 'หัวหน้างาน', ticket_viewer_all: 'ผู้สังเกตการณ์ทิกเก็ต (อ่านทั้งหมด)', asset_manager: 'ผู้ดูแลสินทรัพย์', inventory_manager: 'ผู้ดูแลคลัง', cop_viewer: 'ผู้สังเกตการณ์แพลตฟอร์ม', samba_manager: 'ผู้ดูแลบัญชีบริษัทและไฟล์ที่แชร์', admin: 'ผู้ดูแลระบบ' },
   summaries: {
     requester: 'สร้างทิกเก็ต ติดตามและตอบปัญหาที่ตนแจ้ง', handler: 'ดำเนินการ ตอบและปรับปรุงทิกเก็ตภายในขอบเขตที่เข้าถึงได้', supervisor: 'ดูทิกเก็ตทั้งหมด มอบหมายผู้ดำเนินการ และดูสถิติ',
