@@ -1,5 +1,6 @@
 import { workbenchEn } from '../../features/workbench/strings';
 import { ticketUiEn } from '../../features/tickets/strings';
+import { accessEn } from '../../features/access/strings';
 import { copEn } from '../../features/cop/strings';
 /**
  * English — the reference locale.
@@ -9,6 +10,7 @@ import { copEn } from '../../features/cop/strings';
  * demand it everywhere else.
  */
 const en = {
+  access: accessEn,
   ticketUi: ticketUiEn,
   workbench: workbenchEn,
   cop: copEn,

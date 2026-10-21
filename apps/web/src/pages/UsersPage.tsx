@@ -5,6 +5,8 @@ import { api } from '../lib/api';
 import { type Msg, useMsg } from '../lib/messages';
 import StepUpDialog from '../components/StepUpDialog';
 import { guardedApi, securityErrorKey } from '../lib/security-step-up';
+import RoleSelector from '../features/access/RoleSelector';
+import { toggleRoleSelection, type AssignableRole } from '../features/access/role-selection';
 
 interface UserRow {
   id: string;
@@ -19,11 +21,6 @@ interface UserRow {
   canSetLocalPassword?: boolean;
   directoryLogin?: boolean;
 }
-interface Role {
-  id: string;
-  name: string;
-  description: string | null;
-}
 
 export default function UsersPage() {
   const { t } = useTranslation();
@@ -33,7 +30,7 @@ export default function UsersPage() {
     queryKey: ['users'],
     queryFn: async () => (await api.get('/users')).data,
   });
-  const { data: roles } = useQuery<Role[]>({
+  const { data: roles, isPending: rolesLoading, isError: rolesFailed, refetch: retryRoles } = useQuery<AssignableRole[]>({
     queryKey: ['roles'],
     queryFn: async () => (await api.get('/roles')).data,
   });
@@ -56,21 +53,27 @@ export default function UsersPage() {
   const roleSaveButton = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!editing) return;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    requestAnimationFrame(() => rolePanel.current?.querySelector<HTMLElement>('input, button')?.focus());
-    return () => { if (previous?.isConnected && !document.querySelector('[data-step-up-dialog]')) previous.focus(); };
+    const frame = requestAnimationFrame(() => rolePanel.current?.querySelector<HTMLElement>('input, button')?.focus());
+    return () => {
+      cancelAnimationFrame(frame);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected && !document.querySelector('[data-step-up-dialog]')) previous.focus();
+    };
   }, [editing]);
   const roleKeys = (event: KeyboardEvent) => {
     if (roleBusy) return;
     if (event.key === 'Escape') { event.preventDefault(); setEditing(null); return; }
     if (event.key !== 'Tab') return;
-    const controls = [...(rolePanel.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled)') || [])];
+    const controls = [...(rolePanel.current?.querySelectorAll<HTMLElement>('input:not(:disabled), button:not(:disabled), summary') || [])];
     if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
     else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0].focus(); }
   };
   const roleLabel = (name: string) => {
     const role = roles?.find((item) => item.name === name);
-    return role?.description ? `${role.description} · ${name}` : name;
+    return t(`access.roles.${name}`, { defaultValue: role?.description || name });
   };
 
   const refreshUsers = () => { void qc.invalidateQueries({ queryKey: ['users'] }); };
@@ -90,9 +93,7 @@ export default function UsersPage() {
     finally { roleSaving.current = false; setRoleBusy(false); }
   };
   const toggleEditRole = (name: string) =>
-    setEditRoles((r) =>
-      r.includes(name) ? r.filter((x) => x !== name) : [...r, name],
-    );
+    setEditRoles((r) => toggleRoleSelection(r, name));
 
   const resetPwd = (u: UserRow) => {
     const pwd = prompt(t('users.resetPrompt', { name: u.name }));
@@ -119,9 +120,7 @@ export default function UsersPage() {
   const toggleRole = (name: string) =>
     setForm((f) => ({
       ...f,
-      roleNames: f.roleNames.includes(name)
-        ? f.roleNames.filter((r) => r !== name)
-        : [...f.roleNames, name],
+      roleNames: toggleRoleSelection(f.roleNames, name),
     }));
 
   return (
@@ -130,6 +129,7 @@ export default function UsersPage() {
 
       {/* 新建用户 */}
       <form
+        inert={editing ? true : undefined}
         onSubmit={submit}
         className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 p-4 grid grid-cols-1 md:grid-cols-4 gap-3 items-end"
       >
@@ -161,27 +161,17 @@ export default function UsersPage() {
         /></label>
         <button
           type="submit"
-          disabled={!!challenge || form.roleNames.length === 0}
+          disabled={!!challenge || rolesLoading || rolesFailed || form.roleNames.length === 0}
           className="min-h-11 rounded-md bg-brand-700 px-4 text-white text-sm hover:bg-brand-800 disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500"
         >
           {t('users.create')}
         </button>
-        <div className="md:col-span-4 flex flex-wrap gap-3 text-sm">
-          <span className="text-gray-500">{t('users.rolesLabel')}</span>
-          {roles?.map((r) => (
-            <label key={r.id} className="flex min-h-11 items-center gap-1.5">
-              <input
-                type="checkbox"
-                checked={form.roleNames.includes(r.name)}
-                onChange={() => toggleRole(r.name)}
-              />
-              <span>{r.description ?? r.name}</span>
-              <code className="text-xs text-gray-400">{r.name}</code>
-            </label>
-          ))}
+        <div className="min-w-0 md:col-span-4">
+          <RoleSelector roles={roles ?? []} selected={form.roleNames} onToggle={toggleRole} disabled={!!challenge}
+            loading={rolesLoading} failed={rolesFailed} onRetry={() => void retryRoles()} />
         </div>
         <p className="md:col-span-4 text-xs text-gray-500 dark:text-gray-400">
-          {t('users.fixedRolesHint')}
+          {t('access.readonly')}
         </p>
         {msg && (
           <p role="alert" className="md:col-span-4 text-sm text-gray-700 dark:text-gray-200">{showMsg(msg)}</p>
@@ -189,7 +179,7 @@ export default function UsersPage() {
       </form>
 
       {/* 用户列表 */}
-      <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-x-auto">
+      <div inert={editing ? true : undefined} className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 overflow-x-auto">
         <table className="w-full min-w-[48rem] text-sm">
           <thead className="bg-gray-50 dark:bg-gray-800 text-gray-500">
             <tr>
@@ -208,7 +198,7 @@ export default function UsersPage() {
               >
                 <td className="px-4 py-2">{u.name}{u.directoryAccount && <p className="mt-1 text-xs text-gray-500">AD · {u.directoryAccount}</p>}</td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
-                <td className="px-4 py-2">{u.roles.map(roleLabel).join(', ')}{!!u.directoryRoles?.length && <p className="mt-1 text-xs text-gray-500">{t('users.directoryRoles')}：{u.directoryRoles.map(roleLabel).join(', ')}</p>}</td>
+                <td className="max-w-80 px-4 py-2"><div className="flex flex-wrap gap-1.5">{u.roles.map(name => <span key={name} title={name} className="rounded border border-gray-200 bg-gray-50 px-2 py-1 text-xs dark:border-gray-700 dark:bg-gray-800">{roleLabel(name)}</span>)}</div>{!!u.directoryRoles?.length && <p className="mt-1 text-xs text-gray-500">{t('users.directoryRoles')}：{u.directoryRoles.map(roleLabel).join(', ')}</p>}</td>
                 <td className="px-4 py-2">
                   <span
                     className={
@@ -259,7 +249,7 @@ export default function UsersPage() {
       {/* 编辑角色弹窗 */}
       {editing && (
         <div
-          className="fixed inset-0 z-30 flex items-center justify-center overflow-y-auto bg-black/40 p-4"
+          className="fixed inset-0 z-[60] flex items-center justify-center overflow-y-auto bg-black/40 p-3 sm:p-6"
           onClick={() => { if (!roleBusy) setEditing(null); }}
         >
           <div
@@ -269,26 +259,15 @@ export default function UsersPage() {
             aria-labelledby="edit-roles-title"
             onKeyDown={roleKeys}
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[calc(100dvh-2rem)] w-full max-w-sm overflow-y-auto rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-6 space-y-4"
+            className="max-h-[calc(100dvh-2rem)] w-full max-w-5xl overflow-y-auto rounded-xl bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4 sm:p-6 space-y-4"
           >
             <h2 id="edit-roles-title" className="text-lg font-semibold">
               {t('users.editRolesTitle', { name: editing.name })}
             </h2>
-            {!!editing.directoryRoles?.length && <p className="text-sm text-gray-500">{t('users.directoryRoles')}：{editing.directoryRoles.map(roleLabel).join(', ')}</p>}
-            <div className="space-y-2">
-              {roles?.map((r) => (
-                <label key={r.id} className="flex min-h-11 items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={editRoles.includes(r.name)}
-                    disabled={roleBusy}
-                    onChange={() => toggleEditRole(r.name)}
-                  />
-                  <span>{r.description ?? r.name}</span>
-                  <code className="text-xs text-gray-400">{r.name}</code>
-                </label>
-              ))}
-            </div>
+            <p className="break-all text-sm text-gray-500 dark:text-gray-400">{editing.email}</p>
+            {!!editing.directoryRoles?.length && <div className="rounded-md bg-gray-50 p-3 text-xs dark:bg-gray-800"><p className="font-medium">{t('access.inherited')}：{editing.directoryRoles.map(roleLabel).join(', ')}</p><p className="mt-1 text-gray-500 dark:text-gray-400">{t('access.inheritedHint')}</p></div>}
+            <RoleSelector key={editing.id} roles={roles ?? []} selected={editRoles} onToggle={toggleEditRole} disabled={roleBusy}
+              loading={rolesLoading} failed={rolesFailed} onRetry={() => void retryRoles()} />
             {editRoles.length === 0 && (
               <p className="text-xs text-amber-600">
                 {t('users.noBusinessRoles')}
@@ -306,10 +285,10 @@ export default function UsersPage() {
               <button
                 ref={roleSaveButton}
                 onClick={() => void saveRoles()}
-                disabled={roleBusy}
+                disabled={roleBusy || rolesLoading || rolesFailed}
                 className="min-h-11 rounded-md bg-brand-700 text-white px-4 py-2 text-sm hover:bg-brand-800 disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-brand-500"
               >
-                {t('common.save')}
+                {t(roleBusy ? 'common.processing' : 'common.save')}
               </button>
             </div>
           </div>
