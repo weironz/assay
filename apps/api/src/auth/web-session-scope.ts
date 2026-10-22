@@ -1,11 +1,12 @@
 import { createHmac } from 'node:crypto';
 import type { Request } from 'express';
+import { requireAuthSecret } from './auth-secret';
 
 // Server-only request context; never added to /me or returned to the browser.
 export const webSessionScopes = new WeakMap<Request, { fingerprint: string; expiresAt: number }>();
 export function webSessionFingerprint(token: string) {
-  if (!process.env.AUTH_SECRET) throw new Error('Session scope secret unavailable');
-  return createHmac('sha256', process.env.AUTH_SECRET).update('employee-files\0').update(token).digest('hex');
+  // 与 better-auth 共用同一把已校验的密钥（见 auth-secret.ts）
+  return createHmac('sha256', requireAuthSecret()).update('employee-files\0').update(token).digest('hex');
 }
 
 type FileSessionRenewal = (scope: { fingerprint: string; expiresAt: number; userId: string }) => Promise<void>;

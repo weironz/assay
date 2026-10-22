@@ -7,8 +7,10 @@ import { PrismaClient } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
 import { mailEnabled, mailTemplate, sendMail } from '../mail/mailer';
 import { authRedis } from './auth-redis';
+import { requireAuthSecret } from './auth-secret';
 import { enforceBetterAuthSensitiveStepUp } from './better-auth-step-up';
 import { assertCanLoseActiveAdmin } from './last-admin';
+import { assertUserDeletable } from './user-deletion';
 import { captureAuthEpoch, readValidatedSession, refreshSessionMarker, stampSessionEpoch, stampTwoFactorChallenge } from './session-epoch';
 import { readOidcSettings } from './oidc-config';
 import { oidcPlugin } from './oidc';
@@ -38,7 +40,7 @@ export const auth = betterAuth({
   appName: 'Greenstor Assay',
   baseURL: process.env.AUTH_BASE_URL || 'http://localhost:3000',
   basePath: '/api/auth',
-  secret: process.env.AUTH_SECRET || 'dev_secret_change_me',
+  secret: requireAuthSecret(),
   trustedOrigins: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(
     ',',
   ),
@@ -139,7 +141,7 @@ export const auth = betterAuth({
     },
   },
   user: {
-    // 允许用户自助注销账号（需密码确认；有工单记录的账号禁止删除，见 beforeDelete）
+    // 允许用户自助注销账号（需密码确认；有工单/回复/附件/库存记录的账号禁止删除，见 beforeDelete）
     deleteUser: {
       enabled: true,
       beforeDelete: async (user) => {
@@ -151,19 +153,16 @@ export const auth = betterAuth({
           }
           throw error;
         }
-        const [tickets, messages] = await Promise.all([
-          prisma.ticket.count({
-            where: {
-              OR: [{ requesterId: user.id }, { assigneeId: user.id }],
-            },
-          }),
-          prisma.ticketMessage.count({ where: { authorId: user.id } }),
-        ]);
-        if (tickets > 0 || messages > 0) {
-          throw new APIError('BAD_REQUEST', {
-            message:
-              '该账号已有工单或回复记录，无法删除。如需停用请联系管理员禁用账号。',
-          });
+        // 统一约束检查见 auth/user-deletion.ts：规则与管理员删除入口共用。
+        // better-auth 的实际删除不经过我们的事务兜底，漏登记会让用户看到 500
+        // 且会话已被销毁，新增外键时务必在 BLOCKING_QUERIES 中登记。
+        try {
+          await assertUserDeletable(prisma, user.id, '如需停用请联系管理员禁用账号。');
+        } catch (error) {
+          if (error instanceof ConflictException) {
+            throw new APIError('BAD_REQUEST', { message: error.message });
+          }
+          throw error;
         }
         // Invalidate orphaned Redis sessions before Better Auth deletes the
         // user. A failed later delete may log the user out, but never revive
@@ -235,7 +234,8 @@ export const auth = betterAuth({
     updateAge: 60 * 60 * 24, // 每天滑动续期
     cookieCache: { enabled: false }, // every request must check the durable epoch
   },
-  // 限流：防登录爆破。计数走 Redis；真实 IP 取 nginx 设置的 x-real-ip
+  // 限流：防登录爆破。计数走 Redis；x-real-ip 由前端 nginx 用真实来源地址
+  // 覆盖转发（见 apps/web/nginx.conf 的 realip 配置），客户端伪造的头到不了这里
   rateLimit: {
     enabled: true,
     window: 60,

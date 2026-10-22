@@ -81,8 +81,10 @@ docker compose -f docker-compose.dev.yml down -v       # 停止并清空数据�
 默认管理员账号（在 `.env` 的 `ADMIN_EMAIL/ADMIN_PASSWORD` 配置，api 启动时自动创建）：
 
 ```
-admin@example.com / admin12345
+admin@example.com / 你在 .env 中设置的 ADMIN_PASSWORD
 ```
+
+生产环境必须显式设置 `ADMIN_PASSWORD`（缺失时 API 拒绝启动）；本地开发不设置时会生成一次性随机密码，见 api 启动日志中的 `AuthBootstrap` 警告。
 
 登录后可在「用户管理」创建其他角色（handler / supervisor / requester）用户。
 

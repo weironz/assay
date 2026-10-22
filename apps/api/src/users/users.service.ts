@@ -10,6 +10,7 @@ import { auth } from '../auth/auth';
 import { isSystemRoleName } from '../auth/role-policy';
 import { privilegedMfaMode } from '../auth/step-up-store';
 import { assertCanLoseActiveAdmin } from '../auth/last-admin';
+import { assertUserDeletable } from '../auth/user-deletion';
 import { CreateUserDto, UpdateUserDto } from './dto';
 import { assertSessionEpochMigration } from '../auth/session-epoch';
 
@@ -122,7 +123,22 @@ export class UsersService {
     await assertCanLoseActiveAdmin(this.prisma, id);
     const ctx = await auth.$context;
     await ctx.internalAdapter.deleteUserSessions(id);
-    await this.prisma.user.delete({ where: { id } });
+    try {
+      // 统一约束检查与用户自助注销共用（auth/user-deletion.ts）。检查与删除放进
+      // 同一事务收敛 check→delete 竞态；schema 新增外键漏登记时由 P2003 兜底，
+      // 转换为业务错误而不是裸 500。会话清理刻意留在事务外：删除失败最多是会话
+      // 提前失效，不能反过来让会话残留。
+      await this.prisma.$transaction(async (tx) => {
+        await assertUserDeletable(tx, id, '请改用禁用账号。');
+        await tx.user.delete({ where: { id } });
+      });
+    } catch (error) {
+      const code = (error as any)?.code;
+      if (code === 'P2003') {
+        throw new BadRequestException('该账号仍被业务记录引用，无法删除。请改用禁用账号。');
+      }
+      throw error;
+    }
     await ctx.internalAdapter.deleteUserSessions(id);
     return { ok: true };
   }
