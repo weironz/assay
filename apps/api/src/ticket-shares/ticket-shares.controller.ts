@@ -2,6 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Res } from '@nestjs/common'
 import type { Response } from 'express';
 import { CurrentUser, Public, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
+import { downloadResponse } from '../attachments/limits';
 import { CreateTicketShareDto } from './ticket-shares.dto';
 import { TicketSharesService } from './ticket-shares.service';
 
@@ -63,16 +64,20 @@ export class PublicTicketSharesController {
     @Res() res: Response,
   ) {
     const { attachment, stream } = await this.shares.publicInlineAttachment(token, attachmentId);
+    const { mime } = downloadResponse(attachment);
     res.setHeader('Cache-Control', 'private, no-store, max-age=0');
     res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Type', attachment.mime);
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Type', mime);
     res.setHeader('Content-Length', String(attachment.fileSize));
     res.setHeader(
       'Content-Disposition',
       `inline; filename*=UTF-8''${encodeURIComponent(attachment.fileName)}`,
     );
     res.on('close', () => stream.destroy());
+    // 分享页也可能拿到已丢失/损坏的对象，读流失败不能变成未捕获异常。
+    stream.on('error', () => res.destroy());
     stream.pipe(res);
   }
 }

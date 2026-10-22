@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { WorkflowService, TicketAction } from './workflow.service';
 import { cleanHtml } from '../common/sanitize';
+import { referencedAttachmentIds } from '../attachments/visibility';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SlaService } from '../sla/sla.service';
 import {
@@ -647,6 +648,29 @@ export class TicketsService {
   }
 
   // ---------- 消息 ----------
+  /**
+   * 编辑器是「先传图、后发消息」：附件上传时还没有 messageId，消息落库后
+   * 才能判断它属于公开回复还是内部备注。这里按正文引用把本人尚未归属消息
+   * 的附件绑定到新消息，附件可见性就能直接复用消息的 isInternal。
+   *
+   * 必须与消息写入共用同一个事务：否则消息已提交、绑定尚未提交的窗口里，
+   * 未绑定附件会按公开正文引用被当作可见，绕过消息可见性。
+   */
+  private async linkReferencedAttachments(
+    db: Prisma.TransactionClient,
+    ticketId: string,
+    messageId: string,
+    body: string,
+    uploaderId: string,
+  ) {
+    const ids = [...referencedAttachmentIds(body)];
+    if (!ids.length) return;
+    await db.ticketAttachment.updateMany({
+      where: { id: { in: ids }, ticketId, uploaderId, messageId: null },
+      data: { messageId },
+    });
+  }
+
   async addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id },
@@ -669,22 +693,27 @@ export class TicketsService {
       throw new BadRequestException('只能提及本工单的相关人员');
     }
 
-    const message = await this.prisma.ticketMessage.create({
-      data: {
-        ticketId: id,
-        authorId: user.id,
-        type: isInternal ? 'NOTE' : 'REPLY',
-        isInternal,
-        contentType: dto.contentType ?? 'text/html',
-        body: cleanHtml(dto.body),
-        mentions: mentionUserIds.length
-          ? { createMany: { data: mentionUserIds.map((userId) => ({ userId })) } }
-          : undefined,
-      },
-      include: {
-        author: { select: AUTHOR_SELECT },
-        mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
-      },
+    // 消息与附件绑定同一事务提交：内部/公开的可见性从落库那一刻起就是确定的。
+    const message = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.ticketMessage.create({
+        data: {
+          ticketId: id,
+          authorId: user.id,
+          type: isInternal ? 'NOTE' : 'REPLY',
+          isInternal,
+          contentType: dto.contentType ?? 'text/html',
+          body: cleanHtml(dto.body),
+          mentions: mentionUserIds.length
+            ? { createMany: { data: mentionUserIds.map((userId) => ({ userId })) } }
+            : undefined,
+        },
+        include: {
+          author: { select: AUTHOR_SELECT },
+          mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
+        },
+      });
+      await this.linkReferencedAttachments(tx, id, created.id, created.body, user.id);
+      return created;
     });
     await this.history(id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
@@ -816,10 +845,15 @@ export class TicketsService {
     if (msg.authorId !== user.id && !isStaff) {
       throw new ForbiddenException('只能编辑自己的消息');
     }
-    const updated = await this.prisma.ticketMessage.update({
-      where: { id: messageId },
-      data: { body: cleanHtml(dto.body) },
-      include: { author: { select: AUTHOR_SELECT } },
+    // 编辑同样可能引入新的附件引用，更新正文与绑定必须原子提交。
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const next = await tx.ticketMessage.update({
+        where: { id: messageId },
+        data: { body: cleanHtml(dto.body) },
+        include: { author: { select: AUTHOR_SELECT } },
+      });
+      await this.linkReferencedAttachments(tx, ticketId, messageId, next.body, user.id);
+      return next;
     });
     await this.history(ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
     return updated;

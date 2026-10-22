@@ -15,7 +15,11 @@ import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
 import { diskStorage } from 'multer';
 import { tmpdir } from 'os';
-import { MAX_ATTACHMENT_BYTES, UPLOAD_TMP_DIR } from './limits';
+import {
+  MAX_ATTACHMENT_BYTES,
+  UPLOAD_TMP_DIR,
+  downloadResponse,
+} from './limits';
 
 /**
  * 落临时盘而不是进内存。默认的 memoryStorage 会把整个文件读进 RAM——
@@ -76,17 +80,21 @@ export class AttachmentsController {
     @Res() res: Response,
   ) {
     const { rec, stream } = await this.attachments.getForDownload(user, id);
-    res.setHeader('Content-Type', rec.mime);
+    // 只信服务端归一化过的 MIME：历史数据里的 image/svg+xml 等一律转成附件下载。
+    const { mime, inline } = downloadResponse(rec);
+    res.setHeader('Content-Type', mime);
     res.setHeader('Content-Length', String(rec.fileSize));
-    const isImage = rec.mime.startsWith('image/');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader(
       'Content-Disposition',
-      `${isImage ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(
+      `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${encodeURIComponent(
         rec.fileName,
       )}`,
     );
-    // 直接转发流。客户端中途断开时要销毁上游流，否则连接会一直挂着
+    // 直接转发流。客户端中途断开时要销毁上游流，否则连接会一直挂着；
+    // 存储读流出错时也要销毁响应，否则 'error' 没有监听器会变成未捕获异常。
     res.on('close', () => stream.destroy());
+    stream.on('error', () => res.destroy());
     stream.pipe(res);
   }
 }

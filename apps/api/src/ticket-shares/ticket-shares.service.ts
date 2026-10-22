@@ -8,6 +8,8 @@ import { createHash, randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
+import { isRasterImageMime } from '../attachments/limits';
+import { loadAttachmentReferences } from '../attachments/visibility';
 import { CreateTicketShareDto } from './ticket-shares.dto';
 
 type ActiveShare = {
@@ -199,28 +201,47 @@ export class TicketSharesService {
 
   async publicInlineAttachment(token: string, attachmentId: string) {
     const share = await this.active(token);
-    // 编辑器会在提交回复前上传图片，旧数据的 attachment.messageId 因而可能为空。
-    // 以“公开正文是否真的引用该下载路径”作为可见性事实，既兼容旧数据，也不放开
-    // 单独上传、内部备注或普通附件。
-    const referencedByPublicMessage = await this.prisma.ticketMessage.findFirst({
-      where: {
-        ticketId: share.ticketId,
-        isInternal: false,
-        body: { contains: `/attachments/${attachmentId}/download` },
-      },
-      select: { id: true },
-    });
-    if (!referencedByPublicMessage) throw new NotFoundException('附件不存在');
     const attachment = await this.prisma.ticketAttachment.findFirst({
       where: {
         id: attachmentId,
         ticketId: share.ticketId,
       },
-      select: { fileName: true, fileSize: true, mime: true, objectKey: true },
+      select: {
+        fileName: true,
+        fileSize: true,
+        mime: true,
+        objectKey: true,
+        messageId: true,
+      },
     });
-    if (!attachment || !attachment.mime.startsWith('image/')) {
+    // 只放行服务端认可的真实位图；SVG 等可执行内容即使被旧数据标成 image/* 也不暴露。
+    if (!attachment || !isRasterImageMime(attachment.mime)) {
       throw new NotFoundException('附件不存在');
     }
+
+    // 绑定关系优先于正文引用：内部备注的附件即使被某条公开回复引用了下载地址，
+    // 也不能通过分享链接解禁。消息缺失或跨工单的脏数据同样按内部材料处理。
+    if (attachment.messageId) {
+      const boundMessage = await this.prisma.ticketMessage.findFirst({
+        where: { id: attachment.messageId, ticketId: share.ticketId },
+        select: { isInternal: true },
+      });
+      if (!boundMessage || boundMessage.isInternal) {
+        throw new NotFoundException('附件不存在');
+      }
+    }
+
+    // 编辑器会在提交回复前上传图片，旧数据的 attachment.messageId 因而可能为空。
+    // 未绑定附件采用内部优先：只要内部备注引用过，公开正文再引用也不放行；
+    // 只有「公开正文实际引用、且从未被内部备注引用」的图片才允许分享。
+    const references = await loadAttachmentReferences(this.prisma, share.ticketId);
+    if (!references.publicIds.has(attachmentId)) {
+      throw new NotFoundException('附件不存在');
+    }
+    if (!attachment.messageId && references.internalIds.has(attachmentId)) {
+      throw new NotFoundException('附件不存在');
+    }
+
     return { attachment, stream: await this.storage.getStream(attachment.objectKey) };
   }
 }
