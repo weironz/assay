@@ -6,11 +6,12 @@ import { ApiTokensModule } from '../api-tokens/api-tokens.module';
 import { StepUpController } from './step-up.controller';
 import { StepUpService } from './step-up.service';
 import { DirectoryController } from './directory.controller';
+import { AuthLifecycleService } from './auth-lifecycle.service';
 
 @Global()
 @Module({
   imports: [ApiTokensModule],
-  providers: [AuthService, AuthBootstrapService, StepUpService],
+  providers: [AuthService, AuthBootstrapService, StepUpService, AuthLifecycleService],
   controllers: [AuthController, StepUpController, DirectoryController],
   exports: [AuthService, StepUpService],
 })

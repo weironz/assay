@@ -29,8 +29,6 @@ export interface StorageDriver {
   get(key: string): Promise<Buffer>;
   /** 流式读取，供下载直接转发，避免整包进内存 */
   getStream(key: string): Promise<Readable>;
-  /** 生成临时下载 URL（本地实现可返回后端代理地址） */
-  presignGet(key: string, expiresInSec?: number): Promise<string>;
   /** 删除对象 */
   delete(key: string): Promise<void>;
   /** 驱动名，便于日志/健康检查 */

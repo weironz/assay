@@ -13,6 +13,9 @@ export const apiOrigin = BASE;
 export const absUrl = (path?: string | null) =>
   !path ? '' : /^https?:\/\//.test(path) ? path : `${BASE}${path}`;
 
+/** 分享页等免登录场景的 API 实例，不挂 401 跳转拦截器 */
+export const createPublicApi = () => axios.create({ baseURL: `${BASE}/api` });
+
 // 401 时广播事件，由 App 统一清理登录态并跳转（避免与 store 循环依赖）
 api.interceptors.response.use(
   (res) => res,

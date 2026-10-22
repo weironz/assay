@@ -7,7 +7,6 @@ import {
   CreateBucketCommand,
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { Readable } from 'stream';
 import {
   StorageDriver,
@@ -92,14 +91,6 @@ export class S3Storage implements StorageDriver {
     );
     const bytes = await res.Body!.transformToByteArray();
     return Buffer.from(bytes);
-  }
-
-  async presignGet(key: string, expiresInSec = 600): Promise<string> {
-    return getSignedUrl(
-      this.client,
-      new GetObjectCommand({ Bucket: this.bucket, Key: key }),
-      { expiresIn: expiresInSec },
-    );
   }
 
   async delete(key: string): Promise<void> {

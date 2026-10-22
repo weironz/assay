@@ -1,8 +1,12 @@
 # 阿里云环境可选的公共 Traefik。已有代理时不安装、不覆盖。
 # 在独立目录部署；不能与 Assay 共用 .env 或默认 Compose 项目名。
 # cp traefik.env.example .env
-# docker network create traefik-network
+# docker network create --subnet 172.30.10.0/24 traefik-network
+# （子网必须与下方 TRAEFIK_FIXED_IP 所在段一致；web 镜像 nginx.conf 的
+#  set_real_ip_from 信任该固定地址，三者要一起改才生效）
 # docker compose -p traefik -f traefik.compose.yaml up -d
+# 既有部署：子网已确定的外部网络不可改，把 TRAEFIK_FIXED_IP 设为
+# `docker network inspect` 查到的 Traefik 容器地址，并同步维护 web 的 nginx.conf。
 
 services:
   traefik:
@@ -29,7 +33,11 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       # 证书必须持久化，否则每次重启都重新申请，很快会撞上 Let's Encrypt 限流
       - letsencrypt:/letsencrypt
-    networks: [traefik-network]
+    networks:
+      # 固定地址与 web 镜像 nginx.conf 的 `set_real_ip_from 172.30.10.10` 一一对应，
+      # 真实客户端 IP 才能被登录限流/审计正确识别；改动要三处同步（网络子网/此处/nginx.conf）
+      traefik-network:
+        ipv4_address: ${TRAEFIK_FIXED_IP:-172.30.10.10}
 
 networks:
   traefik-network:

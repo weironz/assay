@@ -15,10 +15,8 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { tmpdir } from 'os';
 import type { Response } from 'express';
-import { MAX_ATTACHMENT_BYTES, UPLOAD_TMP_DIR } from '../attachments/limits';
+import { createAttachmentUploadOptions } from '../attachments/limits';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
 import { AssetsService } from './assets.service';
@@ -39,10 +37,7 @@ import {
   TicketLinkInput,
   WarehouseInput,
 } from './dto';
-const attachmentUpload = {
-  storage: diskStorage({ destination: UPLOAD_TMP_DIR || tmpdir() }),
-  limits: { fileSize: MAX_ATTACHMENT_BYTES + 1 },
-};
+const attachmentUpload = createAttachmentUploadOptions();
 function downloadCSV(res: Response, name: string, contents: string) {
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="' + name + '"');

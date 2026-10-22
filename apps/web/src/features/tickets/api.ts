@@ -1,13 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import axios from 'axios';
-import { api } from '../../lib/api';
+import { api, apiOrigin, createPublicApi } from '../../lib/api';
 import type { TicketContact } from '../../lib/contact';
 
-const API_BASE =
-  (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000') + '/api';
+const API_BASE = apiOrigin + '/api';
 
 // 分享页无需登录，不能复用会在 401 时跳回登录页的业务 API 实例。
-const publicApi = axios.create({ baseURL: API_BASE });
+const publicApi = createPublicApi();
 
 export interface Attachment {
   id: string;

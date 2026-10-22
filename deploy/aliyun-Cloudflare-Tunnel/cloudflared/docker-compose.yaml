@@ -17,7 +17,13 @@ services:
       - ${CLOUDFLARED_DNS_PRIMARY:-223.5.5.5}
       - ${CLOUDFLARED_DNS_SECONDARY:-1.1.1.1}
     networks:
-      - origin
+      # 固定地址与 web 镜像 nginx.conf 的 `set_real_ip_from 172.31.10.10` 一一对应：
+      # 真实客户端 IP 才能被限流/审计正确识别。所在外部网络（origin）创建时必须
+      # 带上包含该地址的子网，例如：docker network create --subnet 172.31.10.0/24 assay-tunnel
+      # 既有部署无法改子网时，把 CLOUDFLARED_FIXED_IP 设为该网络子网内的实际地址，
+      # 并同步维护 web 的 nginx.conf。
+      origin:
+        ipv4_address: ${CLOUDFLARED_FIXED_IP:-172.31.10.10}
     logging:
       driver: json-file
       options:

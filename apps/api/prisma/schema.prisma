@@ -473,7 +473,25 @@ model TicketAttachment {
   uploader User           @relation(fields: [uploaderId], references: [id])
 
   @@index([ticketId])
+  // 上传配额按「上传者 + 时间窗口」统计，没有这个索引每次上传都要全表扫描
+  @@index([uploaderId, createdAt])
   @@map("ticket_attachments")
+}
+
+/// 对象删除 outbox。
+/// 业务记录（工单/消息/附件行）在数据库事务里删除时，把对象 key 一并写进来；
+/// 后台任务按 nextAttemptAt 领取并重试 S3 删除，避免删除失败后永久丢失定位。
+model AttachmentDeletionTask {
+  id            String   @id @default(cuid())
+  objectKey     String   @map("object_key")
+  reason        String   @default("UNKNOWN")
+  attempts      Int      @default(0)
+  lastError     String?  @map("last_error")
+  nextAttemptAt DateTime @default(now()) @map("next_attempt_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  @@index([nextAttemptAt])
+  @@map("attachment_deletion_tasks")
 }
 
 // ============ 审计历史 ============

@@ -41,16 +41,22 @@ AUTH_TRUST_ORIGINS=https://${PUBLIC_DOMAIN}
 CLOUDFLARED_NETWORK=assay-tunnel
 ```
 
-连接器 `.env` 的 `CLOUDFLARED_NETWORK` 必须相同。新安装创建一次这个外部网络：
+连接器 `.env` 的 `CLOUDFLARED_NETWORK` 必须相同。新安装创建一次这个外部网络，
+子网必须包含连接器固定地址（默认 `172.31.10.10`，与 web 镜像 nginx.conf 的
+`set_real_ip_from` 条目一一对应）：
 
 ```bash
-docker network create assay-tunnel
+docker network create --subnet 172.31.10.0/24 assay-tunnel
 cd /data/assay
 docker compose config --quiet
 docker compose up -d
 # 仅全新空数据库初始化一次；已有生产库升级或重启不执行 seed。
 docker compose exec api node dist/seed.js
 ```
+
+既有部署的外部网络无法改子网时，把连接器 `.env` 的 `CLOUDFLARED_FIXED_IP` 设为
+`docker network inspect` 查到的实际地址，并同步维护 web 的 nginx.conf；
+否则登录限流会因所有流量共用一个来源 IP 而退化为全站共享配额。
 
 应用从 `PUBLIC_DOMAIN` 推导 HTTPS 的 `PUBLIC_URL`、`AUTH_BASE_URL`、`APP_URL`。
 不另外配置 `PUBLIC_URL`。`AUTH_TRUST_ORIGINS` 从 `.env` 传入。

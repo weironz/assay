@@ -111,7 +111,8 @@ curl --fail-with-body -sS -X POST "$BASE/tickets" \
 
 图片/附件可先用同一个带有 `ticket:create` 的 Token 调用 `POST /api/uploads`（multipart 字段
 `file`），再把返回的 ID 放入建单 JSON 的 `attachmentIds`。仍执行格式、512MB 单文件、
-最多 5 个普通附件以及草稿归属限制；不能关联其他账号的草稿。接口详情见 §5。
+最多 5 个普通附件以及草稿归属限制；服务端另有兜底配额（单工单 100 条附件记录、
+单用户 24 小时 100 次 / 2048 MB），不能关联其他账号的草稿。接口详情见 §5。
 建单后的回复、补充附件需要另行勾选 `ticket:comment`。
 
 ---
@@ -499,6 +500,8 @@ DELETE /api/tickets/:id
 | --- | --- |
 | 单文件大小 | **512 MB** |
 | 单张工单附件数 | 5 个（界面约束，正文内联图片不计入） |
+| 服务端兜底配额 | 单工单 100 条附件记录（含内联图）；单用户 24 小时 100 次 / 2048 MB |
+| 草稿保留 | 24 小时内未关联工单，记录与对象存储文件一并清理 |
 | 允许扩展名 | `.png .jpeg .jpg .txt .rar .zip .doc .docx .xls .xlsx .7z .mp4` |
 
 `kind` 参数区分两种用途，校验规则不同：
@@ -535,6 +538,10 @@ GET /api/attachments/:id/download       权限 ticket:read
 ```
 
 下载接口鉴权后以流式转发文件，图片为 `inline`，其余为 `attachment` 下载。
+
+未绑定消息的附件（编辑器「先传图、后发消息」的中间态）默认按内部材料处理：
+只有上传者本人和内部成员（管理岗/处理人/协作成员）能看到；绑定到公开消息后，
+才对提单人和关注者可见。
 
 ```bash
 curl -s -b "$JAR" -F "file=@./log.zip" "$BASE/uploads?kind=attachment"

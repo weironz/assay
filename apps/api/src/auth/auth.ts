@@ -30,8 +30,12 @@ const REQUIRE_EMAIL_VERIFICATION =
     ? process.env.REQUIRE_EMAIL_VERIFICATION === 'true'
     : mailEnabled;
 
-// better-auth 使用独立的 PrismaClient（在 Nest DI 之外，模块加载时即需就绪）
-const prisma = new PrismaClient();
+// better-auth 使用独立的 PrismaClient（在 Nest DI 之外，模块加载时即需就绪）。
+// 由 AuthLifecycleService 在应用关闭时 $disconnect()，避免 SIGTERM 时连接泄漏；
+// 与 Nest 的 PrismaService 合并为单一连接池需要把 better-auth 构造挪进工厂，
+// 涉及全部依赖方与测试，属独立的后续重构。
+export const authPrisma = new PrismaClient();
+const prisma = authPrisma;
 const oidcSettings = readOidcSettings();
 const directory = directoryPlugin(prisma);
 

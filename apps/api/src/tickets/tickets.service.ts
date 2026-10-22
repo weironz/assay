@@ -13,6 +13,7 @@ import { cleanHtml } from '../common/sanitize';
 import { referencedAttachmentIds } from '../attachments/visibility';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SlaService } from '../sla/sla.service';
+import { AttachmentsService } from '../attachments/attachments.service';
 import {
   AddParticipantDto,
   AssignDto,
@@ -70,6 +71,7 @@ export class TicketsService {
     private readonly workflow: WorkflowService,
     private readonly notifications: NotificationsService,
     private readonly sla: SlaService,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   // ---------- 工具 ----------
@@ -294,17 +296,53 @@ export class TicketsService {
         data: { defaultContact: normalizeContact(dto.contact) },
       });
     }
-    // 关联建单前上传的草稿附件（仅本人、仍未挂单的）
-    if (dto.attachmentIds?.length) {
-      await this.prisma.ticketAttachment.updateMany({
-        where: {
-          id: { in: dto.attachmentIds },
-          uploaderId: user.id,
-          ticketId: null,
-        },
-        data: { ticketId: ticket.id },
+    // 关联建单前上传的草稿附件（仅本人、仍未挂单的）。未绑定附件已收紧为
+    // 「仅上传者/内部可见」，所以这里要一次性把归属确定下来：
+    // - attachmentIds 是用户在附件区显式选择的文件，绑定到建单首条公开消息；
+    // - 正文里实际引用的内联图即使没出现在 attachmentIds 里，也一并挂到工单并
+    //   绑定到首条消息，避免正文图片对协作成员和分享页 404。
+    await this.prisma.$transaction(async (tx) => {
+      if (dto.attachmentIds?.length) {
+        await tx.ticketAttachment.updateMany({
+          where: {
+            id: { in: dto.attachmentIds },
+            uploaderId: user.id,
+            ticketId: null,
+          },
+          data: { ticketId: ticket.id },
+        });
+      }
+      const firstMessage = await tx.ticketMessage.findFirst({
+        where: { ticketId: ticket.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true, body: true },
       });
-    }
+      if (!firstMessage) return;
+
+      if (dto.attachmentIds?.length) {
+        await tx.ticketAttachment.updateMany({
+          where: {
+            id: { in: dto.attachmentIds },
+            ticketId: ticket.id,
+            uploaderId: user.id,
+            messageId: null,
+          },
+          data: { messageId: firstMessage.id },
+        });
+      }
+      const referenced = [...referencedAttachmentIds(firstMessage.body)];
+      if (referenced.length) {
+        // linkReferencedAttachments 会先把不在 attachmentIds 里的草稿图补挂到
+        // 工单，再按正文引用绑定 messageId。
+        await this.linkReferencedAttachments(
+          tx,
+          ticket.id,
+          firstMessage.id,
+          firstMessage.body,
+          user.id,
+        );
+      }
+    });
     return this.findOne(user, ticket.id);
   }
 
@@ -654,7 +692,8 @@ export class TicketsService {
    * 的附件绑定到新消息，附件可见性就能直接复用消息的 isInternal。
    *
    * 必须与消息写入共用同一个事务：否则消息已提交、绑定尚未提交的窗口里，
-   * 未绑定附件会按公开正文引用被当作可见，绕过消息可见性。
+   * 正文里的图片仍处于未绑定状态，非上传者/内部成员会看不到它；绑定与消息
+   * 一起提交后，可见性直接由消息的 isInternal 决定。
    */
   private async linkReferencedAttachments(
     db: Prisma.TransactionClient,
@@ -665,6 +704,12 @@ export class TicketsService {
   ) {
     const ids = [...referencedAttachmentIds(body)];
     if (!ids.length) return;
+    // 旧流程可能先按草稿上传（ticketId 为空）再把图片粘进回复；这里先把本人
+    // 仍处于草稿状态的引用附件挂到当前工单，下一句才能绑定 messageId。
+    await db.ticketAttachment.updateMany({
+      where: { id: { in: ids }, uploaderId, ticketId: null, messageId: null },
+      data: { ticketId },
+    });
     await db.ticketAttachment.updateMany({
       where: { id: { in: ids }, ticketId, uploaderId, messageId: null },
       data: { messageId },
@@ -834,21 +879,62 @@ export class TicketsService {
     messageId: string,
     dto: CreateMessageDto,
   ) {
-    const msg = await this.prisma.ticketMessage.findUnique({
-      where: { id: messageId },
+    const ticket = await this.prisma.ticket.findUnique({
+      where: { id: ticketId },
+      include: { participants: true },
     });
-    if (!msg || msg.ticketId !== ticketId) {
-      throw new NotFoundException('消息不存在');
+    if (!ticket) throw new NotFoundException('工单不存在');
+    // 写权限必须建立在「当前仍能查看该工单」之上：被 removeParticipant 移出的
+    // 协作成员不能再改写自己的历史消息，否则移除协作只挡住了新回复。
+    // 这里是快速失败；真正写库前会在同一事务里再确认一次，避免读取与写入之间
+    // 被移出协作。
+    if (!this.canView(user, ticket)) {
+      throw new ForbiddenException('无权查看该工单');
     }
-    const isStaff =
-      user.roles.includes('admin') || user.roles.includes('supervisor');
-    if (msg.authorId !== user.id && !isStaff) {
-      throw new ForbiddenException('只能编辑自己的消息');
-    }
+
     // 编辑同样可能引入新的附件引用，更新正文与绑定必须原子提交。
     const updated = await this.prisma.$transaction(async (tx) => {
+      const current = await tx.ticket.findUnique({
+        where: { id: ticketId },
+        include: { participants: true },
+      });
+      if (!current) throw new NotFoundException('工单不存在');
+      if (!this.canView(user, current)) {
+        throw new ForbiddenException('无权查看该工单');
+      }
+      const isStaff =
+        user.roles.includes('admin') || user.roles.includes('supervisor');
+      const canSeeInternal = this.isInternalParticipant(user, current);
+
+      // 把编辑权限下推到消息查询里：先取正文、再在内存里判断，会让无权用户
+      // 触发一次内部备注正文的读取，也容易在后续改动中漏掉校验。
+      const authorized = await tx.ticketMessage.findFirst({
+        where: {
+          id: messageId,
+          ticketId,
+          ...(isStaff ? {} : { authorId: user.id }),
+          ...(canSeeInternal ? {} : { isInternal: false }),
+        },
+        select: { id: true },
+      });
+      if (!authorized) {
+        // 只在确认存在后返回 403，不把无权访问的消息正文带出来。
+        const meta = await tx.ticketMessage.findFirst({
+          where: { id: messageId, ticketId },
+          select: { authorId: true, isInternal: true },
+        });
+        if (!meta) throw new NotFoundException('消息不存在');
+        if (meta.authorId !== user.id && !isStaff) {
+          throw new ForbiddenException('只能编辑自己的消息');
+        }
+        if (meta.isInternal && !canSeeInternal) {
+          throw new ForbiddenException('无权编辑内部备注');
+        }
+        throw new ForbiddenException('无权编辑该消息');
+      }
+
       const next = await tx.ticketMessage.update({
-        where: { id: messageId },
+        where: { id: authorized.id },
         data: { body: cleanHtml(dto.body) },
         include: { author: { select: AUTHOR_SELECT } },
       });
@@ -866,9 +952,31 @@ export class TicketsService {
     if (!user.roles.includes('admin') && ticket.requesterId !== user.id) {
       throw new ForbiddenException('只能删除自己提交的工单');
     }
-    await this.sla.cancel(id);
-    // 级联删除消息/历史/附件记录/标签（附件对象暂留存储，可后续清理）
-    await this.prisma.ticket.delete({ where: { id } });
+
+    // 对象存储不能在数据库事务里删：先把待删 key 和业务删除写进同一事务。
+    // 工单删除会级联删除消息、附件记录和历史；这些记录与 outbox 一起原子提交，
+    // 不会出现「记录删了但 key 丢了」。事务提交后再立即尝试删对象，失败由
+    // 持久化 outbox 重试并告警。
+    await this.prisma.$transaction(async (tx) => {
+      const attachments = await tx.ticketAttachment.findMany({
+        where: { ticketId: id },
+        select: { objectKey: true },
+      });
+      await this.attachments.queueObjectDeletions(
+        tx,
+        attachments.map((attachment) => attachment.objectKey),
+        'TICKET_DELETED',
+      );
+      await tx.ticket.delete({ where: { id } });
+    });
+
+    try {
+      await this.sla.cancel(id);
+    } finally {
+      // 只触发后台清理，不把全局 outbox 的 S3 删除串行压在删除请求上；
+      // outbox 已经和业务删除一起提交，慢/坏的对象由定时任务继续重试。
+      void this.attachments.processPendingDeletions().catch(() => undefined);
+    }
     return { ok: true };
   }
 

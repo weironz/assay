@@ -3,6 +3,7 @@ import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { auth } from './auth';
 import { assertSessionEpochMigration } from './session-epoch';
+import { SYSTEM_ROLE_NAMES, SYSTEM_ROLE_PERMISSIONS } from './role-policy';
 
 /** 仓库 .env.example / 部署模板中公开出现过的默认与占位口令（公开即高危，任何环境禁用） */
 const KNOWN_PLACEHOLDER_PASSWORDS = new Set([
@@ -11,7 +12,7 @@ const KNOWN_PLACEHOLDER_PASSWORDS = new Set([
   'please_set_a_strong_password',
 ]);
 
-/** 启动时对存量管理员账号比对的已知公开默认口令（命中则告警要求轮换） */
+/** 启动时对存量管理员账号比对的已知公开默认口令（公开即高危，一律处理，不只在生产） */
 const KNOWN_DEFAULT_PASSWORDS = ['admin12345', 'CHANGE_ME_admin_password'];
 
 /**
@@ -30,6 +31,7 @@ export class AuthBootstrapService implements OnModuleInit {
     // the checked-in SQL, without marking Prisma migrations as applied.
     // Production must use prisma migrate deploy.
     await assertSessionEpochMigration(this.prisma);
+    await this.assertRolePermissionsBaseline();
     const email = process.env.ADMIN_EMAIL || 'admin@example.com';
     const name = process.env.ADMIN_NAME || '系统管理员';
 
@@ -74,8 +76,40 @@ export class AuthBootstrapService implements OnModuleInit {
       update: {},
       create: { userId: user.id, roleId: adminRole.id },
     });
-    await this.warnIfAdminUsesDefaultPassword(email);
+    // 不只刚处理的本机 ADMIN_EMAIL 账号：遍历全部 admin 角色的 credential 账号
+    await this.enforceAdminPasswordRotation();
     this.logger.log(`管理员就绪: ${email}`);
+  }
+
+  /**
+   * 角色→权限的运行真源在数据库（#23 后目录账号也读库）；SYSTEM_ROLE_PERMISSIONS
+   * 只是 seed 的输入。启动时对比两边基线：DB 漏跑 seed、迁移失败或被人手工改动时，
+   * 目录与本地登录会同时拿到漂移后的权限。生产直接拒绝启动逼着先跑 seed 校准，
+   * 非生产只告警不阻断本地调试。
+   */
+  private async assertRolePermissionsBaseline() {
+    const roles = await this.prisma.role.findMany({
+      where: { name: { in: [...SYSTEM_ROLE_NAMES] } },
+      select: { name: true, permissions: { include: { permission: true } } },
+    });
+    const stored = new Map(
+      roles.map((role) => [role.name, new Set(role.permissions.map((rp) => rp.permission.code))]),
+    );
+    const drifted = SYSTEM_ROLE_NAMES.filter((name) => {
+      const baseline = new Set(SYSTEM_ROLE_PERMISSIONS[name]);
+      const actual = stored.get(name);
+      return (
+        !actual ||
+        actual.size !== baseline.size ||
+        [...baseline].some((code) => !actual.has(code))
+      );
+    });
+    if (!drifted.length) return;
+    const message =
+      `数据库角色权限与代码基线不一致（${drifted.join('、')}）；` +
+      '运行期的唯一真源在数据库，请先执行 seed 校准再上线';
+    if (process.env.NODE_ENV === 'production') throw new Error(message);
+    this.logger.error(message);
   }
 
   /**
@@ -124,30 +158,67 @@ export class AuthBootstrapService implements OnModuleInit {
   }
 
   /**
-   * 已有管理员账号的兜底检查：拿到凭据哈希后与已知公开默认口令逐一比对验证。
-   * 命中说明该账号仍是默认密码（典型场景：早期版本写入后从未轮换），在日志持续
-   * 告警要求立即轮换。验证仅限生产环境，避免开发机每次启动白跑哈希。
+   * 存量管理员账号的默认口令兜底：扫描全部 admin 角色用户的 credential 凭据，
+   * 逐一与已知公开默认口令比对，而非只核对当前 ADMIN_EMAIL 匹配的那一个——
+   * 早期默认路径（如 admin@example.com）创建的账号不会随 ADMIN_EMAIL 改名消失，
+   * 漏扫它们等于把公网登录入口留给任何读过仓库的人。命中后续处理：
+   * - 生产环境：立即轮换为一次性随机口令并自增该用户 sessionEpoch 使全部旧会话失效，
+   *   新口令只在服务端日志打印一次，运维登录后必须立刻再改一次；
+   * - 其他环境：对每个命中账号持续告警要求轮换，不擅自改本地开发库。
+   * 比对在所有环境执行：默认口令公开可查，开发/测试机被扫到同样是事故。
    */
-  private async warnIfAdminUsesDefaultPassword(email: string) {
-    if (process.env.NODE_ENV !== 'production') return;
-    const account = await this.prisma.account.findFirst({
-      where: { user: { email }, providerId: 'credential', password: { not: null } },
+  private async enforceAdminPasswordRotation() {
+    const accounts = await this.prisma.account.findMany({
+      where: {
+        providerId: 'credential',
+        password: { not: null },
+        user: { roles: { some: { role: { name: 'admin' } } } },
+      },
+      select: {
+        id: true,
+        password: true,
+        user: { select: { id: true, email: true } },
+      },
     });
-    if (!account?.password) return;
+    if (!accounts.length) return;
     const ctx = await auth.$context;
-    for (const candidate of KNOWN_DEFAULT_PASSWORDS) {
-      try {
-        const result = await ctx.password.verify({ password: candidate, hash: account.password });
-        if (result) {
-          this.logger.warn(
-            `检测到管理员 ${email} 仍在使用公开默认密码，请立即登录后台轮换为高强度密码！`,
-          );
-          return;
+    for (const account of accounts) {
+      if (!account.password) continue;
+      let usesDefault = false;
+      for (const candidate of KNOWN_DEFAULT_PASSWORDS) {
+        try {
+          if (await ctx.password.verify({ password: candidate, hash: account.password })) {
+            usesDefault = true;
+            break;
+          }
+        } catch (e) {
+          this.logger.warn(`默认密码检查失败: ${(e as Error).message}`);
+          break;
         }
-      } catch (e) {
-        this.logger.warn(`默认密码检查失败: ${(e as Error).message}`);
-        return;
       }
+      if (!usesDefault) continue;
+      if (process.env.NODE_ENV !== 'production') {
+        this.logger.warn(
+          `检测到管理员 ${account.user.email} 仍在使用公开默认密码，请勿保留到正式环境，立即轮换为高强度密码！`,
+        );
+        continue;
+      }
+      // 与 bootstrapPassword() 同款的临时口令：能登录，但绝不可能被猜到或公开查到。
+      const rotated = randomBytes(18).toString('base64url');
+      await this.prisma.$transaction([
+        this.prisma.account.update({
+          where: { id: account.id },
+          data: { password: await ctx.password.hash(rotated) },
+        }),
+        this.prisma.user.update({
+          where: { id: account.user.id },
+          data: { sessionEpoch: { increment: 1 } },
+        }),
+      ]);
+      this.logger.warn(
+        `管理员 ${account.user.email} 的公开默认密码已被强制轮换并吊销全部旧会话，` +
+          `临时密码为 ${rotated}（仅此一次打印，请立即登录后台改为高强度密码）`,
+      );
     }
   }
 }

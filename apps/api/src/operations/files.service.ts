@@ -3,7 +3,6 @@ import {
   Inject,
   Injectable,
   NotFoundException,
-  PayloadTooLargeException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { createReadStream } from 'fs';
@@ -13,7 +12,7 @@ import { AuthUser } from '../auth/auth.types';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import {
   ALLOWED_EXTS,
-  MAX_ATTACHMENT_BYTES,
+  assertAttachmentSize,
   extOf,
 } from '../attachments/limits';
 import { PlatformService } from './platform.service';
@@ -53,8 +52,7 @@ export class BusinessFilesService {
     const key = 'business/' + kind + '/' + id + '/' + randomUUID();
     try {
       await this.platform.subject(user, kind, id, true);
-      if (file.size > MAX_ATTACHMENT_BYTES)
-        throw new PayloadTooLargeException('附件超过上传大小限制');
+      assertAttachmentSize(file);
       if (!ALLOWED_EXTS.includes(extOf(file.originalname)))
         throw new BadRequestException('不支持的文件格式');
       await this.storage.putStream({

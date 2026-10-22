@@ -9,7 +9,10 @@ import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
 import { isRasterImageMime } from '../attachments/limits';
-import { loadAttachmentReferences } from '../attachments/visibility';
+import {
+  isReferencedByPublicMessage,
+  rewriteAttachmentUrls,
+} from '../attachments/visibility';
 import { CreateTicketShareDto } from './ticket-shares.dto';
 
 type ActiveShare = {
@@ -193,9 +196,10 @@ export class TicketSharesService {
   }
 
   private rewriteInlineImages(body: string, token: string) {
-    const imagePath = /(?:https?:\/\/[^"'<>\s]+)?\/api\/attachments\/([^\/?"'<>\s]+)\/download/g;
-    return body.replace(imagePath, (_match, attachmentId: string) =>
-      `/api/shared-tickets/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
+    return rewriteAttachmentUrls(
+      body,
+      (attachmentId) =>
+        `/api/shared-tickets/${encodeURIComponent(token)}/attachments/${encodeURIComponent(attachmentId)}`,
     );
   }
 
@@ -205,6 +209,8 @@ export class TicketSharesService {
       where: {
         id: attachmentId,
         ticketId: share.ticketId,
+        // 未绑定消息的附件不对外分享；历史正文引用已由数据迁移回填 messageId。
+        messageId: { not: null },
       },
       select: {
         fileName: true,
@@ -218,27 +224,31 @@ export class TicketSharesService {
     if (!attachment || !isRasterImageMime(attachment.mime)) {
       throw new NotFoundException('附件不存在');
     }
+    // 查询已排除空 messageId，这里再兜一层，避免未来改查询时把草稿图放出去。
+    const messageId = attachment.messageId;
+    if (!messageId) {
+      throw new NotFoundException('附件不存在');
+    }
 
     // 绑定关系优先于正文引用：内部备注的附件即使被某条公开回复引用了下载地址，
     // 也不能通过分享链接解禁。消息缺失或跨工单的脏数据同样按内部材料处理。
-    if (attachment.messageId) {
-      const boundMessage = await this.prisma.ticketMessage.findFirst({
-        where: { id: attachment.messageId, ticketId: share.ticketId },
-        select: { isInternal: true },
-      });
-      if (!boundMessage || boundMessage.isInternal) {
-        throw new NotFoundException('附件不存在');
-      }
-    }
-
-    // 编辑器会在提交回复前上传图片，旧数据的 attachment.messageId 因而可能为空。
-    // 未绑定附件采用内部优先：只要内部备注引用过，公开正文再引用也不放行；
-    // 只有「公开正文实际引用、且从未被内部备注引用」的图片才允许分享。
-    const references = await loadAttachmentReferences(this.prisma, share.ticketId);
-    if (!references.publicIds.has(attachmentId)) {
+    const boundMessage = await this.prisma.ticketMessage.findFirst({
+      where: { id: messageId, ticketId: share.ticketId },
+      select: { isInternal: true },
+    });
+    if (!boundMessage || boundMessage.isInternal) {
       throw new NotFoundException('附件不存在');
     }
-    if (!attachment.messageId && references.internalIds.has(attachmentId)) {
+
+    // 再确认这条公开消息的正文确实引用了它：绑定到公开消息但已从正文移除的
+    // 附件不应继续通过旧链接下载。该查询显式排除内部备注。
+    if (
+      !(await isReferencedByPublicMessage(
+        this.prisma,
+        share.ticketId,
+        attachmentId,
+      ))
+    ) {
       throw new NotFoundException('附件不存在');
     }
 

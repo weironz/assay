@@ -10,7 +10,7 @@ import {
 
 /**
  * 本地文件系统实现。附件写入 baseDir，DB 只存 key（相对路径）。
- * presignGet 返回后端代理下载地址（由 attachments 控制器实现，P3）。
+ * 下载统一由控制器鉴权后代理读取，不暴露直链。
  */
 export class LocalFsStorage implements StorageDriver {
   readonly name = 'local';
@@ -45,11 +45,6 @@ export class LocalFsStorage implements StorageDriver {
 
   async getStream(key: string): Promise<Readable> {
     return createReadStream(this.full(key));
-  }
-
-  async presignGet(key: string): Promise<string> {
-    // 本地无预签名，返回内部代理路径，由 API 鉴权后回传文件
-    return `/attachments/download?key=${encodeURIComponent(key)}`;
   }
 
   async delete(key: string): Promise<void> {

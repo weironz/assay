@@ -14,6 +14,11 @@ async function bootstrap() {
   // 关闭全局 body parser：better-auth 处理器需要读取原始请求体
   const app = await NestFactory.create(AppModule, { bodyParser: false });
 
+  // SIGTERM/SIGINT 下触发各模块的 OnModuleDestroy / OnApplicationShutdown：
+  // Nest 侧 PrismaService.$disconnect，AuthLifecycleService 收尾 better-auth
+  // 的游离 PrismaClient 与 Redis 连接。滚动发布时不至于把连接留在服务端。
+  app.enableShutdownHooks();
+
   app.enableCors({
     origin: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(','),
     credentials: true,
@@ -61,6 +66,13 @@ async function bootstrap() {
 
   const port = Number(process.env.API_PORT) || 3000;
   await app.listen(port, '0.0.0.0');
+  // 排空窗口：app.close() 只等 HTTP server 的自然断开，keep-alive 空闲连接会
+  // 拖住停机。收到停机信号后先给在途请求这段时间，超时强制断开全部连接。
+  const server = app.getHttpServer() as import('node:http').Server;
+  const drainMs = Number(process.env.SHUTDOWN_DRAIN_MS) || 10_000;
+  const forceCloseAfterDrain = () => setTimeout(() => server.closeAllConnections?.(), drainMs).unref();
+  process.on('SIGTERM', forceCloseAfterDrain);
+  process.on('SIGINT', forceCloseAfterDrain);
   new Logger('Bootstrap').log(`API 已启动: http://localhost:${port}`);
 }
 bootstrap();
