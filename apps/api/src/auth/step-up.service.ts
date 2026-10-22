@@ -6,6 +6,7 @@ import { auth } from './auth';
 import { AuthUser } from './auth.types';
 import { PrismaService } from '../prisma/prisma.service';
 import { verifyDirectoryPassword } from './directory-runtime';
+import { getConfig } from '../config';
 import {
   checkStepUpRate, consumeStepUp, issueStepUp, privilegedMfaMode,
   reserveTotpCode, releaseSuccessfulStepUpAttempt, StepUpPurpose, STEP_UP_TTL_SECONDS,
@@ -67,7 +68,7 @@ export class StepUpService {
   // for the same password again (or for a separate local Assay password).
   async preparePasswordChange(req: Request, user: AuthUser, _code?: string) {
     await this.session(req, user);
-    const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+    const origins = getConfig().auth.trustedOrigins;
     if (!req.headers.origin || !origins.includes(req.headers.origin)) {
       throw new ForbiddenException('密码修改来源校验失败');
     }
@@ -101,7 +102,7 @@ export class StepUpService {
     if (req.headers['x-step-up-token'] === undefined) {
       // The session and current RBAC are checked by the guards. A trusted Origin
       // still prevents another site from submitting cookie-authenticated writes.
-      const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+      const origins = getConfig().auth.trustedOrigins;
       if (!req.headers.origin || !origins.includes(req.headers.origin)) {
         throw new ForbiddenException('操作来源校验失败');
       }

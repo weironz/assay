@@ -1,9 +1,10 @@
 import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 import { Controller, Get, Inject, ServiceUnavailableException } from '@nestjs/common';
 import { constants, promises as fs } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { dirname, resolve } from 'path';
 import { createClient } from 'redis';
 import { Public } from '../auth/decorators';
+import { getConfig } from '../config';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 
@@ -72,7 +73,7 @@ export class HealthController {
     // Match better-auth's Redis URL. A short-lived client has no background
     // reconnect or shutdown lifecycle to manage.
     const client = createClient({
-      url: process.env.REDIS_URL || 'redis://redis:6379',
+      url: getConfig().redis.connectionUrl,
       disableOfflineQueue: true,
       socket: {
         connectTimeout: PROBE_TIMEOUT_MS,
@@ -92,7 +93,7 @@ export class HealthController {
 
   protected async checkStorage(): Promise<void> {
     if (this.storage.name === 'local') {
-      let directory = resolve(process.env.STORAGE_LOCAL_DIR || join(process.cwd(), 'storage-data'));
+      let directory = resolve(getConfig().storage.localDir);
       // LocalFsStorage creates its directory on first upload. Until then the
       // nearest existing parent must be writable so that creation can work.
       for (;;) {
@@ -113,19 +114,24 @@ export class HealthController {
     if (this.storage.name !== 's3') throw new Error('Unknown storage driver');
 
     // HEAD checks the configured bucket and credentials without changing data.
+    // 与真实存储驱动共用同一份集中配置，避免健康检查“假阳性”。
+    const s3 = getConfig().storage.s3;
+    if (!s3.accessKeyId || !s3.secretAccessKey) {
+      throw new Error('S3 凭据未配置；生产环境必须显式设置 S3_ACCESS_KEY / S3_SECRET_KEY');
+    }
     const client = new S3Client({
-      endpoint: process.env.S3_ENDPOINT || 'http://rustfs:9000',
-      region: process.env.S3_REGION || 'us-east-1',
+      endpoint: s3.endpoint,
+      region: s3.region,
       credentials: {
-        accessKeyId: process.env.S3_ACCESS_KEY || 'rustfsadmin',
-        secretAccessKey: process.env.S3_SECRET_KEY || 'rustfsadmin',
+        accessKeyId: s3.accessKeyId,
+        secretAccessKey: s3.secretAccessKey,
       },
-      forcePathStyle: (process.env.S3_FORCE_PATH_STYLE || 'true') === 'true',
+      forcePathStyle: s3.forcePathStyle,
       maxAttempts: 1,
     });
     try {
       await client.send(
-        new HeadBucketCommand({ Bucket: process.env.S3_BUCKET || 'assay-attachments' }),
+        new HeadBucketCommand({ Bucket: s3.bucket }),
         { abortSignal: AbortSignal.timeout(PROBE_TIMEOUT_MS) },
       );
     } finally {

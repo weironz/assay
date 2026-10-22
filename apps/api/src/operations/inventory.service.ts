@@ -17,6 +17,7 @@ import {
   WarehouseInput,
 } from './dto';
 import { PlatformService } from './platform.service';
+import { canViewTicket } from '../tickets/visibility';
 
 const operationInclude = {
   sparePart: true,
@@ -185,10 +186,7 @@ export class InventoryService {
     const visible =
       t &&
       user.permissions.includes('ticket:read') &&
-      (user.permissions.includes('ticket:read:all') ||
-        t.requesterId === user.id ||
-        t.assigneeId === user.id ||
-        t.participants.some((p: any) => p.userId === user.id));
+      canViewTicket(user, t);
     return {
       ...operation,
       ticketId: visible ? t.id : null,

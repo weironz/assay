@@ -15,6 +15,7 @@ import {
 } from './business';
 import { AssetInput, AssetQuery } from './dto';
 import { PlatformService } from './platform.service';
+import { ticketVisibilityWhere } from '../tickets/visibility';
 
 export const ASSET_TRANSITIONS: Record<AssetStatus, AssetStatus[]> = {
   PENDING_REGISTRATION: ['IN_STOCK', 'IN_USE', 'MAINTENANCE', 'RETIRED'],
@@ -219,15 +220,7 @@ export class AssetsService {
   async tickets(user: AuthUser, id: string) {
     await this.get(user, id);
     if (!user.permissions.includes('ticket:read')) return [];
-    const scope = user.permissions.includes('ticket:read:all')
-      ? {}
-      : {
-          OR: [
-            { requesterId: user.id },
-            { assigneeId: user.id },
-            { participants: { some: { userId: user.id } } },
-          ],
-        };
+    const scope = ticketVisibilityWhere(user);
     const links = await this.db.ticketAsset.findMany({
       where: { assetId: id, ticket: scope },
       include: {

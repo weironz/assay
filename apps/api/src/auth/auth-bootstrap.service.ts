@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { auth } from './auth';
 import { assertSessionEpochMigration } from './session-epoch';
 import { SYSTEM_ROLE_NAMES, SYSTEM_ROLE_PERMISSIONS } from './role-policy';
+import { getConfig } from '../config';
 
 /** 仓库 .env.example / 部署模板中公开出现过的默认与占位口令（公开即高危，任何环境禁用） */
 const KNOWN_PLACEHOLDER_PASSWORDS = new Set([
@@ -32,10 +33,11 @@ export class AuthBootstrapService implements OnModuleInit {
     // Production must use prisma migrate deploy.
     await assertSessionEpochMigration(this.prisma);
     await this.assertRolePermissionsBaseline();
-    const email = process.env.ADMIN_EMAIL || 'admin@example.com';
-    const name = process.env.ADMIN_NAME || '系统管理员';
+    const config = getConfig();
+    const email = config.admin.email;
+    const name = config.admin.name;
 
-    if (!process.env.ADMIN_EMAIL && process.env.NODE_ENV === 'production') {
+    if (!config.admin.emailConfigured && config.isProduction) {
       this.logger.warn(`未设置 ADMIN_EMAIL，生产环境将使用默认管理员邮箱 ${email}，建议显式配置`);
     }
 
@@ -108,7 +110,7 @@ export class AuthBootstrapService implements OnModuleInit {
     const message =
       `数据库角色权限与代码基线不一致（${drifted.join('、')}）；` +
       '运行期的唯一真源在数据库，请先执行 seed 校准再上线';
-    if (process.env.NODE_ENV === 'production') throw new Error(message);
+    if (getConfig().isProduction) throw new Error(message);
     this.logger.error(message);
   }
 
@@ -119,12 +121,13 @@ export class AuthBootstrapService implements OnModuleInit {
    * - 其他环境生成一次性随机密码并打印到日志，供本地开发登录后立即修改。
    */
   private bootstrapPassword(email: string): string {
-    const explicit = process.env.ADMIN_PASSWORD;
+    const config = getConfig();
+    const explicit = config.admin.password;
     if (explicit) {
       this.assertBootstrapPasswordStrong(explicit);
       return explicit;
     }
-    if (process.env.NODE_ENV === 'production') {
+    if (config.isProduction) {
       throw new Error(
         '首次创建管理员必须显式设置 ADMIN_PASSWORD；生产环境不提供默认密码',
       );
@@ -150,7 +153,7 @@ export class AuthBootstrapService implements OnModuleInit {
       );
     }
     if (password.length < 12) {
-      if (process.env.NODE_ENV === 'production') {
+      if (getConfig().isProduction) {
         throw new Error('生产环境 ADMIN_PASSWORD 长度不足：至少 12 个字符');
       }
       this.logger.warn('ADMIN_PASSWORD 长度不足 12 位，请勿在正式环境使用该口令');
@@ -197,7 +200,7 @@ export class AuthBootstrapService implements OnModuleInit {
         }
       }
       if (!usesDefault) continue;
-      if (process.env.NODE_ENV !== 'production') {
+      if (!getConfig().isProduction) {
         this.logger.warn(
           `检测到管理员 ${account.user.email} 仍在使用公开默认密码，请勿保留到正式环境，立即轮换为高强度密码！`,
         );

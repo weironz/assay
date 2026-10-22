@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { currentEnv } from '../config';
 
 export interface DirectorySettings {
   url: string; baseDN: string; bindDN: string; passwordFile: string; caFile: string;
   domain: string; sambaDomain: string; providerId: string; name: string; autoProvision: boolean; origins: string[];
 }
-export function readDirectorySettings(env: NodeJS.ProcessEnv = process.env): DirectorySettings | null {
+export function readDirectorySettings(env: NodeJS.ProcessEnv = currentEnv()): DirectorySettings | null {
   if (env.DIRECTORY_AUTH_ENABLED !== 'true') return null;
   const required = (key: string) => {
     const value = env[key]?.trim();

@@ -15,6 +15,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { RequirePermissions, CurrentUser } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
 import { directoryRoleUserIds } from '../auth/directory-policy';
+import { getConfig } from '../config';
 
 class CategoryDto {
   @IsString()
@@ -201,7 +202,7 @@ export class MetaController {
       where: {
         status: 'ACTIVE',
         OR: [
-          { roles: { some: { role: { name: { in: ['handler', 'admin'] } } } }, ...(process.env.DIRECTORY_AUTH_ENABLED === 'true' ? { directoryIdentity: null } : {}) },
+          { roles: { some: { role: { name: { in: ['handler', 'admin'] } } } }, ...(getConfig().directory.authEnabled ? { directoryIdentity: null } : {}) },
           { id: { in: directoryHandlers } },
         ],
       },

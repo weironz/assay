@@ -6,6 +6,7 @@ import { adDomainDN, normalizedDomainDN, readDirectorySettings } from './directo
 import { authRedis } from './auth-redis';
 import type { SystemRoleName } from './role-policy';
 import { directoryRolesForGroups } from './directory-role-policy';
+import { getConfig } from '../config';
 
 export const directorySettings = readDirectorySettings();
 export const directoryClient = directorySettings ? new DirectoryClient(directorySettings) : null;
@@ -57,7 +58,7 @@ export async function resolveDirectoryIdentity(db: PrismaClient, profile: Direct
     if (account && account.userId !== user.id) throw new DirectoryRejected();
     if (!account)
       await tx.account.create({ data: { providerId: settings.providerId, accountId: profile.id, userId: user.id } });
-    if (process.env.SAMBA_ENABLED === 'true') {
+    if (getConfig().samba.enabled) {
       const current = await tx.sambaIdentity.findUnique({ where: { userId: user.id } });
       if (current && (current.adObjectId !== profile.id || normalizedDomainDN(current.domain) !== normalizedDomainDN(adDomainDN(settings.domain)))) throw new DirectoryRejected();
       await tx.sambaIdentity.upsert({ where: { userId: user.id }, create: { userId: user.id, adObjectId: profile.id, domain: adDomainDN(settings.domain), accountName: profile.accountName, linkedBy: 'directory-login' }, update: { accountName: profile.accountName } });
@@ -133,7 +134,8 @@ type FileConnector = (session: { token: string; userId: string; expiresAt: Date 
 let connectFiles: FileConnector | undefined;
 export function registerDirectoryFileConnector(connector: FileConnector) { connectFiles = connector; }
 export async function connectDirectoryFiles(session: Parameters<FileConnector>[0], password: string, origin: string) {
-  if (process.env.SAMBA_ENABLED !== 'true' || process.env.FILES_ENABLED !== 'true') return false;
+  const config = getConfig();
+  if (!config.samba.enabled || !config.files.enabled) return false;
   if (!connectFiles) return false;
   try { await connectFiles(session, password, origin); return true; }
   catch { return false; } // Business login remains available when optional SMB transport is down.

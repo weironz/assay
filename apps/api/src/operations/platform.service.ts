@@ -14,6 +14,7 @@ import {
   requirePermission,
 } from './business';
 import { DepartmentInput } from './dto';
+import { canViewTicket } from '../tickets/visibility';
 
 @Injectable()
 export class PlatformService {
@@ -34,12 +35,7 @@ export class PlatformService {
       include: { participants: true },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-    if (
-      !user.permissions.includes('ticket:read:all') &&
-      ticket.requesterId !== user.id &&
-      ticket.assigneeId !== user.id &&
-      !ticket.participants.some((p: any) => p.userId === user.id)
-    ) {
+    if (!canViewTicket(user, ticket)) {
       throw new ForbiddenException('无权关联或查看此工单');
     }
     return ticket;
@@ -223,7 +219,6 @@ export class PlatformService {
     ];
     const hidden = new Set<string>();
     if (linkedTicketIds.length && user.permissions.includes('ticket:read')) {
-      const readAll = user.permissions.includes('ticket:read:all');
       const tickets = await this.db.ticket.findMany({
         where: { id: { in: linkedTicketIds } },
         select: {
@@ -234,15 +229,7 @@ export class PlatformService {
         },
       });
       const visible = new Set(
-        (readAll
-          ? tickets
-          : tickets.filter(
-              (t) =>
-                t.requesterId === user.id ||
-                t.assigneeId === user.id ||
-                t.participants.some((p) => p.userId === user.id),
-            )
-        ).map((t) => t.id),
+        tickets.filter((t) => canViewTicket(user, t)).map((t) => t.id),
       );
       for (const ticketId of linkedTicketIds)
         if (!visible.has(ticketId)) hidden.add(ticketId);

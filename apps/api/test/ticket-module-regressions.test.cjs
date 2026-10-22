@@ -5,7 +5,7 @@ require('reflect-metadata');
 // do not start a deployment Redis connection just by loading that module.
 const redisModule = require.resolve('../dist/auth/auth-redis');
 require.cache[redisModule] = { id: redisModule, filename: redisModule, loaded: true, exports: { authRedis: {} } };
-const { TicketsService } = require('../dist/tickets/tickets.service');
+const { createTicketsService } = require('./tickets-service.fixture');
 const { TicketSharesService } = require('../dist/ticket-shares/ticket-shares.service');
 const { MetaController } = require('../dist/tickets/meta.controller');
 const { ListTicketsQuery } = require('../dist/tickets/dto');
@@ -19,7 +19,7 @@ const { SessionGuard } = require('../dist/auth/session.guard');
 
 test('environment/SLA/date filters intersect ticket visibility; list and count use exactly the same scope', async () => {
   const queries = [];
-  const service = new TicketsService({ ticket: {
+  const service = createTicketsService({ ticket: {
     findMany: async args => { queries.push(args); return []; },
     count: async args => { queries.push(args); return 0; },
   } }, {}, {}, {});

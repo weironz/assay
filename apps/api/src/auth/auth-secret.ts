@@ -7,8 +7,15 @@
  *   拒绝启动；只比较长度不够——运维复制模板忘记改值时，服务必须起不来；
  * - 其他环境允许占位密钥，保证本地起得来，但不再使用硬编码默认值兜底生产。
  */
+import { getConfig } from '../config';
+
 const MIN_SECRET_LENGTH = 32;
-const DEV_FALLBACK_SECRET = 'dev_secret_change_me_not_for_production';
+/**
+ * 与重构前 `auth.ts` 的 `AUTH_SECRET || 'dev_secret_change_me'` 完全一致：
+ * 非生产环境保留同一个占位密钥，升级后本地已签发的会话/文件指纹继续有效；
+ * 生产环境通过下面的占位值检测明确拒绝它。
+ */
+const DEV_FALLBACK_SECRET = 'dev_secret_change_me';
 
 /** 仓库模板与历史默认值：公开即高危，任何命中都视为“没改” */
 const KNOWN_PLACEHOLDER_SECRETS = [
@@ -31,9 +38,10 @@ function isLowEntropySecret(secret: string): boolean {
 }
 
 export function requireAuthSecret(): string {
-  const secret = process.env.AUTH_SECRET;
+  const config = getConfig();
+  const secret = config.auth.secret;
   if (secret && secret.length >= MIN_SECRET_LENGTH) {
-    if (process.env.NODE_ENV !== 'production') return secret;
+    if (!config.isProduction) return secret;
     if (isPlaceholderSecret(secret) || isLowEntropySecret(secret)) {
       throw new Error(
         'AUTH_SECRET 仍是仓库公开的占位值或低熵弱密钥，生产环境禁止使用；' +
@@ -42,7 +50,7 @@ export function requireAuthSecret(): string {
     }
     return secret;
   }
-  if (process.env.NODE_ENV === 'production') {
+  if (config.isProduction) {
     throw new Error(
       `AUTH_SECRET 缺失或长度不足 ${MIN_SECRET_LENGTH} 字符；生产环境必须显式配置强随机值` +
         '（openssl rand -base64 48）',

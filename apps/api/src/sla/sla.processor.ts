@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { SLA_QUEUE, SlaJobData, slaReceiptField } from './sla.service';
 import { directoryRoleUserIds } from '../auth/directory-policy';
+import { getConfig } from '../config';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (char) =>
@@ -62,7 +63,7 @@ export class SlaProcessor extends WorkerHost {
         else {
           const staff = await tx.user.findMany({
             where: { status: 'ACTIVE', OR: [
-              { roles: { some: { role: { name: { in: ['admin', 'supervisor'] } } } }, ...(process.env.DIRECTORY_AUTH_ENABLED === 'true' ? { directoryIdentity: null } : {}) },
+              { roles: { some: { role: { name: { in: ['admin', 'supervisor'] } } } }, ...(getConfig().directory.authEnabled ? { directoryIdentity: null } : {}) },
               { id: { in: directorySupervisors } },
             ] },
             select: { id: true },

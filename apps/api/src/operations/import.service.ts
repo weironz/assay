@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { AssetImportInput, AssetImportRow } from './dto';
 import { serializable, writeActivity } from './business';
+import { getConfig } from '../config';
 
 // Explicit alias from supplied inventories and the authenticated NetBox snapshot.
 // COP's site naming is independent from NetBox's canonical DCIM slug.
@@ -268,9 +269,8 @@ export class AssetImportService {
     }
   }
   async netbox() {
-    const base = (
-      process.env.NETBOX_API_BASE_URL || 'https://netbox.cloudcele.com'
-    ).replace(/\/$/, '');
+    const netbox = getConfig().netbox;
+    const base = netbox.baseUrl.replace(/\/$/, '');
     const url = new URL(base);
     if (
       url.protocol !== 'https:' ||
@@ -282,7 +282,7 @@ export class AssetImportService {
       throw new ServiceUnavailableException(
         'NetBox 地址配置不符合受控 HTTPS 来源',
       );
-    const token = process.env.NETBOX_API_TOKEN;
+    const token = netbox.token;
     if (!token)
       throw new ServiceUnavailableException(
         'NetBox 只读 API 密钥尚未配置；可先使用 Excel 导入',

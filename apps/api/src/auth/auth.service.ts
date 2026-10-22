@@ -9,6 +9,7 @@ import { directorySettings, refreshDirectoryIdentity, validatedDirectorySession 
 import { ApiTokensService } from '../api-tokens/api-tokens.service';
 import { assertSessionEpoch } from './session-epoch';
 import { webSessionFingerprint, webSessionScopes } from './web-session-scope';
+import { getConfig } from '../config';
 
 @Injectable()
 export class AuthService {
@@ -59,7 +60,7 @@ export class AuthService {
       directorySession = !!state; directoryRoles = state?.roleNames || [];
     }
     catch { return null; }
-    if (process.env.FILES_ENABLED === 'true')
+    if (getConfig().files.enabled)
       webSessionScopes.set(req, { fingerprint: webSessionFingerprint(session.session.token), expiresAt: new Date(session.session.expiresAt).getTime() });
     return { ...this.toAuthUser(user, null, await this.directoryRolesFromDb(directoryRoles)),
       passwordSource: directorySession ? 'directory' : 'local' };

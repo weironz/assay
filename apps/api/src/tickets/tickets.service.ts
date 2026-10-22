@@ -1,19 +1,12 @@
-import {
-  BadRequestException,
-  ConflictException,
-  ForbiddenException,
-  Injectable,
-  NotFoundException,
-} from '@nestjs/common';
-import { HistoryAction, Prisma, TicketStatus } from '@prisma/client';
-import { PrismaService } from '../prisma/prisma.service';
+import { Injectable } from '@nestjs/common';
 import { AuthUser } from '../auth/auth.types';
-import { WorkflowService, TicketAction } from './workflow.service';
-import { cleanHtml } from '../common/sanitize';
-import { referencedAttachmentIds } from '../attachments/visibility';
-import { NotificationsService } from '../notifications/notifications.service';
-import { SlaService } from '../sla/sla.service';
-import { AttachmentsService } from '../attachments/attachments.service';
+import { TicketAction } from './workflow.service';
+import { TicketQueries } from './ticket-queries';
+import { TicketEditor } from './ticket-editor';
+import { TicketLifecycle } from './ticket-lifecycle';
+import { TicketMessaging } from './ticket-messaging';
+import { TicketParticipants } from './ticket-participants';
+import { TicketDeletion } from './ticket-deletion';
 import {
   AddParticipantDto,
   AssignDto,
@@ -22,792 +15,86 @@ import {
   ListTicketsQuery,
   UpdateTicketDto,
 } from './dto';
-import { TicketContactDto } from './contact';
 
 /**
- * 联系方式落库前收敛一次：去掉首尾空格、丢掉空的邮件行。
- * 前端「添加邮件地址」允许留空行，不清掉就会把 "" 存进去。
+ * 工单域外观：HTTP 层的承诺保持不变（controller 注入与返回结构不变），
+ * 实现按域拆到 tickets/ 下的内聚模块——
+ * - 查询：TicketQueries（列表/详情/筛选人员/历史）
+ * - 写入：TicketEditor（建单/编辑）
+ * - 生命周期：TicketLifecycle（指派/状态流转）
+ * - 消息：TicketMessaging（回复/内部备注/编辑正文）
+ * - 协作人：TicketParticipants（协作成员/关注人）
+ * - 删除：TicketDeletion（含对象存储删除 outbox）
+ * 共享 helper 在 tickets/core.ts，可见性唯一定义在 tickets/visibility.ts。
+ *
+ * 六个域实现注册在 TicketsModule.providers，由构造器注入：每个域可独立
+ * mock/override，并享有 provider 生命周期。回归测试通过
+ * test/tickets-service.fixture.ts 以原始依赖装配各域。
  */
-function normalizeContact(
-  contact?: TicketContactDto | null,
-): Prisma.InputJsonValue | typeof Prisma.JsonNull {
-  if (!contact?.phone?.trim()) return Prisma.JsonNull;
-  return {
-    ...(contact.position ? { position: contact.position } : {}),
-    phone: contact.phone.trim(),
-    callTime: contact.callTime,
-    smsTime: contact.smsTime,
-    emails: (contact.emails ?? []).map((e) => e.trim()).filter(Boolean),
-  };
-}
-
-/**
- * 工单没设类型时的兜底时限。类型的 SLA 可由管理员在界面上配置，
- * 这里只是防止「没类型 = 没有任何 SLA 监控」。
- */
-const FALLBACK_SLA = { responseMin: 60, resolveMin: 1440 };
-const TERMINAL_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED', 'CANCELLED'];
-const COMPLETED_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED'];
-
-/** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
-const AUTHOR_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  image: true,
-} as const;
-
-const PARTICIPANT_USER_SELECT = {
-  id: true,
-  name: true,
-  email: true,
-  image: true,
-} as const;
-
 @Injectable()
 export class TicketsService {
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly workflow: WorkflowService,
-    private readonly notifications: NotificationsService,
-    private readonly sla: SlaService,
-    private readonly attachments: AttachmentsService,
+    private readonly queries: TicketQueries,
+    private readonly editor: TicketEditor,
+    private readonly lifecycle: TicketLifecycle,
+    private readonly messaging: TicketMessaging,
+    private readonly participantsDomain: TicketParticipants,
+    private readonly deletion: TicketDeletion,
   ) {}
 
-  // ---------- 工具 ----------
-  private async genTicketNo(): Promise<string> {
-    const d = new Date();
-    const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
-      d.getDate(),
-    ).padStart(2, '0')}`;
-    const prefix = `WO-${ymd}-`;
-    // 取当天最大编号 +1，而不是数当天条数：删掉任意一张单都会让计数回退，
-    // 下一张新单就会撞上已存在的编号。序号补零到 4 位，字典序即数字序。
-    const last = await this.prisma.ticket.findFirst({
-      where: { ticketNo: { startsWith: prefix } },
-      orderBy: { ticketNo: 'desc' },
-      select: { ticketNo: true },
-    });
-    const seq = last ? Number(last.ticketNo.slice(prefix.length)) + 1 : 1;
-    return `${prefix}${String(seq).padStart(4, '0')}`;
+  // ---------- 查询 ----------
+  list(user: AuthUser, q: ListTicketsQuery) {
+    return this.queries.list(user, q);
   }
 
-  private history(
-    ticketId: string,
-    userId: string,
-    action: HistoryAction,
-    field?: string,
-    oldValue?: string | null,
-    newValue?: string | null,
-  ) {
-    return this.prisma.ticketHistory.create({
-      data: { ticketId, userId, action, field, oldValue, newValue },
-    });
+  filterPeople(user: AuthUser) {
+    return this.queries.filterPeople(user);
   }
 
-  private async loadOrThrow(id: string) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    return ticket;
+  findOne(user: AuthUser, id: string) {
+    return this.queries.findOne(user, id);
   }
 
-  /** 独立的数据范围权限：允许读取全部工单，但不自动授予任何写操作。 */
-  private canReadAll(user: AuthUser) {
-    return user.permissions.includes('ticket:read:all');
+  async history_(user: AuthUser, id: string) {
+    // 统一复用详情的可见性判定，协作成员也可查看审计历史。
+    await this.findOne(user, id);
+    return this.queries.history(id);
   }
 
-  /** 列表数据级可见性：有全局只读权限全看；否则看本人关联或被邀请协作的工单。 */
-  private visibilityFilter(user: AuthUser): Prisma.TicketWhereInput {
-    if (this.canReadAll(user)) {
-      return {};
-    }
-    return {
-      OR: [
-        { requesterId: user.id },
-        { assigneeId: user.id },
-        { participants: { some: { userId: user.id } } },
-      ],
-    };
-  }
-
-  private canView(
-    user: AuthUser,
-    ticket: {
-      requesterId: string;
-      assigneeId: string | null;
-      participants?: { userId: string; role: string }[];
-    },
-  ) {
-    if (this.canReadAll(user)) return true;
-    return (
-      ticket.requesterId === user.id ||
-      ticket.assigneeId === user.id ||
-      !!ticket.participants?.some((participant) => participant.userId === user.id)
-    );
-  }
-
-  private isCollaborator(
-    user: AuthUser,
-    ticket: { participants?: { userId: string; role: string }[] },
-  ) {
-    return ticket.participants?.some(
-      (participant) =>
-        participant.userId === user.id && participant.role === 'COLLABORATOR',
-    );
-  }
-
-  private isInternalParticipant(
-    user: AuthUser,
-    ticket: { assigneeId: string | null; participants?: { userId: string; role: string }[] },
-  ) {
-    return (
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      ticket.assigneeId === user.id ||
-      this.isCollaborator(user, ticket)
-    );
-  }
-
-  private canManageParticipants(
-    user: AuthUser,
-    ticket: { assigneeId: string | null },
-  ) {
-    return (
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      ticket.assigneeId === user.id
-    );
-  }
-
-  /**
-   * 写操作仍沿用原有边界：管理员/主管可处理全部工单，其他人只能操作与自己相关的工单。
-   * 不把 ticket:read:all 混进这里，避免“全局只读”意外变成全局可编辑。
-   */
-  private canOperate(user: AuthUser, ticket: { requesterId: string; assigneeId: string | null }) {
-    if (user.roles.includes('admin') || user.roles.includes('supervisor')) return true;
-    return ticket.requesterId === user.id || ticket.assigneeId === user.id;
-  }
-
-  /**
-   * 分类落库：下拉选中的 id 优先；否则拿自填的名字去找已有分类，找不到才新建。
-   * 忽略大小写和首尾空格做匹配——不去重的话分类表很快会长出
-   *「网络」「网络 」「网络」三条同义项，筛选和报表就没法用了。
-   */
-  private async resolveCategoryId(
-    categoryId?: string,
-    categoryName?: string,
-    database: Pick<Prisma.TransactionClient, 'category'> = this.prisma,
-  ): Promise<string | undefined> {
-    if (categoryId) return categoryId;
-    const name = categoryName?.trim();
-    if (!name) return undefined;
-    const existing = await database.category.findFirst({
-      where: { name: { equals: name, mode: 'insensitive' } },
-    });
-    if (existing) return existing.id;
-    const created = await database.category.create({ data: { name } });
-    return created.id;
-  }
-
-  /**
-   * 编号是「读当天最大值 + 1」，两个请求挨得足够近就会读到同一个值。
-   * 唯一索引会挡住后一个，这里重取编号再试；连撞 5 次就不是并发问题了，抛出去。
-   */
-  private async createWithTicketNo(
-    build: (ticketNo: string) => Prisma.TicketCreateArgs,
-  ) {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      try {
-        return await this.prisma.ticket.create(build(await this.genTicketNo()));
-      } catch (e) {
-        const dup =
-          e instanceof Prisma.PrismaClientKnownRequestError &&
-          e.code === 'P2002' &&
-          String(e.meta?.target ?? '').includes('ticket_no');
-        if (!dup || attempt === 4) throw e;
-      }
-    }
-    throw new Error('unreachable');
-  }
-
-  /**
-   * 取该类型的 SLA 时限。没设类型时用兜底值——宁可给个保守时限，
-   * 也不要让工单彻底脱离 SLA 监控悄悄躺着。
-   */
-  private async slaOf(typeId: string | null) {
-    const type = typeId
-      ? await this.prisma.ticketType.findUnique({ where: { id: typeId } })
-      : null;
-    return {
-      responseMin: type?.slaResponseMin ?? FALLBACK_SLA.responseMin,
-      resolveMin: type?.slaResolveMin ?? FALLBACK_SLA.resolveMin,
-    };
-  }
-
-  // ---------- 建单 ----------
+  // ---------- 写入 ----------
   async create(user: AuthUser, dto: CreateTicketDto) {
-    const categoryId = await this.resolveCategoryId(
-      dto.categoryId,
-      dto.categoryName,
-    );
-    const ticket = await this.createWithTicketNo((ticketNo) => ({
-      data: {
-        ticketNo,
-        title: dto.title,
-        requesterId: user.id,
-        priority: (dto.priority as any) ?? 'MEDIUM',
-        typeId: dto.typeId,
-        categoryId,
-        queueId: dto.queueId,
-        datacenterId: dto.datacenterId,
-        clusterId: dto.clusterId,
-        serialNumber: dto.serialNumber?.trim() || null,
-        contact: normalizeContact(dto.contact),
-        status: 'NEW',
-        messages: {
-          create: {
-            authorId: user.id,
-            type: 'REPLY',
-            isInternal: false,
-            contentType: 'text/html',
-            body: cleanHtml(dto.body),
-          },
-        },
-      },
-    }));
-    // SLA 从建单起算：一直没人接手才是最该告警的情况，
-    // 从「开始处理」起算的话这种单永远不会超时
-    const sla = await this.slaOf(dto.typeId ?? null);
-    const base = ticket.createdAt.getTime();
-    const firstResponseDueAt = new Date(base + sla.responseMin * 60_000);
-    const slaDueAt = new Date(base + sla.resolveMin * 60_000);
-    await this.prisma.ticket.update({
-      where: { id: ticket.id },
-      data: { firstResponseDueAt, slaDueAt },
-    });
-    await this.sla.schedule(ticket.id, 'response', firstResponseDueAt);
-    await this.sla.schedule(ticket.id, 'resolve', slaDueAt);
-
-    await this.history(ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
-    // 勾了「设为默认」才写用户档案；没勾就不动，免得覆盖上次存好的
-    if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { defaultContact: normalizeContact(dto.contact) },
-      });
-    }
-    // 关联建单前上传的草稿附件（仅本人、仍未挂单的）。未绑定附件已收紧为
-    // 「仅上传者/内部可见」，所以这里要一次性把归属确定下来：
-    // - attachmentIds 是用户在附件区显式选择的文件，绑定到建单首条公开消息；
-    // - 正文里实际引用的内联图即使没出现在 attachmentIds 里，也一并挂到工单并
-    //   绑定到首条消息，避免正文图片对协作成员和分享页 404。
-    await this.prisma.$transaction(async (tx) => {
-      if (dto.attachmentIds?.length) {
-        await tx.ticketAttachment.updateMany({
-          where: {
-            id: { in: dto.attachmentIds },
-            uploaderId: user.id,
-            ticketId: null,
-          },
-          data: { ticketId: ticket.id },
-        });
-      }
-      const firstMessage = await tx.ticketMessage.findFirst({
-        where: { ticketId: ticket.id },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, body: true },
-      });
-      if (!firstMessage) return;
-
-      if (dto.attachmentIds?.length) {
-        await tx.ticketAttachment.updateMany({
-          where: {
-            id: { in: dto.attachmentIds },
-            ticketId: ticket.id,
-            uploaderId: user.id,
-            messageId: null,
-          },
-          data: { messageId: firstMessage.id },
-        });
-      }
-      const referenced = [...referencedAttachmentIds(firstMessage.body)];
-      if (referenced.length) {
-        // linkReferencedAttachments 会先把不在 attachmentIds 里的草稿图补挂到
-        // 工单，再按正文引用绑定 messageId。
-        await this.linkReferencedAttachments(
-          tx,
-          ticket.id,
-          firstMessage.id,
-          firstMessage.body,
-          user.id,
-        );
-      }
-    });
-    return this.findOne(user, ticket.id);
+    const id = await this.editor.create(user, dto);
+    return this.findOne(user, id);
   }
 
-  // ---------- 列表 ----------
-  /**
-   * 仅返回当前用户可见工单涉及的人员，供列表的处理人/提单人下拉框使用。
-   * 不返回邮箱、角色等目录信息，也不会绕过 visibilityFilter。
-   */
-  async filterPeople(user: AuthUser) {
-    const visibleTickets = this.visibilityFilter(user);
-    return this.prisma.user.findMany({
-      where: {
-        OR: [
-          { requestedTickets: { some: visibleTickets } },
-          { assignedTickets: { some: visibleTickets } },
-        ],
-      },
-      select: { id: true, name: true },
-      orderBy: { name: 'asc' },
-    });
-  }
-
-  async list(user: AuthUser, q: ListTicketsQuery) {
-    // 所有筛选都必须与可见范围相交。用 AND 组合可避免关键字/快捷范围覆盖
-    // visibilityFilter 里的 OR，从而意外扩大普通用户能看到的工单。
-    const filters: Prisma.TicketWhereInput[] = [this.visibilityFilter(user)];
-    if (q.status) filters.push({ status: q.status as TicketStatus });
-    if (q.priority) filters.push({ priority: q.priority as any });
-    if (q.queueId) filters.push({ queueId: q.queueId });
-    if (q.assigneeId) filters.push({ assigneeId: q.assigneeId === '__none__' ? null : q.assigneeId });
-    if (q.datacenterId) filters.push({ datacenterId: q.datacenterId === '__none__' ? null : q.datacenterId });
-    if (q.createdFrom && q.createdTo && new Date(q.createdFrom) >= new Date(q.createdTo)) {
-      throw new BadRequestException('创建日期范围无效');
-    }
-    if (q.createdFrom || q.createdTo) filters.push({ createdAt: {
-      ...(q.createdFrom ? { gte: new Date(q.createdFrom) } : {}),
-      ...(q.createdTo ? { lt: new Date(q.createdTo) } : {}),
-    } });
-    const activeStates = { notIn: [...TERMINAL_STATUSES, 'PENDING' as TicketStatus] };
-    if (q.slaState === 'overdue') filters.push({ status: activeStates, slaDueAt: { lt: new Date() } });
-    if (q.slaState === 'within') filters.push({ status: activeStates, slaDueAt: { gte: new Date() } });
-    if (q.slaState === 'paused') filters.push({ status: 'PENDING', slaDueAt: { not: null } });
-    if (q.slaState === 'completed') filters.push({ status: { in: TERMINAL_STATUSES } });
-    if (q.slaState === 'unset') filters.push({ slaDueAt: null, status: { notIn: TERMINAL_STATUSES } });
-    if (q.requesterId) filters.push({ requesterId: q.requesterId });
-    if (q.categoryId) filters.push({ categoryId: q.categoryId });
-    if (q.ticketNo) {
-      filters.push({ ticketNo: { contains: q.ticketNo, mode: 'insensitive' } });
-    }
-
-    if (q.scope === 'open') {
-      filters.push({ status: { notIn: TERMINAL_STATUSES } });
-    } else if (q.scope === 'completed') {
-      // “已完成”不包含已取消，需与仪表盘口径保持一致。
-      filters.push({ status: { in: COMPLETED_STATUSES } });
-    } else if (q.scope === 'mine') {
-      filters.push({ assigneeId: user.id, status: { notIn: TERMINAL_STATUSES } });
-    } else if (q.scope === 'unassigned') {
-      filters.push({ assigneeId: null, status: { notIn: TERMINAL_STATUSES } });
-    } else if (q.scope === 'overdue') {
-      filters.push({
-        slaDueAt: { lt: new Date() },
-        status: { notIn: [...TERMINAL_STATUSES, 'PENDING'] },
-      });
-    }
-
-    if (q.keyword) {
-      filters.push({
-        OR: [
-          { title: { contains: q.keyword, mode: 'insensitive' } },
-          { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
-        ],
-      });
-    }
-    const where: Prisma.TicketWhereInput =
-      filters.length === 1 ? filters[0] : { AND: filters };
-
-    const page = q.page ?? 1;
-    const pageSize = q.pageSize ?? 20;
-    const [items, total] = await Promise.all([
-      this.prisma.ticket.findMany({
-        where,
-        include: {
-          requester: { select: { id: true, name: true } },
-          assignee: { select: { id: true, name: true } },
-          queue: { select: { id: true, name: true } },
-          type: { select: { id: true, name: true } },
-          category: { select: { id: true, name: true } },
-          datacenter: { select: { id: true, name: true } },
-        },
-        orderBy: { [q.sort ?? 'createdAt']: q.order ?? 'desc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-      }),
-      this.prisma.ticket.count({ where }),
-    ]);
-    return { items, total, page, pageSize };
-  }
-
-  // ---------- 详情 ----------
-  async findOne(user: AuthUser, id: string) {
-    const ticket = await this.prisma.ticket.findUnique({
-      where: { id },
-      include: {
-        requester: { select: { id: true, name: true, email: true } },
-        assignee: { select: { id: true, name: true } },
-        queue: true,
-        type: true,
-        category: true,
-        datacenter: true,
-        cluster: true,
-        tags: { include: { tag: true } },
-        participants: {
-          include: { user: { select: PARTICIPANT_USER_SELECT } },
-          orderBy: { createdAt: 'asc' },
-        },
-        messages: {
-          include: {
-            author: { select: AUTHOR_SELECT },
-            mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
-          },
-          orderBy: { createdAt: 'asc' },
-        },
-      },
-    });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canView(user, ticket)) throw new ForbiddenException('无权查看该工单');
-
-    // 提单人看不到内部备注
-    const isStaff = this.isInternalParticipant(user, ticket);
-    const messages = isStaff
-      ? ticket.messages
-      : ticket.messages.filter((m) => !m.isInternal);
-
-    const actions = this.workflow.availableActions(ticket.status, user, ticket);
-    return { ...ticket, messages, availableActions: actions };
-  }
-
-  // ---------- 编辑 ----------
   async update(user: AuthUser, id: string, dto: UpdateTicketDto) {
-    const ticket = await this.loadOrThrow(id);
-    if (!this.canOperate(user, ticket)) throw new ForbiddenException('无权操作');
-    if (dto.title !== undefined && !dto.title?.trim()) throw new BadRequestException('标题不能为空');
-    if (dto.categoryName !== undefined && !dto.categoryId && !dto.categoryName?.trim()) throw new BadRequestException('分类名称不能为空');
-    await this.prisma.$transaction(async database => {
-      // Recheck ownership inside the same transaction as the change and audit.
-      const before = await database.ticket.findUnique({ where: { id } });
-      if (!before) throw new NotFoundException('工单不存在');
-      if (!this.canOperate(user, before)) throw new ForbiddenException('无权操作');
-      const references = [
-        { field: 'typeId', value: dto.typeId, find: () => database.ticketType.findUnique({ where: { id: dto.typeId! } }) },
-        { field: 'categoryId', value: dto.categoryId, find: () => database.category.findUnique({ where: { id: dto.categoryId! } }) },
-        { field: 'queueId', value: dto.queueId, find: () => database.queue.findUnique({ where: { id: dto.queueId! } }) },
-        { field: 'datacenterId', value: dto.datacenterId, find: () => database.datacenter.findUnique({ where: { id: dto.datacenterId! } }) },
-        { field: 'clusterId', value: dto.clusterId, find: () => database.cluster.findUnique({ where: { id: dto.clusterId! } }) },
-      ];
-      for (const reference of references) {
-        if (reference.value === undefined || reference.value === null) continue;
-        if (!reference.value || !(await reference.find())) throw new BadRequestException({ message: '属性选项不存在', code: 'INVALID_REFERENCE', field: reference.field });
-      }
-      const data = {
-        title: dto.title?.trim(), priority: dto.priority, typeId: dto.typeId,
-        categoryId: dto.categoryName !== undefined && !dto.categoryId
-          ? await this.resolveCategoryId(undefined, dto.categoryName, database) : dto.categoryId,
-        queueId: dto.queueId, datacenterId: dto.datacenterId, clusterId: dto.clusterId,
-        serialNumber: dto.serialNumber === undefined ? undefined : dto.serialNumber?.trim() || null,
-        contact: dto.contact === undefined ? undefined : normalizeContact(dto.contact),
-      };
-      const serialize = (value: unknown): string | null => value == null || value === Prisma.JsonNull ? null : typeof value === 'string' ? value : JSON.stringify(value);
-      const changes = Object.entries(data).filter(([field, value]) => value !== undefined && serialize(before[field as keyof typeof before]) !== serialize(value));
-      if (!changes.length) return;
-      await database.ticket.update({ where: { id }, data });
-      for (const [field, value] of changes) {
-        await database.ticketHistory.create({ data: {
-          ticketId: id, userId: user.id, action: 'UPDATE', field,
-          oldValue: serialize(before[field as keyof typeof before]), newValue: serialize(value),
-        } });
-      }
-    });
-    return this.findOne(user, id);
+    const updatedId = await this.editor.update(user, id, dto);
+    return this.findOne(user, updatedId);
   }
 
-  // ---------- 指派 ----------
+  // ---------- 生命周期 ----------
   async assign(user: AuthUser, id: string, dto: AssignDto) {
-    const ticket = await this.loadOrThrow(id);
-    if (!['NEW', 'REOPENED'].includes(ticket.status)) {
-      throw new BadRequestException(`当前状态 ${ticket.status} 不可指派`);
-    }
-    const assignee = await this.prisma.user.findUnique({
-      where: { id: dto.assigneeId },
-    });
-    if (!assignee) throw new BadRequestException('指派对象不存在');
-
-    await this.prisma.ticket.update({
-      where: { id },
-      data: {
-        assigneeId: dto.assigneeId,
-        queueId: dto.queueId ?? ticket.queueId,
-        status: 'ASSIGNED',
-      },
-    });
-    await this.history(
-      id,
-      user.id,
-      'ASSIGN',
-      'assignee',
-      ticket.assigneeId,
-      dto.assigneeId,
-    );
-    await this.history(id, user.id, 'TRANSITION', 'status', ticket.status, 'ASSIGNED');
-    await this.notifications.notify(dto.assigneeId, {
-      type: 'ASSIGNED',
-      title: `你被指派了工单：${ticket.ticketNo}`,
-      content: ticket.title,
-      ticketId: id,
-    });
-    return this.findOne(user, id);
+    const assignedId = await this.lifecycle.assign(user, id, dto);
+    return this.findOne(user, assignedId);
   }
 
-  // ---------- 状态流转 ----------
   async transition(user: AuthUser, id: string, action: TicketAction) {
-    const ticket = await this.loadOrThrow(id);
-    const to = this.workflow.resolveTransition(action, ticket.status, user, ticket);
-
-    const data: Prisma.TicketUpdateInput = { status: to };
-    const now = new Date();
-    // 计时起点在建单，这里只负责「暂停/恢复/重开」三种对时钟的影响
-    let responseDue = ticket.firstResponseDueAt;
-    let resolveDue = ticket.slaDueAt;
-    let reschedule = false;
-
-    if (to === 'PENDING') {
-      // 挂起：记下暂停起点，把两个到期任务撤掉，时钟就停了
-      data.holdStartedAt = now;
-      await this.sla.cancel(id);
-    } else if (ticket.status === 'PENDING' && ticket.holdStartedAt) {
-      // 恢复：把这段暂停时长整体加回到两个截止时刻上，等价于时钟从未走过
-      const paused = now.getTime() - ticket.holdStartedAt.getTime();
-      data.holdStartedAt = null;
-      data.holdMs = { increment: paused };
-      if (responseDue && !ticket.firstResponseAt) {
-        responseDue = new Date(responseDue.getTime() + paused);
-        data.firstResponseDueAt = responseDue;
-      }
-      if (resolveDue) {
-        resolveDue = new Date(resolveDue.getTime() + paused);
-        data.slaDueAt = resolveDue;
-      }
-      reschedule = true;
-    } else if (to === 'REOPENED') {
-      // 重开：旧的解决时限早就过期了，继续用它等于永远超时。按类型重新给一档
-      const sla = await this.slaOf(ticket.typeId);
-      resolveDue = new Date(now.getTime() + sla.resolveMin * 60_000);
-      data.slaDueAt = resolveDue;
-      reschedule = true;
-    }
-
-    if (to === 'CLOSED') data.closedAt = now;
-
-    // 乐观并发：状态从读取到写入之间若被并发流转，updateMany 命中 0 行，
-    // 拒绝重放（避免双写历史、双加暂停时长、重复调度 SLA）。
-    const updated = await this.prisma.ticket.updateMany({
-      where: { id, status: ticket.status },
-      data,
-    });
-    if (updated.count === 0)
-      throw new ConflictException('工单状态已被其他人变更，请刷新后重试');
-    await this.history(id, user.id, 'TRANSITION', 'status', ticket.status, to);
-
-    // SLA 任务调度 / 取消
-    if (['RESOLVED', 'CLOSED', 'CANCELLED'].includes(to)) {
-      await this.sla.cancel(id);
-    } else if (reschedule) {
-      if (!ticket.firstResponseAt) {
-        await this.sla.schedule(id, 'response', responseDue);
-      }
-      await this.sla.schedule(id, 'resolve', resolveDue);
-    }
-
-    // 状态变更通知
-    await this.notifyTransition(user, ticket, to);
-    return this.findOne(user, id);
-  }
-
-  private async notifyTransition(
-    user: AuthUser,
-    ticket: { id: string; ticketNo: string; title: string; requesterId: string; assigneeId: string | null },
-    to: TicketStatus,
-  ) {
-    const base = { ticketId: ticket.id, content: ticket.title };
-    const notify = (uid: string | null, type: string, title: string) =>
-      uid && uid !== user.id
-        ? this.notifications.notify(uid, { type, title, ...base })
-        : undefined;
-
-    if (to === 'RESOLVED') {
-      await notify(ticket.requesterId, 'RESOLVED', `工单已处理待验收：${ticket.ticketNo}`);
-    } else if (to === 'CLOSED') {
-      await notify(ticket.assigneeId, 'CLOSED', `工单已关闭：${ticket.ticketNo}`);
-    } else if (to === 'REOPENED') {
-      await notify(ticket.assigneeId, 'REOPENED', `工单被重新打开：${ticket.ticketNo}`);
-    } else if (to === 'CANCELLED') {
-      await notify(ticket.assigneeId, 'CANCELLED', `工单被取消：${ticket.ticketNo}`);
-    }
-
-    // 关注人需要知晓生命周期变化；提单人与主处理人已由上面的精确规则覆盖。
-    const participantIds = await this.participantIds(ticket.id);
-    await this.notifyMany(
-      participantIds,
-      user.id,
-      'MESSAGE',
-      `工单状态已更新：${ticket.ticketNo}`,
-      ticket.title,
-      ticket.id,
-    );
-  }
-
-  private async participantIds(ticketId: string, role?: 'COLLABORATOR' | 'FOLLOWER') {
-    const participants = await this.prisma.ticketParticipant.findMany({
-      where: { ticketId, ...(role ? { role } : {}) },
-      select: { userId: true },
-    });
-    return participants.map((participant) => participant.userId);
-  }
-
-  private async notifyMany(
-    ids: string[],
-    actorId: string,
-    type: string,
-    title: string,
-    content: string,
-    ticketId: string,
-  ) {
-    await Promise.all(
-      [...new Set(ids)]
-        .filter((id) => id !== actorId)
-        .map((id) =>
-          this.notifications.notify(id, { type, title, content, ticketId }),
-        ),
-    );
+    const transitionedId = await this.lifecycle.transition(user, id, action);
+    return this.findOne(user, transitionedId);
   }
 
   // ---------- 消息 ----------
-  /**
-   * 编辑器是「先传图、后发消息」：附件上传时还没有 messageId，消息落库后
-   * 才能判断它属于公开回复还是内部备注。这里按正文引用把本人尚未归属消息
-   * 的附件绑定到新消息，附件可见性就能直接复用消息的 isInternal。
-   *
-   * 必须与消息写入共用同一个事务：否则消息已提交、绑定尚未提交的窗口里，
-   * 正文里的图片仍处于未绑定状态，非上传者/内部成员会看不到它；绑定与消息
-   * 一起提交后，可见性直接由消息的 isInternal 决定。
-   */
-  private async linkReferencedAttachments(
-    db: Prisma.TransactionClient,
-    ticketId: string,
-    messageId: string,
-    body: string,
-    uploaderId: string,
-  ) {
-    const ids = [...referencedAttachmentIds(body)];
-    if (!ids.length) return;
-    // 旧流程可能先按草稿上传（ticketId 为空）再把图片粘进回复；这里先把本人
-    // 仍处于草稿状态的引用附件挂到当前工单，下一句才能绑定 messageId。
-    await db.ticketAttachment.updateMany({
-      where: { id: { in: ids }, uploaderId, ticketId: null, messageId: null },
-      data: { ticketId },
-    });
-    await db.ticketAttachment.updateMany({
-      where: { id: { in: ids }, ticketId, uploaderId, messageId: null },
-      data: { messageId },
-    });
+  addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
+    return this.messaging.addMessage(user, id, dto);
   }
 
-  async addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
-    const ticket = await this.prisma.ticket.findUnique({
-      where: { id },
-      include: { participants: true },
-    });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    const canComment = this.canOperate(user, ticket) || this.isCollaborator(user, ticket);
-    if (!canComment) throw new ForbiddenException('无权回复');
-
-    const isInternal = !!dto.isInternal && this.isInternalParticipant(user, ticket);
-    const allowedMentionIds = new Set([
-      ticket.requesterId,
-      ...(ticket.assigneeId ? [ticket.assigneeId] : []),
-      ...ticket.participants.map((participant) => participant.userId),
-    ]);
-    const mentionUserIds = [
-      ...new Set((dto.mentionUserIds ?? []).filter((id) => id !== user.id)),
-    ];
-    if (mentionUserIds.some((mentionId) => !allowedMentionIds.has(mentionId))) {
-      throw new BadRequestException('只能提及本工单的相关人员');
-    }
-
-    // 消息与附件绑定同一事务提交：内部/公开的可见性从落库那一刻起就是确定的。
-    const message = await this.prisma.$transaction(async (tx) => {
-      const created = await tx.ticketMessage.create({
-        data: {
-          ticketId: id,
-          authorId: user.id,
-          type: isInternal ? 'NOTE' : 'REPLY',
-          isInternal,
-          contentType: dto.contentType ?? 'text/html',
-          body: cleanHtml(dto.body),
-          mentions: mentionUserIds.length
-            ? { createMany: { data: mentionUserIds.map((userId) => ({ userId })) } }
-            : undefined,
-        },
-        include: {
-          author: { select: AUTHOR_SELECT },
-          mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
-        },
-      });
-      await this.linkReferencedAttachments(tx, id, created.id, created.body, user.id);
-      return created;
-    });
-    await this.history(id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
-
-    // 首次由非提单人发出的公开回复 → 记 first_response，并撤掉响应超时任务
-    if (!ticket.firstResponseAt && !isInternal && ticket.requesterId !== user.id) {
-      await this.prisma.ticket.update({
-        where: { id },
-        data: { firstResponseAt: new Date() },
-      });
-      await this.sla.cancel(id, 'response');
-    }
-
-    const collaboratorIds = ticket.participants
-      .filter((participant) => participant.role === 'COLLABORATOR')
-      .map((participant) => participant.userId);
-    const followerIds = ticket.participants
-      .filter((participant) => participant.role === 'FOLLOWER')
-      .map((participant) => participant.userId);
-    if (isInternal) {
-      // 内部讨论不泄露给提单人和仅关注者。
-      await this.notifyMany(
-        [ticket.assigneeId, ...collaboratorIds].filter(Boolean) as string[],
-        user.id,
-        'MESSAGE',
-        `工单有新的内部讨论：${ticket.ticketNo}`,
-        ticket.title,
-        id,
-      );
-    } else {
-      await this.notifyMany(
-        [ticket.requesterId, ticket.assigneeId, ...collaboratorIds, ...followerIds].filter(
-          Boolean,
-        ) as string[],
-        user.id,
-        'MESSAGE',
-        `工单有新回复：${ticket.ticketNo}`,
-        ticket.title,
-        id,
-      );
-    }
-    await this.notifyMany(
-      mentionUserIds,
-      user.id,
-      'MENTION',
-      `有人在工单中提及你：${ticket.ticketNo}`,
-      ticket.title,
-      id,
-    );
-    return message;
+  updateMessage(
+    user: AuthUser,
+    ticketId: string,
+    messageId: string,
+    dto: CreateMessageDto,
+  ) {
+    return this.messaging.updateMessage(user, ticketId, messageId, dto);
   }
 
   // ---------- 协作成员 / 关注人 ----------
@@ -816,177 +103,20 @@ export class TicketsService {
     return ticket.participants;
   }
 
-  async participantCandidates(user: AuthUser, id: string) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManageParticipants(user, ticket)) {
-      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
-    }
-    return this.prisma.user.findMany({
-      where: { status: 'ACTIVE' },
-      select: PARTICIPANT_USER_SELECT,
-      orderBy: { name: 'asc' },
-    });
+  participantCandidates(user: AuthUser, id: string) {
+    return this.participantsDomain.participantCandidates(user, id);
   }
 
-  async addParticipant(user: AuthUser, id: string, dto: AddParticipantDto) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManageParticipants(user, ticket)) {
-      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
-    }
-    if (dto.userId === ticket.requesterId || dto.userId === ticket.assigneeId) {
-      throw new BadRequestException('提单人和主处理人已自动拥有工单访问权限');
-    }
-    const participant = await this.prisma.user.findFirst({
-      where: { id: dto.userId, status: 'ACTIVE' },
-    });
-    if (!participant) throw new BadRequestException('协作对象不存在或已禁用');
-    const result = await this.prisma.ticketParticipant.upsert({
-      where: { ticketId_userId: { ticketId: id, userId: dto.userId } },
-      update: { role: dto.role, addedById: user.id },
-      create: { ticketId: id, userId: dto.userId, role: dto.role, addedById: user.id },
-      include: { user: { select: PARTICIPANT_USER_SELECT } },
-    });
-    await this.history(id, user.id, 'UPDATE', 'participant', null, `${dto.role}:${dto.userId}`);
-    await this.notifications.notify(dto.userId, {
-      type: 'ASSIGNED',
-      title:
-        dto.role === 'COLLABORATOR'
-          ? `你已加入工单协作：${ticket.ticketNo}`
-          : `你正在关注工单：${ticket.ticketNo}`,
-      content: ticket.title,
-      ticketId: id,
-    });
-    return result;
+  addParticipant(user: AuthUser, id: string, dto: AddParticipantDto) {
+    return this.participantsDomain.addParticipant(user, id, dto);
   }
 
-  async removeParticipant(user: AuthUser, id: string, userId: string) {
-    const ticket = await this.prisma.ticket.findUnique({ where: { id } });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManageParticipants(user, ticket)) {
-      throw new ForbiddenException('仅主处理人、主管或管理员可管理协作成员');
-    }
-    await this.prisma.ticketParticipant.deleteMany({ where: { ticketId: id, userId } });
-    await this.history(id, user.id, 'UPDATE', 'participant', userId, null);
-    return { ok: true };
+  removeParticipant(user: AuthUser, id: string, userId: string) {
+    return this.participantsDomain.removeParticipant(user, id, userId);
   }
 
-  // ---------- 编辑消息（作者本人或 admin/supervisor）----------
-  async updateMessage(
-    user: AuthUser,
-    ticketId: string,
-    messageId: string,
-    dto: CreateMessageDto,
-  ) {
-    const ticket = await this.prisma.ticket.findUnique({
-      where: { id: ticketId },
-      include: { participants: true },
-    });
-    if (!ticket) throw new NotFoundException('工单不存在');
-    // 写权限必须建立在「当前仍能查看该工单」之上：被 removeParticipant 移出的
-    // 协作成员不能再改写自己的历史消息，否则移除协作只挡住了新回复。
-    // 这里是快速失败；真正写库前会在同一事务里再确认一次，避免读取与写入之间
-    // 被移出协作。
-    if (!this.canView(user, ticket)) {
-      throw new ForbiddenException('无权查看该工单');
-    }
-
-    // 编辑同样可能引入新的附件引用，更新正文与绑定必须原子提交。
-    const updated = await this.prisma.$transaction(async (tx) => {
-      const current = await tx.ticket.findUnique({
-        where: { id: ticketId },
-        include: { participants: true },
-      });
-      if (!current) throw new NotFoundException('工单不存在');
-      if (!this.canView(user, current)) {
-        throw new ForbiddenException('无权查看该工单');
-      }
-      const isStaff =
-        user.roles.includes('admin') || user.roles.includes('supervisor');
-      const canSeeInternal = this.isInternalParticipant(user, current);
-
-      // 把编辑权限下推到消息查询里：先取正文、再在内存里判断，会让无权用户
-      // 触发一次内部备注正文的读取，也容易在后续改动中漏掉校验。
-      const authorized = await tx.ticketMessage.findFirst({
-        where: {
-          id: messageId,
-          ticketId,
-          ...(isStaff ? {} : { authorId: user.id }),
-          ...(canSeeInternal ? {} : { isInternal: false }),
-        },
-        select: { id: true },
-      });
-      if (!authorized) {
-        // 只在确认存在后返回 403，不把无权访问的消息正文带出来。
-        const meta = await tx.ticketMessage.findFirst({
-          where: { id: messageId, ticketId },
-          select: { authorId: true, isInternal: true },
-        });
-        if (!meta) throw new NotFoundException('消息不存在');
-        if (meta.authorId !== user.id && !isStaff) {
-          throw new ForbiddenException('只能编辑自己的消息');
-        }
-        if (meta.isInternal && !canSeeInternal) {
-          throw new ForbiddenException('无权编辑内部备注');
-        }
-        throw new ForbiddenException('无权编辑该消息');
-      }
-
-      const next = await tx.ticketMessage.update({
-        where: { id: authorized.id },
-        data: { body: cleanHtml(dto.body) },
-        include: { author: { select: AUTHOR_SELECT } },
-      });
-      await this.linkReferencedAttachments(tx, ticketId, messageId, next.body, user.id);
-      return next;
-    });
-    await this.history(ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
-    return updated;
-  }
-
-  // ---------- 删除（管理员 / 提单人本人）----------
-  async remove(user: AuthUser, id: string) {
-    const ticket = await this.loadOrThrow(id);
-    // 提单人可以撤掉自己提的单；别人的单只有管理员能删
-    if (!user.roles.includes('admin') && ticket.requesterId !== user.id) {
-      throw new ForbiddenException('只能删除自己提交的工单');
-    }
-
-    // 对象存储不能在数据库事务里删：先把待删 key 和业务删除写进同一事务。
-    // 工单删除会级联删除消息、附件记录和历史；这些记录与 outbox 一起原子提交，
-    // 不会出现「记录删了但 key 丢了」。事务提交后再立即尝试删对象，失败由
-    // 持久化 outbox 重试并告警。
-    await this.prisma.$transaction(async (tx) => {
-      const attachments = await tx.ticketAttachment.findMany({
-        where: { ticketId: id },
-        select: { objectKey: true },
-      });
-      await this.attachments.queueObjectDeletions(
-        tx,
-        attachments.map((attachment) => attachment.objectKey),
-        'TICKET_DELETED',
-      );
-      await tx.ticket.delete({ where: { id } });
-    });
-
-    try {
-      await this.sla.cancel(id);
-    } finally {
-      // 只触发后台清理，不把全局 outbox 的 S3 删除串行压在删除请求上；
-      // outbox 已经和业务删除一起提交，慢/坏的对象由定时任务继续重试。
-      void this.attachments.processPendingDeletions().catch(() => undefined);
-    }
-    return { ok: true };
-  }
-
-  async history_(user: AuthUser, id: string) {
-    // 统一复用详情的可见性判定，协作成员也可查看审计历史。
-    await this.findOne(user, id);
-    return this.prisma.ticketHistory.findMany({
-      where: { ticketId: id },
-      include: { user: { select: { id: true, name: true } } },
-      orderBy: { createdAt: 'asc' },
-    });
+  // ---------- 删除 ----------
+  remove(user: AuthUser, id: string) {
+    return this.deletion.remove(user, id);
   }
 }

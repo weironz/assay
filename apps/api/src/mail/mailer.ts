@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import * as nodemailer from 'nodemailer';
+import { getConfig } from '../config';
 
 /**
  * 发信底座（不依赖 Nest DI，供 auth.ts 与 MailService 共用）。
@@ -11,26 +12,17 @@ import * as nodemailer from 'nodemailer';
 
 type Provider = 'aliyun' | 'smtp' | 'none';
 
-function detectProvider(): Provider {
-  const explicit = (process.env.MAIL_PROVIDER || '').toLowerCase();
-  if (explicit === 'aliyun' || explicit === 'smtp' || explicit === 'none') {
-    return explicit;
-  }
-  if (process.env.ALIYUN_DM_ACCESS_KEY_ID) return 'aliyun';
-  if (process.env.SMTP_HOST) return 'smtp';
-  return 'none';
-}
-
-const provider = detectProvider();
+const mailConfig = getConfig().mail;
+const provider: Provider = mailConfig.provider;
 
 let transporter: nodemailer.Transporter | undefined;
 if (provider === 'smtp') {
   transporter = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT) || 587,
-    secure: (process.env.SMTP_SECURE || 'false') === 'true',
-    auth: process.env.SMTP_USER
-      ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS }
+    host: mailConfig.smtp.host,
+    port: mailConfig.smtp.port,
+    secure: mailConfig.smtp.secure,
+    auth: mailConfig.smtp.user
+      ? { user: mailConfig.smtp.user, pass: mailConfig.smtp.pass }
       : undefined,
   });
 }
@@ -40,11 +32,7 @@ export const mailEnabled = provider !== 'none';
 
 /** 前端站点地址（邮件里链接用） */
 export function appUrl(): string {
-  return (
-    process.env.APP_URL ||
-    (process.env.AUTH_TRUST_ORIGINS || '').split(',')[0] ||
-    'http://localhost:5173'
-  );
+  return getConfig().app.mailLinkUrl;
 }
 
 // ---------- 阿里云 DirectMail ----------
@@ -70,12 +58,12 @@ async function sendViaAliyun(
   subject: string,
   html: string,
 ): Promise<void> {
-  const ak = process.env.ALIYUN_DM_ACCESS_KEY_ID!;
-  const sk = process.env.ALIYUN_DM_ACCESS_KEY_SECRET!;
-  const account = process.env.ALIYUN_DM_ACCOUNT || 'noreply@mail.cloudcele.com';
-  const region = process.env.ALIYUN_DM_REGION || 'cn-hangzhou';
-  const endpoint =
-    process.env.ALIYUN_DM_ENDPOINT || 'https://dm.aliyuncs.com/';
+  const aliyun = getConfig().mail.aliyun;
+  const ak = aliyun.accessKeyId!;
+  const sk = aliyun.accessKeySecret!;
+  const account = aliyun.account;
+  const region = aliyun.region;
+  const endpoint = aliyun.endpoint;
 
   const params: Record<string, string> = {
     Format: 'JSON',
@@ -95,7 +83,7 @@ async function sendViaAliyun(
     Subject: subject,
     HtmlBody: html,
   };
-  const alias = process.env.ALIYUN_DM_FROM_ALIAS;
+  const alias = getConfig().mail.aliyun.fromAlias;
   if (alias) params.FromAlias = alias;
 
   const canonical = Object.keys(params)
@@ -134,7 +122,7 @@ export async function sendMail(
     return;
   }
   await transporter!.sendMail({
-    from: process.env.SMTP_FROM || '工单系统 <no-reply@example.com>',
+    from: getConfig().mail.smtp.from,
     to,
     subject,
     html,

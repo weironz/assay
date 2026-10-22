@@ -7,6 +7,7 @@ const env = {
   DIRECTORY_BASE_DN: 'DC=example,DC=test', DIRECTORY_DOMAIN: 'EXAMPLE.TEST',
   DIRECTORY_BIND_DN: 'CN=reader,DC=example,DC=test', DIRECTORY_BIND_PASSWORD_FILE: '/private/password',
   DIRECTORY_CA_FILE: '/private/ca.crt', AUTH_TRUST_ORIGINS: 'https://assay.example.test', NODE_ENV: 'production',
+  AUTH_SECRET: 'assay-directory-test-only-strong-secret-a1b2c3d4e5f6',
 };
 test('local authentication is the default and AD configuration is independent of Samba/files', () => {
   assert.equal(readDirectorySettings({}), null);

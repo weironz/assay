@@ -7,6 +7,7 @@
 import { PayloadTooLargeException } from '@nestjs/common';
 import { diskStorage } from 'multer';
 import { tmpdir } from 'os';
+import { getConfig } from '../config';
 
 /**
  * 单个附件上限。
@@ -47,7 +48,7 @@ export const MAX_DAILY_UPLOAD_BYTES = MAX_DAILY_UPLOAD_MB * 1024 * 1024;
 export const DRAFT_TTL_HOURS = 24;
 
 /** 上传中转目录。留空则用系统临时目录 */
-export const UPLOAD_TMP_DIR = process.env.UPLOAD_TMP_DIR || '';
+export const UPLOAD_TMP_DIR = getConfig().files.uploadTmpDir;
 
 /**
  * 上传路由共用的 multer 配置（工单附件 + 业务附件），限额/临时目录只在这一处定义。

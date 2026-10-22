@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 require('reflect-metadata');
 const { ValidationPipe } = require('@nestjs/common');
 const { Prisma } = require('@prisma/client');
-const { TicketsService } = require('../dist/tickets/tickets.service');
+const { createTicketsService } = require('./tickets-service.fixture');
 const { UpdateTicketDto } = require('../dist/tickets/dto');
 
 const requester = { id: 'requester', roles: ['requester'], permissions: ['ticket:read', 'ticket:update'] };
@@ -40,7 +40,7 @@ function fixture({ failAudit = false } = {}) {
     try { return await operation(database); }
     catch (err) { ({ row, history, categories, writes } = snapshot); throw err; }
   } };
-  const service = new TicketsService(prisma, {}, {}, {});
+  const service = createTicketsService(prisma, {}, {}, {});
   // Exercise real update/ownership/reference/audit logic; projection is tested elsewhere.
   service.findOne = async () => structuredClone(row);
   return { service, row: () => row, history: () => history, categories: () => categories, writes: () => writes };

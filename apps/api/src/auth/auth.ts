@@ -5,7 +5,8 @@ import { twoFactor } from 'better-auth/plugins';
 import { constantTimeEqual } from 'better-auth/crypto';
 import { PrismaClient } from '@prisma/client';
 import { ConflictException } from '@nestjs/common';
-import { mailEnabled, mailTemplate, sendMail } from '../mail/mailer';
+import { mailTemplate, sendMail } from '../mail/mailer';
+import { getConfig } from '../config';
 import { authRedis } from './auth-redis';
 import { requireAuthSecret } from './auth-secret';
 import { enforceBetterAuthSensitiveStepUp } from './better-auth-step-up';
@@ -25,10 +26,8 @@ import { publicRegistrationBlocked, registrationEnabled } from './login-policy';
  * 默认：配置了发信服务就开启（否则会把所有人锁在门外）。
  * 可用 REQUIRE_EMAIL_VERIFICATION=true/false 显式覆盖。
  */
-const REQUIRE_EMAIL_VERIFICATION =
-  process.env.REQUIRE_EMAIL_VERIFICATION !== undefined
-    ? process.env.REQUIRE_EMAIL_VERIFICATION === 'true'
-    : mailEnabled;
+const config = getConfig();
+const REQUIRE_EMAIL_VERIFICATION = config.auth.requireEmailVerification;
 
 // better-auth 使用独立的 PrismaClient（在 Nest DI 之外，模块加载时即需就绪）。
 // 由 AuthLifecycleService 在应用关闭时 $disconnect()，避免 SIGTERM 时连接泄漏；
@@ -42,12 +41,10 @@ const directory = directoryPlugin(prisma);
 // Redis 二级存储：会话数据存 Redis，可即时撤销（删 key 即失效）
 export const auth = betterAuth({
   appName: 'Greenstor Assay',
-  baseURL: process.env.AUTH_BASE_URL || 'http://localhost:3000',
+  baseURL: config.auth.baseUrl,
   basePath: '/api/auth',
   secret: requireAuthSecret(),
-  trustedOrigins: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(
-    ',',
-  ),
+  trustedOrigins: config.auth.trustedOrigins,
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
   plugins: [twoFactor({ issuer: 'Greenstor Assay', allowPasswordless: true }), oidcPlugin(oidcSettings, prisma), directory, unifiedLoginPlugin(prisma, directory.endpoints!.directorySignIn)],
   account: { storeStateStrategy: 'database', accountLinking: { enabled: false } },

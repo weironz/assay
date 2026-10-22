@@ -10,9 +10,10 @@ import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
 import { isRasterImageMime } from '../attachments/limits';
 import {
-  isReferencedByPublicMessage,
+  isSharableInlineAttachment,
   rewriteAttachmentUrls,
-} from '../attachments/visibility';
+} from '../attachments/rules';
+import { canOperateTicket } from '../tickets/visibility';
 import { CreateTicketShareDto } from './ticket-shares.dto';
 
 type ActiveShare = {
@@ -28,19 +29,6 @@ export class TicketSharesService {
     private readonly prisma: PrismaService,
     @Inject(STORAGE_DRIVER) private readonly storage: StorageDriver,
   ) {}
-
-  /**
-   * 分享会把公开讨论交给持有链接的人，不能因为“被关注”或“全局只读”而间接扩权。
-   * 只允许提单人、当前处理人或管理岗位创建/撤销。
-   */
-  private canManage(user: AuthUser, ticket: { requesterId: string; assigneeId: string | null }) {
-    return (
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      ticket.requesterId === user.id ||
-      ticket.assigneeId === user.id
-    );
-  }
 
   private hash(value: string) {
     return createHash('sha256').update(value).digest('hex');
@@ -68,7 +56,9 @@ export class TicketSharesService {
       select: { requesterId: true, assigneeId: true },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManage(user, ticket)) throw new ForbiddenException('无权管理工单分享链接');
+    // 分享会把公开讨论交给持有链接的人：边界与工单写操作一致（canOperateTicket），
+    // 被关注或“全局只读”不能间接扩权。
+    if (!canOperateTicket(user, ticket)) throw new ForbiddenException('无权管理工单分享链接');
 
     const shares = await this.prisma.ticketShare.findMany({
       where: { ticketId },
@@ -84,7 +74,7 @@ export class TicketSharesService {
       select: { requesterId: true, assigneeId: true },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManage(user, ticket)) throw new ForbiddenException('无权创建工单分享链接');
+    if (!canOperateTicket(user, ticket)) throw new ForbiddenException('无权创建工单分享链接');
 
     const token = `shr_${randomBytes(32).toString('base64url')}`;
     const share = await this.prisma.ticketShare.create({
@@ -118,7 +108,7 @@ export class TicketSharesService {
       select: { requesterId: true, assigneeId: true },
     });
     if (!ticket) throw new NotFoundException('工单不存在');
-    if (!this.canManage(user, ticket)) throw new ForbiddenException('无权管理工单分享链接');
+    if (!canOperateTicket(user, ticket)) throw new ForbiddenException('无权管理工单分享链接');
 
     const result = await this.prisma.ticketShare.updateMany({
       where: { id: shareId, ticketId, revokedAt: null },
@@ -224,30 +214,13 @@ export class TicketSharesService {
     if (!attachment || !isRasterImageMime(attachment.mime)) {
       throw new NotFoundException('附件不存在');
     }
-    // 查询已排除空 messageId，这里再兜一层，避免未来改查询时把草稿图放出去。
-    const messageId = attachment.messageId;
-    if (!messageId) {
-      throw new NotFoundException('附件不存在');
-    }
-
-    // 绑定关系优先于正文引用：内部备注的附件即使被某条公开回复引用了下载地址，
-    // 也不能通过分享链接解禁。消息缺失或跨工单的脏数据同样按内部材料处理。
-    const boundMessage = await this.prisma.ticketMessage.findFirst({
-      where: { id: messageId, ticketId: share.ticketId },
-      select: { isInternal: true },
-    });
-    if (!boundMessage || boundMessage.isInternal) {
-      throw new NotFoundException('附件不存在');
-    }
-
-    // 再确认这条公开消息的正文确实引用了它：绑定到公开消息但已从正文移除的
-    // 附件不应继续通过旧链接下载。该查询显式排除内部备注。
+    // 分享页与站内下载共用同一套放行规则（attachments/rules）：
+    // 绑定公开消息 + 公开正文确实引用。
     if (
-      !(await isReferencedByPublicMessage(
-        this.prisma,
-        share.ticketId,
-        attachmentId,
-      ))
+      !(await isSharableInlineAttachment(this.prisma, share.ticketId, {
+        id: attachmentId,
+        messageId: attachment.messageId,
+      }))
     ) {
       throw new NotFoundException('附件不存在');
     }

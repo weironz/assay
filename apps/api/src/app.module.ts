@@ -23,22 +23,32 @@ import { TicketSharesModule } from './ticket-shares/ticket-shares.module';
 import { HealthController } from './health/health.controller';
 import { SessionGuard } from './auth/session.guard';
 import { PermissionsGuard } from './auth/permissions.guard';
+import { getConfig, validateEnv } from './config';
+
+// 先加载 .env（ConfigModule.forRoot 会写入 process.env）再解析后续配置，
+// 保持 .env 与进程环境变量两种来源行为一致。
+const configModule = ConfigModule.forRoot({
+  isGlobal: true,
+  validate: validateEnv,
+});
+const redis = getConfig().redis;
 
 @Module({
   imports: [
     OperationsModule,
     SambaModule,
     FilesModule,
-    ConfigModule.forRoot({ isGlobal: true }),
+    // validate：启动期执行 zod schema 校验 + 生产敏感默认值检查。
+    configModule,
     // REDIS_URL 优先（可携带密码/TLS）；未设置时退回 HOST/PORT 组合。
     // 与 ioredis 约定一致：url 存在时 host/port 被忽略。
     BullModule.forRoot(
-      process.env.REDIS_URL
-        ? { connection: { url: process.env.REDIS_URL } }
+      redis.url
+        ? { connection: { url: redis.url } }
         : {
             connection: {
-              host: process.env.REDIS_HOST || 'redis',
-              port: Number(process.env.REDIS_PORT) || 6379,
+              host: redis.host,
+              port: redis.port,
             },
           },
     ),

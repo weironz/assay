@@ -5,6 +5,7 @@ import { APIError } from 'better-auth';
 import type { PrismaClient } from '@prisma/client';
 import { authRedis } from './auth-redis';
 import { renewExistingFileSession } from './web-session-scope';
+import { getConfig } from '../config';
 
 type EpochDb = Pick<PrismaClient, 'user' | '$queryRawUnsafe'> & Partial<Pick<PrismaClient, '$transaction'>>;
 type EpochSnapshot = { userId: string; epoch: number };
@@ -85,7 +86,7 @@ async function bootstrapDevelopmentTriggers(db: EpochDb): Promise<void> {
 
 export async function assertSessionEpochMigration(db: EpochDb): Promise<void> {
   if (!await hasSecurityTriggers(db)) {
-    if (process.env.NODE_ENV !== 'development') throw new Error('SESSION_EPOCH_MIGRATION_REQUIRED');
+    if (getConfig().nodeEnv !== 'development') throw new Error('SESSION_EPOCH_MIGRATION_REQUIRED');
     await bootstrapDevelopmentTriggers(db);
     if (!await hasSecurityTriggers(db)) throw new Error('SESSION_EPOCH_MIGRATION_REQUIRED');
   }

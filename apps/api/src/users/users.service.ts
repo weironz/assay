@@ -13,12 +13,14 @@ import { assertCanLoseActiveAdmin } from '../auth/last-admin';
 import { assertUserDeletable } from '../auth/user-deletion';
 import { CreateUserDto, UpdateUserDto } from './dto';
 import { assertSessionEpochMigration } from '../auth/session-epoch';
+import { getConfig } from '../config';
 
 @Injectable()
 export class UsersService {
   constructor(private readonly prisma: PrismaService) {}
 
   private serialize(user: any) {
+    const directoryAuth = getConfig().directory.authEnabled;
     return {
       id: user.id,
       email: user.email,
@@ -30,11 +32,11 @@ export class UsersService {
         user.roles
           ?.map((ur: any) => ur.role.name)
           .filter(isSystemRoleName) ?? [],
-      directoryRoles: process.env.DIRECTORY_AUTH_ENABLED === 'true' ? user.directoryIdentity?.roleNames?.filter(isSystemRoleName) ?? [] : [],
+      directoryRoles: directoryAuth ? user.directoryIdentity?.roleNames?.filter(isSystemRoleName) ?? [] : [],
       directoryAccount: user.directoryIdentity?.accountName || null,
       localPassword: user.accounts?.some((a: any) => a.providerId === 'credential') ?? true,
-      canSetLocalPassword: process.env.DIRECTORY_AUTH_ENABLED !== 'true',
-      directoryLogin: process.env.DIRECTORY_AUTH_ENABLED === 'true' && !!user.directoryIdentity,
+      canSetLocalPassword: !directoryAuth,
+      directoryLogin: directoryAuth && !!user.directoryIdentity,
       createdAt: user.createdAt,
     };
   }
@@ -149,7 +151,7 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({ where: { id } });
     if (!user) throw new NotFoundException('用户不存在');
     const directoryIdentity = await this.prisma.directoryIdentity.findUnique({ where: { userId: id } });
-    if (process.env.DIRECTORY_AUTH_ENABLED === 'true' && directoryIdentity)
+    if (getConfig().directory.authEnabled && directoryIdentity)
       throw new BadRequestException('此员工使用公司账号登录，密码由 AD 管理');
     // 用 better-auth 内部哈希器，保证与登录校验一致
     const ctx = await auth.$context;

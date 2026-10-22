@@ -1,3 +1,5 @@
+// 必须第一行：在任何业务模块求值前加载 .env（DATABASE_URL 等供顶层快照使用）。
+import './config/load-env';
 import { PrismaClient } from '@prisma/client';
 import {
   SYSTEM_ROLE_DESCRIPTIONS,

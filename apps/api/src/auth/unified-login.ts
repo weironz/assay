@@ -7,6 +7,7 @@ import {
   signInEmail,
 } from "better-auth/api";
 import { z } from "zod";
+import { getConfig } from "../config";
 import { directorySettings } from "./directory-runtime";
 import {
   LoginDirectoryUnavailable,
@@ -37,11 +38,7 @@ export function unifiedLoginPlugin(
   const endpoint = (path: "/sign-in/unified" | "/sign-in/local-admin") =>
     createAuthEndpoint(path, { method: "POST", body }, async (ctx) => {
       const origin = ctx.headers?.get("origin");
-      const origins = (
-        process.env.AUTH_TRUST_ORIGINS || "http://localhost:5173"
-      )
-        .split(",")
-        .map((value) => value.trim());
+      const origins = getConfig().auth.trustedOrigins;
       if (
         !origin ||
         !origins.includes(origin) ||

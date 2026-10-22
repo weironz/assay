@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
+import { ticketVisibilityWhere } from '../tickets/visibility';
 
 const DONE = ['RESOLVED', 'CLOSED', 'CANCELLED'];
 const STATUSES = [
@@ -15,19 +16,9 @@ const STATUSES = [
 class StatsController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 必须与 TicketsService.visibilityFilter 保持一致：本人提单/被指派的工单，
-  // 以及被邀请为协作成员/关注者的工单，都要计入仪表盘统计。
+  // 可见性口径统一来自 tickets/visibility.ts（本人关联或被邀请协作的工单）。
   private scope(user: AuthUser): Prisma.TicketWhereInput {
-    if (user.permissions.includes('ticket:read:all')) {
-      return {};
-    }
-    return {
-      OR: [
-        { requesterId: user.id },
-        { assigneeId: user.id },
-        { participants: { some: { userId: user.id } } },
-      ],
-    };
+    return ticketVisibilityWhere(user);
   }
 
   @Get('overview')

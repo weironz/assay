@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
 import { authPrisma } from './auth';
 import { authRedis, waitForAuthRedis } from './auth-redis';
+import { getConfig } from '../config';
 
 /**
  * better-auth 的两个游离客户端（auth.ts 的 PrismaClient、auth-redis.ts 的
@@ -15,7 +16,7 @@ export class AuthLifecycleService implements OnApplicationBootstrap, OnApplicati
     const ready = await waitForAuthRedis();
     if (ready) return;
     const message = 'Redis 启动探测失败：better-auth 的会话、限流与安全验证计数不可用';
-    if (process.env.NODE_ENV === 'production') throw new Error(message);
+    if (getConfig().isProduction) throw new Error(message);
     this.logger.error(`${message}（非生产仅告警，Redis 恢复后功能即恢复）`);
   }
 

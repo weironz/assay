@@ -31,11 +31,18 @@ import {
   processObjectDeletions,
 } from './deletion-queue';
 
-type TicketAccess = {
-  requesterId: string;
-  assigneeId: string | null;
-  participants: { userId: string; role: string }[];
-};
+import {
+  canViewTicket,
+  TicketRoleAccess as TicketAccess,
+} from '../tickets/visibility';
+import {
+  attachmentListWhere,
+  attachmentRowVisible,
+  canUploadToTicket,
+  isAttachmentDownloadable,
+  isUnboundVisible,
+  messageBindingIssue,
+} from './rules';
 
 /**
  * 上传中的对象先登记为「待删除」，正常落库后在同一事务里撤销登记。
@@ -66,40 +73,14 @@ export class AttachmentsService {
   }
 
   private assertCanView(user: AuthUser, ticket: TicketAccess) {
-    if (user.permissions.includes('ticket:read:all')) return;
-    if (
-      ticket.requesterId !== user.id &&
-      ticket.assigneeId !== user.id &&
-      !ticket.participants.some((participant) => participant.userId === user.id)
-    ) {
+    if (!canViewTicket(user, ticket)) {
       throw new ForbiddenException('无权访问该工单附件');
     }
   }
 
-  /**
-   * 谁能看内部备注。与 TicketsService.isInternalParticipant 保持一致：
-   * 管理岗、当前处理人、协作成员。仅有 ticket:read:all 的只读账号也不行。
-   */
-  private isInternalParticipant(user: AuthUser, ticket: TicketAccess) {
-    return (
-      user.roles.includes('admin') ||
-      user.roles.includes('supervisor') ||
-      ticket.assigneeId === user.id ||
-      ticket.participants.some(
-        (participant) =>
-          participant.userId === user.id && participant.role === 'COLLABORATOR',
-      )
-    );
-  }
-
   /** 上传是写操作，不能因“查看全部”而获得对他人工单上传附件的能力。 */
   private assertCanOperate(user: AuthUser, ticket: TicketAccess) {
-    const staff = user.roles.includes('admin') || user.roles.includes('supervisor');
-    const collaborator = ticket.participants.some(
-      (participant) =>
-        participant.userId === user.id && participant.role === 'COLLABORATOR',
-    );
-    if (!staff && !collaborator && ticket.requesterId !== user.id && ticket.assigneeId !== user.id) {
+    if (!canUploadToTicket(user, ticket)) {
       throw new ForbiddenException('无权向该工单上传附件');
     }
   }
@@ -114,14 +95,17 @@ export class AttachmentsService {
     ticketId: string,
     messageId: string,
   ) {
-    const message = await this.prisma.ticketMessage.findFirst({
-      where: { id: messageId, ticketId },
-      select: { isInternal: true },
-    });
-    if (!message) {
+    const issue = await messageBindingIssue(
+      this.prisma,
+      user,
+      ticket,
+      ticketId,
+      messageId,
+    );
+    if (issue === 'FOREIGN_MESSAGE') {
       throw new BadRequestException('附件关联的消息不属于该工单');
     }
-    if (message.isInternal && !this.isInternalParticipant(user, ticket)) {
+    if (issue === 'INTERNAL_MESSAGE') {
       throw new ForbiddenException('无权向内部备注上传附件');
     }
   }
@@ -385,81 +369,20 @@ export class AttachmentsService {
     }
   }
 
-  /**
-   * 未绑定消息的附件对非内部成员是否可见。
-   *
-   * 编辑器是「先传图、再发消息」：图片上传时 messageId 还是空的，消息落库后才
-   * 由 TicketsService.linkReferencedAttachments 绑定。这个窗口期只有上传者本人
-   * 能看自己的草稿图；历史数据里的正文引用已在迁移中回填 messageId，不再用
-   * 「公开正文引用过」作为放行条件——否则猜到附件 ID 的人就能绕过消息可见性。
-   * 内部参与方不经过这里，直接按工单可见性放行。
-   */
-  private unboundVisible(
-    attachment: { id: string; uploaderId: string },
-    user: AuthUser,
-  ) {
-    return attachment.uploaderId === user.id;
-  }
-
   async list(user: AuthUser, ticketId: string) {
     const ticket = await this.loadTicketForAccess(ticketId);
     this.assertCanView(user, ticket);
-    const internal = this.isInternalParticipant(user, ticket);
     const rows = await this.prisma.ticketAttachment.findMany({
-      where: {
-        ticketId,
-        // 非内部成员：已绑定消息的按消息可见性取；未绑定的只返回自己上传的草稿。
-        ...(internal
-          ? {}
-          : {
-              OR: [
-                {
-                  messageId: { not: null },
-                  message: { isInternal: false, ticketId },
-                },
-                { messageId: null, uploaderId: user.id },
-              ],
-            }),
-      },
+      where: attachmentListWhere(user, ticket, ticketId),
       // 带上消息可见性，内存兜底过滤才能真正判断已绑定附件的归属。
       include: { message: { select: { isInternal: true } } },
       orderBy: { createdAt: 'asc' },
     });
     return rows
-      // 查询条件已是最终口径，这里再兜一层，避免将来改查询时把未绑定记录或
-      // 绑定到内部备注的记录带出去。
-      .filter((row) => {
-        if (internal) return true;
-        if (row.messageId === null) return this.unboundVisible(row, user);
-        return row.message?.isInternal === false;
-      })
+      // 查询条件已是最终口径（attachmentListWhere），这里再兜一层，避免将来
+      // 改查询时把未绑定记录或绑定到内部备注的记录带出去。
+      .filter((row) => attachmentRowVisible(user, ticket, row))
       .map((row) => this.serialize(row));
-  }
-
-  private async assertAttachmentVisible(
-    user: AuthUser,
-    rec: {
-      id: string;
-      ticketId: string;
-      messageId: string | null;
-      uploaderId: string;
-    },
-  ) {
-    if (rec.messageId) {
-      const message = await this.prisma.ticketMessage.findFirst({
-        where: { id: rec.messageId, ticketId: rec.ticketId },
-        select: { isInternal: true },
-      });
-      // 消息不存在（脏数据）同样按内部材料处理，避免默认放行。
-      if (!message || message.isInternal) {
-        throw new ForbiddenException('无权访问该附件');
-      }
-      return;
-    }
-    // 未绑定消息：只允许上传者本人；历史引用已由迁移回填，不能再按正文引用放行。
-    if (!this.unboundVisible(rec, user)) {
-      throw new ForbiddenException('无权访问该附件');
-    }
   }
 
   async getForDownload(user: AuthUser, id: string) {
@@ -469,18 +392,12 @@ export class AttachmentsService {
     if (!rec) throw new NotFoundException('附件不存在');
     // 已挂工单的按工单可见性校验；草稿附件（ticketId 为空）仅上传者本人可下载
     if (rec.ticketId) {
-      const ticketId = rec.ticketId;
-      const ticket = await this.loadTicketForAccess(ticketId);
+      const ticket = await this.loadTicketForAccess(rec.ticketId);
       this.assertCanView(user, ticket);
-      if (!this.isInternalParticipant(user, ticket)) {
-        await this.assertAttachmentVisible(user, {
-          id: rec.id,
-          ticketId,
-          messageId: rec.messageId,
-          uploaderId: rec.uploaderId,
-        });
+      if (!(await isAttachmentDownloadable(this.prisma, user, ticket, rec))) {
+        throw new ForbiddenException('无权访问该附件');
       }
-    } else if (rec.uploaderId !== user.id) {
+    } else if (!isUnboundVisible(rec, user)) {
       throw new ForbiddenException('无权访问该附件');
     }
     // 返回流而不是 Buffer：512MB 的附件整包读进内存下载一次就够呛

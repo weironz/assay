@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import type { Request } from 'express';
+import { getConfig } from '../config';
 import { requireAuthSecret } from './auth-secret';
 
 // Server-only request context; never added to /me or returned to the browser.
@@ -13,7 +14,8 @@ type FileSessionRenewal = (scope: { fingerprint: string; expiresAt: number; user
 let renewFiles: FileSessionRenewal | undefined;
 export function registerFileSessionRenewal(renewal?: FileSessionRenewal) { renewFiles = renewal; }
 export function renewExistingFileSession(session: { token: string; userId?: string; expiresAt?: Date | string }, ttl: number) {
-  if (!renewFiles || process.env.SAMBA_ENABLED !== 'true' || process.env.FILES_ENABLED !== 'true' || !process.env.AUTH_SECRET || !session.userId || !session.expiresAt) return;
+  const config = getConfig();
+  if (!renewFiles || !config.samba.enabled || !config.files.enabled || !config.auth.secret || !session.userId || !session.expiresAt) return;
   const expiresAt = Math.min(new Date(session.expiresAt).getTime(), Date.now() + ttl * 1000);
   if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return;
   // Optional file transport must not delay business login/requests. No callback

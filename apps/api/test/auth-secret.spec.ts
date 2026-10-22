@@ -41,7 +41,7 @@ test('production rejects every known placeholder from repo templates', () => {
   for (const placeholder of [
     'change_me_in_prod_please_use_long_random_string',
     'CHANGE_ME_long_random_secret_with_padding_1',
-    'dev_secret_change_me_not_for_production',
+    'dev_secret_change_me',
   ]) {
     withEnv({ AUTH_SECRET: placeholder }, () => {
       assert.throws(requireAuthSecret, /openssl rand -base64 48/, placeholder);
@@ -57,7 +57,7 @@ test('production rejects low-entropy repeated-character secrets', () => {
 
 test('non-production keeps permissive behavior for local development', () => {
   withEnv({ NODE_ENV: 'development', AUTH_SECRET: undefined }, () => {
-    assert.equal(requireAuthSecret(), 'dev_secret_change_me_not_for_production');
+    assert.equal(requireAuthSecret(), 'dev_secret_change_me');
   });
   withEnv({ NODE_ENV: 'development', AUTH_SECRET: 'change_me_in_prod_please_use_long_random_string' }, () => {
     assert.equal(requireAuthSecret(), 'change_me_in_prod_please_use_long_random_string');

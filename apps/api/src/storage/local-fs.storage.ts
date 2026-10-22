@@ -1,7 +1,8 @@
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
-import { dirname, join, resolve } from 'path';
+import { dirname, resolve } from 'path';
 import type { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
+import { getConfig } from '../config';
 import {
   StorageDriver,
   PutObjectInput,
@@ -52,7 +53,6 @@ export class LocalFsStorage implements StorageDriver {
   }
 
   static fromEnv(): LocalFsStorage {
-    const dir = process.env.STORAGE_LOCAL_DIR || join(process.cwd(), 'storage-data');
-    return new LocalFsStorage(dir);
+    return new LocalFsStorage(getConfig().storage.localDir);
   }
 }

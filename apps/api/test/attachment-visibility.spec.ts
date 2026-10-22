@@ -2,12 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { AttachmentsService } from '../src/attachments/attachments.service';
 import {
+  attachmentListWhere,
   isReferencedByPublicMessage,
   referencedAttachmentIds,
   rewriteAttachmentUrls,
-} from '../src/attachments/visibility';
+} from '../src/attachments/rules';
 import { TicketSharesService } from '../src/ticket-shares/ticket-shares.service';
-import { TicketsService } from '../src/tickets/tickets.service';
+import { createTicketsService } from './tickets-service.fixture';
 
 const TOKEN = `shr_${'a'.repeat(43)}`;
 
@@ -343,6 +344,137 @@ test('share endpoint serves a public-bound image referenced by a public reply', 
   assert.equal(attachment.fileName, 'bound.png');
 });
 
+test('attachmentListWhere keeps the non-internal scope to public bindings and own drafts', () => {
+  // 内部参与方（supervisor）看全部。
+  const supervisor = {
+    id: 'supervisor',
+    roles: ['supervisor'],
+    permissions: ['ticket:read'],
+  } as any;
+  assert.deepEqual(
+    attachmentListWhere(supervisor, ticketAccess, 'ticket-1'),
+    { ticketId: 'ticket-1' },
+  );
+  // 非内部成员：公开消息绑定 + 本人未绑定草稿。
+  assert.deepEqual(attachmentListWhere(requester, ticketAccess, 'ticket-1'), {
+    ticketId: 'ticket-1',
+    OR: [
+      {
+        messageId: { not: null },
+        message: { isInternal: false, ticketId: 'ticket-1' },
+      },
+      { messageId: null, uploaderId: 'requester' },
+    ],
+  });
+});
+
+test('same fixture yields one verdict across in-site list, download and share page', async () => {
+  // 同一组数据跑三条路径：站内列表 / 站内下载 / 分享页。
+  // 公开绑定 + 公开正文引用的图三处都放行；绑定内部备注的、未绑定草稿的
+  // 三处都拒绝——三个模块共用 attachments/rules，口径必须一致。
+  const rows: Record<string, any> = {
+    'att-public': {
+      id: 'att-public',
+      ticketId: 'ticket-1',
+      messageId: 'message-public',
+      uploaderId: 'staff',
+      fileName: 'public.png',
+      fileSize: 1,
+      mime: 'image/png',
+      objectKey: 'ticket-1/att-public',
+      message: { isInternal: false },
+    },
+    'att-internal': {
+      id: 'att-internal',
+      ticketId: 'ticket-1',
+      messageId: 'message-internal',
+      uploaderId: 'staff',
+      fileName: 'internal.png',
+      fileSize: 1,
+      mime: 'image/png',
+      objectKey: 'ticket-1/att-internal',
+      message: { isInternal: true },
+    },
+    'att-unbound': {
+      id: 'att-unbound',
+      ticketId: 'ticket-1',
+      messageId: null,
+      uploaderId: 'staff',
+      fileName: 'draft.png',
+      fileSize: 1,
+      mime: 'image/png',
+      objectKey: 'ticket-1/att-unbound',
+      message: null,
+    },
+  };
+  const messages: Record<string, any> = {
+    'message-public': {
+      id: 'message-public',
+      ticketId: 'ticket-1',
+      isInternal: false,
+      body: '<img src="/api/attachments/att-public/download">',
+    },
+    'message-internal': {
+      id: 'message-internal',
+      ticketId: 'ticket-1',
+      isInternal: true,
+      body: '<img src="/api/attachments/att-internal/download">',
+    },
+  };
+  const prisma = {
+    ticketShare: {
+      findUnique: async () => ({
+        id: 'share-1',
+        ticketId: 'ticket-1',
+        expiresAt: null,
+        revokedAt: null,
+      }),
+    },
+    ticket: { findUnique: async () => ticketAccess },
+    ticketAttachment: {
+      // 列表查询不筛（口径由内存兜底过滤体现），下载/分享按 id 取。
+      findMany: async () => Object.values(rows),
+      findUnique: async ({ where }: any) => rows[where.id] ?? null,
+      findFirst: async ({ where }: any) => (where.id ? rows[where.id] ?? null : null),
+    },
+    ticketMessage: {
+      findFirst: async ({ where }: any) => {
+        if (where.id) {
+          return messages[where.id] ? { isInternal: messages[where.id].isInternal } : null;
+        }
+        // isReferencedByPublicMessage：按正文 contains 匹配公开消息。
+        const needle = where.body?.contains ?? '';
+        const hit = Object.values(messages).find(
+          (message) => !message.isInternal && message.body.includes(needle),
+        );
+        return hit ? { id: hit.id } : null;
+      },
+    },
+  } as any;
+
+  const attachments = new AttachmentsService(prisma, storage());
+  const shares = new TicketSharesService(prisma, storage());
+
+  // 站内列表：提单人（非内部参与方）只看到公开绑定的那张。
+  const listed = await attachments.list(requester, 'ticket-1');
+  assert.deepEqual(
+    listed.map((row: any) => row.id),
+    ['att-public'],
+  );
+
+  // 站内下载：公开绑定可下，内部绑定/未绑定一律 403。
+  const { rec } = await attachments.getForDownload(requester, 'att-public');
+  assert.equal(rec.id, 'att-public');
+  await assert.rejects(attachments.getForDownload(requester, 'att-internal'), { status: 403 });
+  await assert.rejects(attachments.getForDownload(requester, 'att-unbound'), { status: 403 });
+
+  // 分享页：公开绑定可看，内部绑定/未绑定一律 404。
+  const { attachment } = await shares.publicInlineAttachment(TOKEN, 'att-public');
+  assert.equal(attachment.fileName, 'public.png');
+  await assert.rejects(shares.publicInlineAttachment(TOKEN, 'att-internal'), { status: 404 });
+  await assert.rejects(shares.publicInlineAttachment(TOKEN, 'att-unbound'), { status: 404 });
+});
+
 test('requester cannot download an unbound image merely because a public reply references it', async () => {
   const service = new AttachmentsService(
     {
@@ -396,7 +528,7 @@ test('message edit scopes authorization into the query and does not read an inte
   };
   prisma.$transaction = async (work: (tx: any) => Promise<unknown>) => work(prisma);
 
-  const service = new TicketsService(
+  const service = createTicketsService(
     prisma,
     {} as any,
     {} as any,
@@ -461,7 +593,7 @@ test('message author can edit their own public message inside the transaction', 
     }
   };
 
-  const service = new TicketsService(
+  const service = createTicketsService(
     prisma,
     {} as any,
     {} as any,
@@ -531,7 +663,7 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
     ticketHistory: { create: async () => ({}) },
     $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
   };
-  const service = new TicketsService(
+  const service = createTicketsService(
     prisma,
     { availableActions: () => [] } as any,
     {} as any,
@@ -583,7 +715,7 @@ test('posting a message binds referenced attachments inside the same transaction
       },
     },
   };
-  const service = new TicketsService(
+  const service = createTicketsService(
     {
       ticket: {
         findUnique: async () => ({

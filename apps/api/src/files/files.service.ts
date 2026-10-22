@@ -9,6 +9,7 @@ import { webSessionScopes } from '../auth/web-session-scope';
 import type { AuthUser } from '../auth/auth.types';
 import { SambaService } from '../samba/samba.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { getConfig } from '../config';
 import { enabledModules, fileCommandSchema, locationSchema, loginSchema, MAX_FILE_SESSION_SECONDS } from './contracts';
 
 interface Capability { token: string; id: string; domain: string; policies: Record<string, string> }
@@ -23,7 +24,7 @@ export class FilesService {
     return scope;
   }
   private csrf(req: Request) {
-    const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(s => s.trim());
+    const origins = getConfig().auth.trustedOrigins;
     if (!req.headers.origin || !origins.includes(req.headers.origin)) throw new ForbiddenException('文件操作来源校验失败');
   }
   private key(owner: string) { return `assay:files:session:${owner}`; }
@@ -49,9 +50,10 @@ export class FilesService {
   }
   private gatewayConfig() {
     try {
-      const url = new URL(process.env.FILES_GATEWAY_URL || '');
+      const files = getConfig().files;
+      const url = new URL(files.gatewayUrl || '');
       if (url.username || url.password || url.search || url.hash || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['agent', 'file-gateway', 'localhost', '127.0.0.1'].includes(url.hostname)))) throw new Error();
-      const token = readFileSync(process.env.FILES_GATEWAY_TOKEN_FILE || '', 'utf8').trim();
+      const token = readFileSync(files.gatewayTokenFile || '', 'utf8').trim();
       if (token.length < 32) throw new Error();
       return { address: url.toString().replace(/\/$/, ''), token };
     } catch { throw new ServiceUnavailableException('文件服务未配置'); }

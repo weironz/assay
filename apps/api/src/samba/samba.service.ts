@@ -5,13 +5,14 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { actions, bindingSchema, bulkCreateSchema, commandSchema, directoryPath, metadata, selfPasswordSchema, renameSchema } from './contracts';
 import { normalizedDomainDN } from '../auth/directory-config';
+import { getConfig } from '../config';
 
 @Injectable()
 export class SambaService implements OnModuleInit,OnModuleDestroy {
   private renameTimer?: ReturnType<typeof setInterval>;
   private reconciling=false;
   constructor(private readonly prisma: PrismaService) {}
-  onModuleInit() { if(process.env.SAMBA_ENABLED==='true'){this.renameTimer=setInterval(()=>{void this.reconcileRenames()},10000);this.renameTimer.unref();void this.reconcileRenames();} }
+  onModuleInit() { if(getConfig().samba.enabled){this.renameTimer=setInterval(()=>{void this.reconcileRenames()},10000);this.renameTimer.unref();void this.reconcileRenames();} }
   onModuleDestroy(){if(this.renameTimer)clearInterval(this.renameTimer)}
   private async reconcileRenames(){
     if(this.reconciling)return;this.reconciling=true;
@@ -69,12 +70,13 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     return this.prisma.sambaOperation.update({where:{id},data:{state:result.state,result}});
   }
   private config() {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
-    const address = process.env.SAMBA_AGENT_URL || '';
+    const samba = getConfig().samba;
+    if (!samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
+    const address = samba.agentUrl || '';
     const url = new URL(address);
     // HTTP is permitted only on the explicitly isolated Compose service / loopback.
     if (url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['agent', '127.0.0.1', 'localhost'].includes(url.hostname)))) throw new ServiceUnavailableException('Agent 地址必须使用 HTTPS 或隔离 Compose 网络');
-    const token = readFileSync(process.env.SAMBA_AGENT_TOKEN_FILE || '', 'utf8').trim();
+    const token = readFileSync(samba.agentTokenFile || '', 'utf8').trim();
     if (token.length < 32) throw new ServiceUnavailableException('Agent 凭据未配置');
     return { address: address.replace(/\/$/, ''), token };
   }
@@ -88,13 +90,13 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     return value;
   }
   async snapshot() {
-    if (process.env.SAMBA_ENABLED !== 'true') return { enabled: false };
+    if (!getConfig().samba.enabled) return { enabled: false };
     await this.reconcileRenames();
     const data = await this.agent('/v1/snapshot');
     const [bindings, assayUsers, directoryIdentities] = await Promise.all([
       this.prisma.sambaIdentity.findMany(),
       this.prisma.user.findMany({ where: { status: 'ACTIVE' }, select: { id: true, name: true, email: true }, orderBy: { name: 'asc' } }),
-      process.env.DIRECTORY_AUTH_ENABLED === 'true' ? this.prisma.directoryIdentity.findMany({ select: { userId: true } }) : Promise.resolve<{ userId: string }[]>([]),
+      getConfig().directory.authEnabled ? this.prisma.directoryIdentity.findMany({ select: { userId: true } }) : Promise.resolve<{ userId: string }[]>([]),
     ]);
     return { enabled: true, ...data, bindings: bindings.map(b => ({ ...b, directoryManaged: directoryIdentities.some(i => i.userId === b.userId) })), assayUsers };
   }
@@ -104,11 +106,11 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     return this.agent(`/v1/${acl ? 'acl' : 'directories'}?${new URLSearchParams(parsed.data).toString()}`);
   }
   async dns(zone?: string) {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    if (!getConfig().samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent(zone ? `/v1/dns/records?zone=${encodeURIComponent(zone)}` : '/v1/dns/zones');
   }
   async recycle() {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    if (!getConfig().samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent('/v1/recycle');
   }
   async setRecycle(user: AuthUser, input: unknown) {
@@ -117,15 +119,15 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     return this.command(user, { requestId: crypto.randomUUID(), action: 'recycle.configure', args: { retention_days: days } });
   }
   async effectivePolicy(id: string) {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    if (!getConfig().samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent(`/v1/effective-policy?id=${encodeURIComponent(id)}`);
   }
   async recycleList(share: string) {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    if (!getConfig().samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent(`/v1/recycle/list?name=${encodeURIComponent(share)}`);
   }
   async sessions() {
-    if (process.env.SAMBA_ENABLED !== 'true') throw new ServiceUnavailableException('Samba 管理未启用');
+    if (!getConfig().samba.enabled) throw new ServiceUnavailableException('Samba 管理未启用');
     return this.agent('/v1/sessions');
   }
   async history() {
@@ -148,7 +150,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     return this.operation(id);
   }
   private async submit(user: AuthUser, requestId: string, action: string, args: Record<string, unknown>) {
-    const secret = process.env.AUTH_SECRET;
+    const secret = getConfig().auth.secret;
     if (!secret) throw new ServiceUnavailableException('操作签名密钥未配置');
     const hash = createHmac('sha256', secret).update(JSON.stringify({ actorId: user.id, action, args })).digest('hex');
     const previous = await this.prisma.sambaOperation.findUnique({ where: { id: requestId } });
@@ -227,7 +229,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     }
     try {
       return await this.prisma.$transaction(async tx => {
-        if (process.env.DIRECTORY_AUTH_ENABLED === 'true') {
+        if (getConfig().directory.authEnabled) {
           const directory = await tx.directoryIdentity.findUnique({ where: { userId: p.data.userId } });
           if (directory && directory.objectId !== p.data.adObjectId) throw new ConflictException('此账号已使用 AD 统一登录，不能直接解除或更换其文件身份');
         }
@@ -239,7 +241,7 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     } catch (e: any) { if (e.code === 'P2002') throw new ConflictException('AD 账号已绑定其他 Assay 用户'); throw e; }
   }
   async identity(user: AuthUser) {
-    if (process.env.SAMBA_ENABLED !== 'true') return { enabled: false, identity: null };
+    if (!getConfig().samba.enabled) return { enabled: false, identity: null };
     return { enabled: true, identity: await this.prisma.sambaIdentity.findUnique({ where: { userId: user.id }, select: { accountName: true, domain: true } }) };
   }
   async fileIdentity(user: AuthUser) {

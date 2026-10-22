@@ -1,8 +1,9 @@
 import type { PrismaClient } from '@prisma/client';
+import { getConfig } from '../config';
 
 /** Directory-derived staff lists must not keep authorizing disabled or departed members. */
 export async function directoryRoleUserIds(db: PrismaClient, roles: string[]): Promise<string[]> {
-  if (process.env.DIRECTORY_AUTH_ENABLED !== 'true') return [];
+  if (!getConfig().directory.authEnabled) return [];
   const { directorySettings, refreshDirectoryIdentity } = await import('./directory-runtime');
   if (!directorySettings) return [];
   const candidates = await db.directoryIdentity.findMany({ where: {

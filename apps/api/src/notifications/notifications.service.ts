@@ -2,6 +2,7 @@ import { adapter, BusinessRef } from '../operations/business';
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
+import { getConfig } from '../config';
 
 export interface NotifyInput {
   type: string;
@@ -46,7 +47,7 @@ export class NotificationsService {
         });
         if (!user?.email) return;
         const subject = input.subject;
-        const base=(process.env.APP_URL||'http://localhost:5173').replace(/\/$/,'');
+        const base=getConfig().app.url.replace(/\/$/,'');
         const link = subject ? base+adapter(subject.kind).path+(adapter(subject.kind).path.endsWith('/')?encodeURIComponent(subject.id):'') : this.mail.ticketUrl(input.ticketId);
         const html = `
           <p>${esc(input.title)}</p>

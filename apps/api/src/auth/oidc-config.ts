@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { currentEnv } from '../config';
 
 export interface OidcSettings {
   issuer: string;
@@ -14,7 +15,7 @@ export interface OidcSettings {
   tokenAuthMethod: 'client_secret_basic' | 'client_secret_post';
 }
 
-export function readOidcSettings(env: NodeJS.ProcessEnv = process.env): OidcSettings | null {
+export function readOidcSettings(env: NodeJS.ProcessEnv = currentEnv()): OidcSettings | null {
   if (env.OIDC_ENABLED !== 'true') return null;
   const required = (name: string) => {
     const value = env[name]?.trim();

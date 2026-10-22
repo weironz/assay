@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import type { Readable } from 'stream';
+import { getConfig } from '../config';
 import {
   StorageDriver,
   PutObjectInput,
@@ -100,13 +101,19 @@ export class S3Storage implements StorageDriver {
   }
 
   static fromEnv(): S3Storage {
+    const s3 = getConfig().storage.s3;
+    if (!s3.accessKeyId || !s3.secretAccessKey) {
+      throw new Error(
+        'S3 凭据未配置：生产环境必须显式设置 S3_ACCESS_KEY 与 S3_SECRET_KEY，禁止回退公开的 rustfsadmin',
+      );
+    }
     return new S3Storage(
-      process.env.S3_BUCKET || 'assay-attachments',
-      process.env.S3_ENDPOINT || 'http://rustfs:9000',
-      process.env.S3_REGION || 'us-east-1',
-      process.env.S3_ACCESS_KEY || 'rustfsadmin',
-      process.env.S3_SECRET_KEY || 'rustfsadmin',
-      (process.env.S3_FORCE_PATH_STYLE || 'true') === 'true',
+      s3.bucket,
+      s3.endpoint,
+      s3.region,
+      s3.accessKeyId,
+      s3.secretAccessKey,
+      s3.forcePathStyle,
     );
   }
 }

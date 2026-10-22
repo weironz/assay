@@ -2,6 +2,7 @@ import { Global, Module, Logger } from '@nestjs/common';
 import { STORAGE_DRIVER, StorageDriver } from './storage.interface';
 import { LocalFsStorage } from './local-fs.storage';
 import { S3Storage } from './s3.storage';
+import { getConfig } from '../config';
 
 const BUCKET_INIT_ATTEMPTS = 6;
 const BUCKET_INIT_RETRY_DELAY_MS = 2_000;
@@ -42,14 +43,15 @@ const storageProvider = {
   provide: STORAGE_DRIVER,
   useFactory: async (): Promise<StorageDriver> => {
     const logger = new Logger('Storage');
-    const driver = (process.env.STORAGE_DRIVER || 's3').toLowerCase();
+    const storage = getConfig().storage;
+    const driver = storage.driver;
     if (driver === 'local') {
       logger.log('使用本地文件系统存储 (LocalFsStorage)');
       return LocalFsStorage.fromEnv();
     }
     const s3 = S3Storage.fromEnv();
     await ensureBucketWithRetry(s3);
-    logger.log(`使用 S3 存储 (endpoint=${process.env.S3_ENDPOINT})`);
+    logger.log(`使用 S3 存储 (endpoint=${storage.s3.endpoint})`);
     return s3;
   },
 };

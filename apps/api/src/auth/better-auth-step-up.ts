@@ -1,5 +1,6 @@
 import { hasPrivilegedRole } from './role-policy';
 import { APIError } from 'better-auth';
+import { getConfig } from '../config';
 import { consumeStepUp, privilegedMfaMode } from './step-up-store';
 
 type Session = { user: { id: string }; session: { token: string } };
@@ -52,7 +53,7 @@ export async function enforceBetterAuthSensitiveStepUp(
       path === '/delete-user' || path === '/unlink-account' ? 'account' : 'two-factor',
     );
     else {
-      const origins = (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(',').map(value => value.trim());
+      const origins = getConfig().auth.trustedOrigins;
       if (!origins.includes(headers.get('origin') || '')) throw new Error('Untrusted origin');
     }
   } catch {

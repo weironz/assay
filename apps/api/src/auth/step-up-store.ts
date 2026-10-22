@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'crypto';
 import { ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { getConfig } from '../config';
 import { authRedis } from './auth-redis';
 
 export type StepUpPurpose = 'roles' | 'api-tokens' | 'two-factor' | 'account' | 'samba';
@@ -16,7 +17,7 @@ return count`;
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 
 export function privilegedMfaMode(): 'optional' | 'enforce' {
-  return process.env.PRIVILEGED_MFA_MODE === 'enforce' ? 'enforce' : 'optional';
+  return getConfig().auth.privilegedMfaMode;
 }
 
 export async function checkStepUpRate(userId: string): Promise<void> {

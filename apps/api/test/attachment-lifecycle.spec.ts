@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { AttachmentsService } from '../src/attachments/attachments.service';
 import { AttachmentMaintenanceService } from '../src/attachments/attachment-maintenance.service';
-import { TicketsService } from '../src/tickets/tickets.service';
+import { createTicketsService } from './tickets-service.fixture';
 import {
   DRAFT_TTL_HOURS,
   MAX_ATTACHMENTS_PER_TICKET,
@@ -387,7 +387,7 @@ test('deleting a ticket queues object keys in the same transaction before cascad
       }
     },
   };
-  const service = new TicketsService(
+  const service = createTicketsService(
     prisma,
     {} as any,
     { notify: async () => ({}) } as any,
@@ -420,7 +420,7 @@ test('deleting a ticket queues object keys in the same transaction before cascad
 
 test('a removed collaborator can no longer edit their old message', async () => {
   let messageLookups = 0;
-  const service = new TicketsService(
+  const service = createTicketsService(
     {
       ticket: {
         findUnique: async () => ({

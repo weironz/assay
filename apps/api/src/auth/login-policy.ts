@@ -1,9 +1,10 @@
 import type { PrismaClient } from "@prisma/client";
 import type { DirectorySettings } from "./directory-config";
+import { currentEnv } from "../config";
 
 export class LoginRejected extends Error {}
 export class LoginDirectoryUnavailable extends Error {}
-export const registrationEnabled = (env: NodeJS.ProcessEnv = process.env) =>
+export const registrationEnabled = (env: NodeJS.ProcessEnv = currentEnv()) =>
   env.AUTH_ALLOW_REGISTRATION === "true";
 export const publicRegistrationBlocked = (
   enabled: boolean,

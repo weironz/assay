@@ -1,3 +1,5 @@
+// 必须第一行：在任何业务模块求值前加载 .env（模块顶层存在 getConfig() 快照）。
+import './config/load-env';
 import { NestFactory } from '@nestjs/core';
 import { Logger, RequestMethod, ValidationPipe } from '@nestjs/common';
 import { json, urlencoded } from 'express';
@@ -7,12 +9,16 @@ import { auth } from './auth/auth';
 import { FilesService } from './files/files.service';
 import { webSessionFingerprint, webSessionScopes, registerFileSessionRenewal } from './auth/web-session-scope';
 import { registerDirectoryFileConnector } from './auth/directory-runtime';
+import { getConfig } from './config';
 import type { AuthUser } from './auth/auth.types';
 import type { Request } from 'express';
 
 async function bootstrap() {
   // 关闭全局 body parser：better-auth 处理器需要读取原始请求体
   const app = await NestFactory.create(AppModule, { bodyParser: false });
+  // NestFactory 初始化 AppModule 时 ConfigModule 已加载 .env；在这里再取配置，
+  // 保证 CORS/端口/停机窗口与 .env 中的值一致。
+  const config = getConfig();
 
   // SIGTERM/SIGINT 下触发各模块的 OnModuleDestroy / OnApplicationShutdown：
   // Nest 侧 PrismaService.$disconnect，AuthLifecycleService 收尾 better-auth
@@ -20,7 +26,7 @@ async function bootstrap() {
   app.enableShutdownHooks();
 
   app.enableCors({
-    origin: (process.env.AUTH_TRUST_ORIGINS || 'http://localhost:5173').split(','),
+    origin: config.auth.trustedOrigins,
     credentials: true,
   });
 
@@ -39,7 +45,7 @@ async function bootstrap() {
   // better-auth 路由（登录/注册/登出/会话/邮箱验证/密码重置等）挂在 body parser 之前
   const authHandler = toNodeHandler(auth);
   expressApp.all(/^\/api\/auth\//, async (req: any, res: any) => {
-    if (process.env.FILES_ENABLED === 'true' && req.method === 'POST' && req.path === '/api/auth/sign-out') {
+    if (config.files.enabled && req.method === 'POST' && req.path === '/api/auth/sign-out') {
       const session = await auth.api.getSession({ headers: fromNodeHeaders(req.headers) });
       if (session?.session?.token) {
         const owner = webSessionFingerprint(session.session.token);
@@ -64,12 +70,12 @@ async function bootstrap() {
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  const port = Number(process.env.API_PORT) || 3000;
+  const port = config.api.port;
   await app.listen(port, '0.0.0.0');
   // 排空窗口：app.close() 只等 HTTP server 的自然断开，keep-alive 空闲连接会
   // 拖住停机。收到停机信号后先给在途请求这段时间，超时强制断开全部连接。
   const server = app.getHttpServer() as import('node:http').Server;
-  const drainMs = Number(process.env.SHUTDOWN_DRAIN_MS) || 10_000;
+  const drainMs = config.api.shutdownDrainMs;
   const forceCloseAfterDrain = () => setTimeout(() => server.closeAllConnections?.(), drainMs).unref();
   process.on('SIGTERM', forceCloseAfterDrain);
   process.on('SIGINT', forceCloseAfterDrain);
