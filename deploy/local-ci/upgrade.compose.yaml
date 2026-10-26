@@ -1,0 +1,17 @@
+services:
+  api:
+    # Restore/migrate is performed explicitly before starting the application.
+    # General seed is deliberately excluded when rehearsing production data.
+    command: [sh, -c, '${LOCAL_CI_UPGRADE_API_STARTUP:-exec node dist/main.js}']
+    environment:
+      ADMIN_EMAIL: ${LOCAL_CI_UPGRADE_ADMIN_EMAIL:?set upgrade source admin email}
+      ADMIN_PASSWORD: UpgradeProbe9!localOnly
+      ATTACHMENT_DRAFT_CLEANUP_ENABLED: 'false'
+      DIRECTORY_AUTH_ENABLED: 'false'
+      SAMBA_ENABLED: 'false'
+      FILES_ENABLED: 'false'
+    healthcheck:
+      test: [CMD, node, -e, 'fetch("http://127.0.0.1:3000/health").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))']
+      interval: 2s
+      timeout: 5s
+      retries: 60
