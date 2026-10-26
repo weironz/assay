@@ -196,7 +196,12 @@ class Pipeline:
 
     def test_web(self):
         image = self.docker_build('web', True)
-        call(['docker', 'run', '--rm', image, 'bun', 'run', 'test'], env=self.env)
+        # One contract test imports the server's scope definitions relative to
+        # the web tree. Keep that source relationship without baking API files
+        # or credentials into the production Web image.
+        call(['docker', 'run', '--rm', '--mount',
+              f'type=bind,src={ROOT / "apps/api/src"},dst=/api/src,readonly',
+              image, 'bun', 'run', 'test'], env=self.env)
         self.mark('test-web')
 
     def test_api(self):
