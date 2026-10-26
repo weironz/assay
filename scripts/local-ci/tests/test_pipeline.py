@@ -109,7 +109,34 @@ class LocalCiSafety(unittest.TestCase):
     def test_unconfigured_github_authentication_is_preserved(self):
         with patch.dict(os.environ, {'GH_TOKEN': 'inherited-auth'}):
             os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
+            os.environ.pop('ASSAY_RELEASE_GH_CONFIG_DIR', None)
             self.assertEqual(ci.Pipeline().github_env()['GH_TOKEN'], 'inherited-auth')
+
+    def test_explicit_local_github_login_is_scoped_to_github_commands(self):
+        directory = Path(self.directory.name) / 'gh-login'
+        directory.mkdir()
+        (directory / 'hosts.yml').touch()
+        with patch.dict(os.environ, {'ASSAY_RELEASE_GH_CONFIG_DIR': str(directory),
+                                     'GH_TOKEN': 'inherited-auth', 'GITHUB_TOKEN': 'inherited-secondary'}):
+            os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
+            pipeline = ci.Pipeline()
+            github = pipeline.github_env()
+            self.assertEqual(github['GH_CONFIG_DIR'], str(directory))
+            self.assertNotIn('GH_TOKEN', github)
+            self.assertNotIn('GITHUB_TOKEN', github)
+            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
+            self.assertEqual(pipeline.env['GITHUB_TOKEN'], 'inherited-secondary')
+
+    def test_unavailable_local_login_never_falls_back_to_inherited_auth(self):
+        with patch.dict(os.environ, {'ASSAY_RELEASE_GH_CONFIG_DIR': str(Path(self.directory.name) / 'missing')}):
+            os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
+            with self.assertRaisesRegex(RuntimeError, 'release GitHub login is unavailable'):
+                ci.Pipeline().github_env()
+
+    def test_managed_github_secret_takes_priority_over_local_login(self):
+        with patch.dict(os.environ, {'ASSAY_RELEASE_GH_CONFIG_DIR': '/missing-local-login',
+                                     'ASSAY_RELEASE_GITHUB_TOKEN': 'github-test-secret'}):
+            self.assertEqual(ci.Pipeline().github_env()['GH_TOKEN'], 'github-test-secret')
 
     def test_docker_login_uses_stdin_and_does_not_relay_secret_output(self):
         token = 'docker-test-secret'

@@ -107,9 +107,19 @@ class Pipeline:
     def github_env(self):
         env = self.env.copy()
         token = os.getenv('ASSAY_RELEASE_GITHUB_TOKEN')
+        config_dir = os.getenv('ASSAY_RELEASE_GH_CONFIG_DIR')
         if token:
             # Keep the platform's inherited authentication unchanged elsewhere.
             env['GH_TOKEN'] = token
+        elif config_dir:
+            # An explicitly selected local gh login is a fallback when managed
+            # secret configuration is unavailable. Let gh read its own store.
+            directory = Path(config_dir).expanduser().resolve()
+            if not (directory / 'hosts.yml').is_file():
+                raise RuntimeError('Configured release GitHub login is unavailable; authenticate in ASSAY_RELEASE_GH_CONFIG_DIR')
+            env['GH_CONFIG_DIR'] = str(directory)
+            env.pop('GH_TOKEN', None)
+            env.pop('GITHUB_TOKEN', None)
         return env
 
     def gh(self, *arguments, capture=False):

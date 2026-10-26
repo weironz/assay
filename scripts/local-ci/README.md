@@ -57,6 +57,21 @@ task auth:check
 实际镜像写权限和 Release 附件上传权限仍由 `task publish` 验证。
 未绑定专用令牌时，继续使用现有 Docker 客户端登录及 GitHub CLI 的默认认证。
 
+### 环境配置入口暂不可用时
+
+也可在当前构建主机保存专用 GitHub CLI 登录，再在被忽略的 `.env.local-ci` 中设置
+`ASSAY_RELEASE_GH_CONFIG_DIR=/绝对路径/专用凭据目录`。目录放在仓库外并设为 `0700`，
+凭据文件仅当前用户可读写；通过 `gh auth login --with-token` 的标准输入完成登录，
+不要把令牌写进命令行参数。Docker Hub 继续使用正常 `docker login` 保存的客户端认证。
+
+发布命令优先使用 `ASSAY_RELEASE_GITHUB_TOKEN`；未绑定时，才使用明确选定的本地
+GitHub CLI 凭据目录。仅这些 GitHub 子进程会去掉默认的 `GH_TOKEN` / `GITHUB_TOKEN`，
+让 CLI 读取专用登录；其他构建命令和平台认证保持原样。选定目录未就绪时会报错，
+不会静默换回其他身份。
+
+这是当前主机的本地保存方式，不会登记成托管机密，也不保证云环境重建后保留。
+配置入口恢复后，可改用前述托管机密绑定；原有发布版本不受影响。
+
 ## 完整执行
 
 ```bash
