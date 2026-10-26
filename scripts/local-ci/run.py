@@ -191,7 +191,7 @@ class Pipeline:
             # Only our unique project and its disposable volumes are eligible.
             if not re.fullmatch(r'assay-local-ci-[a-z]+-[0-9a-f]{10}', project):
                 raise RuntimeError('Invalid sandbox cleanup project')
-            compose('down', '--volumes', '--remove-orphans')
+            compose('--profile', 'smoke', 'down', '--volumes', '--remove-orphans')
 
     def test_deployment(self):
         for directory in ['deploy/aliyun/tests', 'deploy/aliyun-Cloudflare-Tunnel/tests', 'deploy/samba-production', 'scripts/local-ci/tests']:
@@ -287,8 +287,8 @@ class Pipeline:
     def smoke(self):
         images = self.receipt('build-images')['images']
         with self.sandbox('smoke', images) as (compose, env, _network):
-            compose('--profile', 'smoke', 'up', '-d', '--wait', '--wait-timeout', '240')
             try:
+                compose('--profile', 'smoke', 'up', '-d', '--wait', '--wait-timeout', '240')
                 base = env['LOCAL_CI_TEST_URL']
                 client = urllib.request.build_opener(urllib.request.ProxyHandler({}), urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
                 def request(path, body=None):

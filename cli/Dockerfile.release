@@ -11,4 +11,3 @@ RUN --mount=type=secret,id=proxy_ca \
 
 FROM scratch AS linux-export
 COPY --from=linux-builder /source/target/release/assay /assay-x86_64-unknown-linux-musl
-

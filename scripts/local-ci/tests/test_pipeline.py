@@ -75,7 +75,7 @@ class LocalCiSafety(unittest.TestCase):
                 self.assertRegex(network, r'^assay-local-ci-api-[0-9a-f]{10}_default$')
             command = commands.call_args.args[0]
             self.assertEqual(command[command.index('-p') + 1], network.removesuffix('_default'))
-            self.assertEqual(command[-3:], ['down', '--volumes', '--remove-orphans'])
+            self.assertEqual(command[-5:], ['--profile', 'smoke', 'down', '--volumes', '--remove-orphans'])
 
     def test_unconfigured_deploy_cannot_attempt_ssh(self):
         for key in ['LOCAL_CI_DEPLOY_HOST', 'LOCAL_CI_DEPLOY_USER', 'LOCAL_CI_DEPLOY_DIR']:

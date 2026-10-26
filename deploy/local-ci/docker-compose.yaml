@@ -66,6 +66,12 @@ services:
     ports:
       - '127.0.0.1:${LOCAL_CI_TEST_PORT:-18088}:80'
     depends_on: [api]
+    # Probe loopback directly even when Docker injects an outbound proxy.
+    healthcheck:
+      test: [CMD-SHELL, 'wget -Y off -qO- http://127.0.0.1/ >/dev/null 2>&1']
+      interval: 2s
+      timeout: 3s
+      retries: 60
 volumes:
   pg:
   objects:
