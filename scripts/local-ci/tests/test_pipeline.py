@@ -54,6 +54,21 @@ class LocalCiSafety(unittest.TestCase):
                 self.pipeline.local_docker()
             commands.assert_not_called()
 
+    def test_context_selector_cannot_hide_a_remote_daemon_behind_local_host(self):
+        self.pipeline.env.update(DOCKER_HOST='unix:///var/run/docker.sock', DOCKER_CONTEXT='production')
+        with patch.object(ci, 'call', return_value='ssh://production.example') as commands:
+            with self.assertRaisesRegex(RuntimeError, 'refuses remote Docker'):
+                self.pipeline.local_docker()
+            self.assertEqual(commands.call_count, 1)
+            self.assertIn('production', commands.call_args.args[0])
+
+    def test_rebuilt_images_cannot_reuse_an_old_verification(self):
+        receipts = {'verified': {'assets': {'cli': 'same'}, 'imageIds': {'api': 'old'}},
+                    'build-images': {'imageIds': {'api': 'new'}}}
+        with patch.object(self.pipeline, 'receipt', side_effect=lambda name: receipts[name]), patch.object(self.pipeline, 'check_artifacts', return_value={'cli': 'same'}):
+            with self.assertRaisesRegex(RuntimeError, 'changed after verification'):
+                self.pipeline.verified_artifacts()
+
     def test_sandbox_cleanup_is_scoped_to_its_unique_project(self):
         with patch.object(self.pipeline, 'local_docker'), patch.object(ci, 'call') as commands:
             with self.pipeline.sandbox('api') as (_compose, _env, network):
@@ -65,7 +80,7 @@ class LocalCiSafety(unittest.TestCase):
     def test_unconfigured_deploy_cannot_attempt_ssh(self):
         for key in ['LOCAL_CI_DEPLOY_HOST', 'LOCAL_CI_DEPLOY_USER', 'LOCAL_CI_DEPLOY_DIR']:
             os.environ.pop(key, None)
-        with patch.object(ci, 'clean_source'), patch.object(self.pipeline, 'receipt', return_value={'images': {}}), patch.object(ci, 'call') as commands:
+        with patch.object(ci, 'clean_source'), patch.object(self.pipeline, 'verified_artifacts'), patch.object(self.pipeline, 'receipt', return_value={'images': {}}), patch.object(ci, 'call') as commands:
             with self.assertRaisesRegex(RuntimeError, 'Explicit production SSH'):
                 self.pipeline.deploy()
             commands.assert_not_called()

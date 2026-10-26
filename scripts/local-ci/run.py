@@ -109,8 +109,9 @@ class Pipeline:
 
     def local_docker(self):
         endpoint = self.env.get('DOCKER_HOST')
-        if not endpoint:
-            context = call(['docker', 'context', 'show'], capture=True, env=self.env)
+        explicit_context = self.env.get('DOCKER_CONTEXT')
+        if explicit_context or not endpoint:
+            context = explicit_context or call(['docker', 'context', 'show'], capture=True, env=self.env)
             endpoint = call(['docker', 'context', 'inspect', context, '--format', '{{(index .Endpoints "docker").Host}}'], capture=True, env=self.env)
         if not endpoint.startswith(('unix://', 'npipe://')):
             raise RuntimeError('Local CI refuses remote Docker daemons; production uses the explicit SSH deploy task')
@@ -124,6 +125,8 @@ class Pipeline:
         self.local_docker()
         call(['docker', 'compose', 'version'], env=self.env)
         call([self.cargo, '--version'], env=self.env)
+        call([self.cargo, 'fmt', '--version'], env=self.env)
+        call([self.cargo, 'clippy', '--version'], env=self.env)
         call(['gh', 'api', 'user', '--jq', '.login'], env=self.env)
         print('Version and local prerequisites checked; Docker Hub write access is checked on push', flush=True)
 
@@ -315,14 +318,17 @@ class Pipeline:
             except BaseException:
                 compose('logs', '--tail', '80')
                 raise
-        self.mark('smoke')
+        self.mark('smoke', imageIds=self.receipt('build-images')['imageIds'])
 
     def verify(self):
         clean_source()
         for step in STEPS:
             self.receipt(step)
-        self.check_artifacts()
-        self.mark('verified', steps=list(STEPS))
+        assets = self.check_artifacts()
+        images = self.receipt('build-images')['imageIds']
+        if self.receipt('smoke').get('imageIds') != images:
+            raise RuntimeError('Images changed after smoke testing; rerun smoke')
+        self.mark('verified', steps=list(STEPS), imageIds=images, assets=assets)
         print('All local tests, builds and isolated smoke checks passed for ' + self.version, flush=True)
 
     def check_artifacts(self):
@@ -337,11 +343,18 @@ class Pipeline:
                 raise RuntimeError('A verified image tag was changed: ' + service)
         return expected
 
+    def verified_artifacts(self):
+        verified = self.receipt('verified')
+        assets = self.check_artifacts()
+        if (verified.get('assets') != assets or
+                verified.get('imageIds') != self.receipt('build-images')['imageIds']):
+            raise RuntimeError('Artifacts changed after verification; rerun the complete checks')
+        return assets
+
     def push_images(self):
         clean_source()
         self.local_docker()
-        self.receipt('verified')
-        self.check_artifacts()
+        self.verified_artifacts()
         built = self.receipt('build-images')
         published = {}
         previous_path = self.state / 'push-images.json'
@@ -374,8 +387,7 @@ class Pipeline:
 
     def release(self):
         current = clean_source()
-        self.receipt('verified')
-        checksums = self.check_artifacts()
+        checksums = self.verified_artifacts()
         images = self.receipt('push-images')['images']
         if set(images) != set(SERVICES):
             raise RuntimeError('Push all three images before publishing the release')
@@ -440,7 +452,7 @@ class Pipeline:
         # No other pipeline action calls this method.
         clean_source()
         self.receipt('release')
-        self.receipt('verified')
+        self.verified_artifacts()
         images = self.receipt('push-images')['images']
         host = os.getenv('LOCAL_CI_DEPLOY_HOST', '')
         user = os.getenv('LOCAL_CI_DEPLOY_USER', '')
