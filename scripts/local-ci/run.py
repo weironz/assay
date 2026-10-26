@@ -302,7 +302,7 @@ class Pipeline:
                     except urllib.error.HTTPError as error:
                         return error.code, error.read()
                 for _ in range(120):
-                    if request('/api/health')[0] == 200:
+                    if request('/api/health/live')[0] == 200:
                         break
                     time.sleep(2)
                 else:
@@ -321,6 +321,9 @@ class Pipeline:
                     raise RuntimeError('Ticket list smoke failed')
                 mfa_env = env.copy()
                 mfa_env.update(ASSAY_TEST_URL=base, ASSAY_TEST_PASSWORD='ciadmin12345')
+                # This subprocess only addresses the disposable loopback stack.
+                mfa_env['NO_PROXY'] = mfa_env.get('NO_PROXY', '') + ',127.0.0.1,localhost'
+                mfa_env['no_proxy'] = mfa_env['NO_PROXY']
                 call([sys.executable, 'scripts/smoke-two-factor.py'], env=mfa_env)
                 statuses = [request('/api/auth/sign-in/email', {'email': 'admin@example.com', 'password': 'wrong'})[0] for _ in range(8)]
                 if 429 not in statuses:
