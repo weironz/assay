@@ -1,0 +1,84 @@
+version: '3'
+
+dotenv: ['.env.local-ci']
+
+vars:
+  VERSION:
+    sh: python3 -c 'import json; print(json.load(open("package.json"))["version"])'
+  HUB_NAMESPACE: '{{.DOCKERHUB_NAMESPACE | default "willdockerhub"}}'
+  RELEASE_REPO: '{{.GITHUB_REPOSITORY | default "weironz/assay"}}'
+
+env:
+  LOCAL_CI_VERSION: '{{.VERSION}}'
+  LOCAL_CI_DOCKERHUB_NAMESPACE: '{{.HUB_NAMESPACE}}'
+  LOCAL_CI_GITHUB_REPOSITORY: '{{.RELEASE_REPO}}'
+
+tasks:
+  default:
+    desc: List the local CI tasks (never deploys)
+    cmds: ['task --list']
+  doctor:
+    desc: Check local Docker, Rust, GitHub CLI and version prerequisites
+    cmds: ['python3 scripts/local-ci/run.py doctor']
+  test:
+    desc: Run deployment, frontend, backend and Rust tests in sequence
+    cmds:
+      - task: test:deployment
+      - task: test:web
+      - task: test:api
+      - task: test:cli
+      - task: test:agent
+  test:deployment:
+    desc: Validate deployment templates, backup boundaries and local CI safety
+    cmds: ['python3 scripts/local-ci/run.py test-deployment']
+  test:web:
+    desc: Build the frontend test stage and run the locked Bun tests
+    cmds: ['python3 scripts/local-ci/run.py test-web']
+  test:api:
+    desc: Test the API with disposable PostgreSQL and Redis containers
+    cmds: ['python3 scripts/local-ci/run.py test-api']
+  test:cli:
+    desc: Run the Rust CLI tests
+    cmds: ['python3 scripts/local-ci/run.py test-cli']
+  test:agent:
+    desc: Check Rust formatting, clippy and Samba Agent tests
+    cmds: ['python3 scripts/local-ci/run.py test-agent']
+  build:
+    desc: Build the three Docker images and Linux/Windows release binaries
+    cmds:
+      - task: build:images
+      - task: build:cli
+  build:images:
+    desc: Build API, Web and Samba Agent images locally, without pushing
+    cmds: ['python3 scripts/local-ci/run.py build-images']
+  build:cli:
+    desc: Cross-compile Linux musl and Windows MSVC CLI artifacts
+    cmds: ['python3 scripts/local-ci/run.py build-cli']
+  test:smoke:
+    desc: Run login, ticket, branding, MFA and throttling checks on an isolated stack
+    cmds: ['python3 scripts/local-ci/run.py smoke']
+  ci:
+    desc: Run the complete local verification pipeline; does not publish or deploy
+    cmds:
+      - task: doctor
+      - task: test
+      - task: build
+      - task: test:smoke
+      - python3 scripts/local-ci/run.py verify
+  push:images:
+    desc: Push only verified version tags to Docker Hub (does not update latest)
+    cmds: ['python3 scripts/local-ci/run.py push-images']
+  release:
+    desc: Publish verified binaries, checksums and image digests to GitHub Release
+    cmds: ['python3 scripts/local-ci/run.py release']
+  publish:
+    desc: Push verified images and publish GitHub Release; NEVER deploys production
+    cmds:
+      - task: push:images
+      - task: release
+  deploy:production:
+    desc: Explicitly back up and deploy a published release using configured SSH
+    cmds: ['python3 scripts/local-ci/run.py deploy']
+  status:
+    desc: Show local verification and publishing receipts for this version
+    cmds: ['python3 scripts/local-ci/run.py status']

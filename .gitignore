@@ -1,4 +1,7 @@
 node_modules/
+.local-ci/
+.task/
+.env.local-ci
 dist/
 build/
 target/

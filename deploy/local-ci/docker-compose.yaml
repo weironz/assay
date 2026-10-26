@@ -1,0 +1,71 @@
+# Disposable local CI only. run.py always supplies a unique assay-local-ci-* project.
+# No production env_file, external networks, host data mounts or fixed container names.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ci
+      POSTGRES_PASSWORD: ci_test_password
+      POSTGRES_DB: assay_ci
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U ci -d assay_ci]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+  rustfs:
+    profiles: [smoke]
+    image: rustfs/rustfs:1.0.0@sha256:8cc9801755448b71a786705ce76692c77e14936cccd87cf2fc31842e58f4d1ff
+    command: [/data]
+    environment:
+      RUSTFS_ACCESS_KEY: ciaccesskey
+      RUSTFS_SECRET_KEY: cisecretkey
+      RUSTFS_ADDRESS: ':9000'
+      RUSTFS_CONSOLE_ENABLE: 'false'
+    volumes: [objects:/data]
+  api:
+    profiles: [smoke]
+    image: ${LOCAL_CI_API_IMAGE:-assay-local/api:unbuilt}
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://ci:ci_test_password@postgres:5432/assay_ci?schema=public
+      REDIS_URL: redis://redis:6379
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      STORAGE_DRIVER: s3
+      S3_ENDPOINT: http://rustfs:9000
+      S3_BUCKET: assay-attachments
+      S3_REGION: us-east-1
+      S3_ACCESS_KEY: ciaccesskey
+      S3_SECRET_KEY: cisecretkey
+      S3_FORCE_PATH_STYLE: 'true'
+      AUTH_SECRET: ci_only_not_a_production_secret_0123456789
+      AUTH_BASE_URL: ${LOCAL_CI_TEST_URL:-http://127.0.0.1:18088}
+      AUTH_TRUST_ORIGINS: ${LOCAL_CI_TEST_URL:-http://127.0.0.1:18088}
+      PUBLIC_URL: ${LOCAL_CI_TEST_URL:-http://127.0.0.1:18088}
+      APP_URL: ${LOCAL_CI_TEST_URL:-http://127.0.0.1:18088}
+      ADMIN_EMAIL: admin@example.com
+      ADMIN_PASSWORD: ciadmin12345
+      ADMIN_NAME: Local CI Admin
+      MAIL_PROVIDER: none
+      REQUIRE_EMAIL_VERIFICATION: 'false'
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      rustfs: {condition: service_started}
+  web:
+    profiles: [smoke]
+    image: ${LOCAL_CI_WEB_IMAGE:-assay-local/web:unbuilt}
+    ports:
+      - '127.0.0.1:${LOCAL_CI_TEST_PORT:-18088}:80'
+    depends_on: [api]
+volumes:
+  pg:
+  objects:

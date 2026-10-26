@@ -122,6 +122,10 @@ Traefik 应用栈放在 [deploy/aliyun/docker-compose.yaml](deploy/aliyun/docker
 
 Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](deploy/aliyun-Cloudflare-Tunnel/README.md)，包含无主机端口的应用栈、连接器和令牌更新工具。说明覆盖 `ticket.greenstor.ai` 入口和现有生产卷的迁移方式。
 
+### 本地 CI 与备用发布
+
+GitHub Actions 额度不可用时，使用根目录 `Taskfile.yml`：`task ci VERSION=1.3.11` 完成测试和构建，`task publish VERSION=1.3.11` 推送 Docker Hub 并发布 GitHub Release。生产部署是单独的 `task deploy:production`，不会由发布任务自动触发。安装、参数、产物和回滚步骤见 [本地 CI 说明](scripts/local-ci/README.md)。
+
 ### 发版（GitHub Actions 自动完成）
 
 推送**只跑测试**（类型检查 + 编译 + 整栈冒烟测试），不会自动发版。
