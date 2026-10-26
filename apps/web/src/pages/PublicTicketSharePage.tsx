@@ -116,7 +116,7 @@ export default function PublicTicketSharePage() {
                         <time className="text-xs text-gray-400">{fmt.dateTime(message.createdAt)}</time>
                       </header>
                       <div
-                        className="prose prose-sm max-w-none break-words text-gray-700 dark:prose-invert dark:text-gray-200"
+                        className="rich min-w-0 break-words text-sm text-gray-700 dark:text-gray-200"
                         dangerouslySetInnerHTML={renderHtml(publicBody(message.body))}
                       />
                     </article>
