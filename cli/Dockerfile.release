@@ -1,6 +1,5 @@
 # syntax=docker/dockerfile:1
 ARG LINUX_BUILDER=rust:1.99-alpine
-ARG WINDOWS_BUILDER=ghcr.io/rust-cross/cargo-xwin:0.23.1
 
 FROM ${LINUX_BUILDER} AS linux-builder
 WORKDIR /source
@@ -13,13 +12,3 @@ RUN --mount=type=secret,id=proxy_ca \
 FROM scratch AS linux-export
 COPY --from=linux-builder /source/target/release/assay /assay-x86_64-unknown-linux-musl
 
-FROM ${WINDOWS_BUILDER} AS windows-builder
-WORKDIR /source
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
-RUN --mount=type=secret,id=proxy_ca \
-    if [ -f /run/secrets/proxy_ca ]; then export CARGO_HTTP_CAINFO=/run/secrets/proxy_ca SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    rustup target add x86_64-pc-windows-msvc && cargo xwin build --locked --release --target x86_64-pc-windows-msvc
-
-FROM scratch AS windows-export
-COPY --from=windows-builder /source/target/x86_64-pc-windows-msvc/release/assay.exe /assay-x86_64-pc-windows-msvc.exe

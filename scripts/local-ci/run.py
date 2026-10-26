@@ -119,7 +119,7 @@ class Pipeline:
 
     def doctor(self):
         self.version_check()
-        for tool in ['docker', 'gh', 'git', 'python3', self.cargo]:
+        for tool in ['docker', 'gh', 'git', 'python3', self.cargo, 'cargo-xwin', 'clang-cl', 'lld-link', 'llvm-lib', 'llvm-dlltool']:
             if not shutil.which(tool, path=self.env.get('PATH')):
                 raise RuntimeError('Missing prerequisite: ' + tool)
         self.local_docker()
@@ -127,6 +127,9 @@ class Pipeline:
         call([self.cargo, '--version'], env=self.env)
         call([self.cargo, 'fmt', '--version'], env=self.env)
         call([self.cargo, 'clippy', '--version'], env=self.env)
+        call([self.cargo, 'xwin', '--version'], env=self.env)
+        call(['clang-cl', '--version'], env=self.env)
+        call(['lld-link', '--version'], env=self.env)
         call(['gh', 'api', 'user', '--jq', '.login'], env=self.env)
         print('Version and local prerequisites checked; Docker Hub write access is checked on push', flush=True)
 
@@ -259,12 +262,19 @@ class Pipeline:
     def build_cli(self):
         self.local_docker()
         self.version_check()
-        for target in ['linux-export', 'windows-export']:
-            destination = self.state / target
-            call(['docker', 'buildx', 'build', *self.build_flags(), '-f', str(ROOT / 'cli/Dockerfile.release'),
-                  '--target', target, '--output', 'type=local,dest=' + str(destination), str(ROOT / 'cli')], env=self.env)
-            asset = ASSETS[0] if target == 'linux-export' else ASSETS[1]
-            shutil.copy2(destination / asset, self.dist / asset)
+        destination = self.state / 'linux-export'
+        call(['docker', 'buildx', 'build', *self.build_flags(), '-f', str(ROOT / 'cli/Dockerfile.release'),
+              '--target', 'linux-export', '--output', 'type=local,dest=' + str(destination), str(ROOT / 'cli')], env=self.env)
+        shutil.copy2(destination / ASSETS[0], self.dist / ASSETS[0])
+        # Native cargo-xwin avoids expanding a multi-gigabyte compiler image on
+        # Docker's copy-based storage drivers. Its SDK/cache stays in CI output.
+        env = self.env.copy()
+        target = self.state.parent / 'cache/target-cli'
+        env['CARGO_TARGET_DIR'] = str(target)
+        env['XWIN_CACHE_DIR'] = str(self.state.parent / 'cache/xwin')
+        call([self.cargo, 'xwin', 'build', '--locked', '--release', '--target', 'x86_64-pc-windows-msvc',
+              '--manifest-path', str(ROOT / 'cli/Cargo.toml')], env=env)
+        shutil.copy2(target / 'x86_64-pc-windows-msvc/release/assay.exe', self.dist / ASSETS[1])
         # Verify both file formats, and execute the statically linked Linux CLI.
         if (self.dist / ASSETS[0]).read_bytes()[:4] != b'\x7fELF' or (self.dist / ASSETS[1]).read_bytes()[:2] != b'MZ':
             raise RuntimeError('Invalid Linux or Windows binary format')

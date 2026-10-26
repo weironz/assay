@@ -8,7 +8,18 @@ GitHub Actions 免费额度耗尽时，使用仓库根目录 `Taskfile.yml`。�
 主运行环境为 Linux x86_64：Python 3.11+、Docker（Compose v2 / Buildx）、Git、GitHub CLI、
 Rust stable（包含 rustfmt、clippy）、Node.js（部署工具契约测试）。API/Web 的依赖安装和构建
 在 Docker 中执行，不要求主机额外安装 pnpm/Bun。CLI 的 Linux musl 和 Windows MSVC
-发布包也通过 Docker 交叉构建。
+发布包分别通过 Docker 和主机 cargo-xwin 交叉构建。主机还需安装 cargo-xwin v0.23.1、
+LLVM（clang-cl、lld-link、llvm-lib、llvm-dlltool）以及 Rust 的 Windows 目标：
+
+```bash
+rustup target add x86_64-pc-windows-msvc
+cargo install cargo-xwin --version 0.23.1 --locked
+# Debian/Ubuntu：apt install clang lld llvm
+```
+
+也可从 cargo-xwin 官方 Release 下载并校验预编译工具。Windows SDK 首次构建时由
+cargo-xwin 下载并缓存到本地 CI 输出目录，请遵守该工具及 Microsoft SDK 的许可条款。
+此方式避免下载和展开完整的 Windows 编译器容器镜像，适合磁盘有限的备用构建主机。
 
 安装 Task v3.54.0 时，从 [官方 Release](https://github.com/go-task/task/releases/tag/v3.54.0)
 下载对应平台的压缩包与 `task_checksums.txt`，验证 SHA256 后将 `task` 放到 PATH。
