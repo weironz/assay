@@ -6,8 +6,11 @@ WORKDIR /source
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN --mount=type=secret,id=proxy_ca \
+    --mount=type=cache,id=assay-rust-registry,target=/usr/local/cargo/registry,sharing=locked \
+    --mount=type=cache,id=assay-cli-musl-target,target=/source/target,sharing=locked \
     if [ -f /run/secrets/proxy_ca ]; then export CARGO_HTTP_CAINFO=/run/secrets/proxy_ca SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
-    cargo build --locked --release
+    cargo build --locked --release \
+    && mkdir -p /out && cp target/release/assay /out/assay
 
 FROM scratch AS linux-export
-COPY --from=linux-builder /source/target/release/assay /assay-x86_64-unknown-linux-musl
+COPY --from=linux-builder /out/assay /assay-x86_64-unknown-linux-musl

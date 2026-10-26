@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
+import { getConfig } from '../config';
 import { DRAFT_TTL_HOURS } from './limits';
 import type { DeletionDrainResult } from './deletion-queue';
 import {
@@ -50,21 +51,25 @@ export class AttachmentMaintenanceService
   ) {}
 
   onModuleInit() {
-    void this.sweep().catch((error) =>
-      this.logger.error('草稿附件清理失败', error),
-    );
-    this.sweepTimer = setInterval(() => {
+    // Upgrades must not turn historical uploads into an implicit deletion job.
+    // Deliberate deletions keep their durable retry worker independently.
+    if (getConfig().attachments.draftCleanupEnabled) {
       void this.sweep().catch((error) =>
         this.logger.error('草稿附件清理失败', error),
       );
-    }, SWEEP_INTERVAL_MS);
+      this.sweepTimer = setInterval(() => {
+        void this.sweep().catch((error) =>
+          this.logger.error('草稿附件清理失败', error),
+        );
+      }, SWEEP_INTERVAL_MS);
+    }
     this.drainTimer = setInterval(() => {
       void this.processDeletions().catch((error) =>
         this.logger.error('附件删除队列处理失败', error),
       );
     }, DELETION_DRAIN_INTERVAL_MS);
     // 与 SlaService 一致：定时器不能拖住进程退出。
-    this.sweepTimer.unref();
+    this.sweepTimer?.unref();
     this.drainTimer.unref();
   }
 

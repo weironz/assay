@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { AttachmentsService } from '../src/attachments/attachments.service';
 import { AttachmentMaintenanceService } from '../src/attachments/attachment-maintenance.service';
+
 import { createTicketsService } from './tickets-service.fixture';
 import {
   DRAFT_TTL_HOURS,
@@ -15,6 +16,37 @@ import {
   extForRasterMime,
   mimeForRasterExt,
 } from '../src/attachments/limits';
+
+test('disabling automatic draft cleanup preserves uploads while the deletion outbox keeps running', async () => {
+  const original = process.env.ATTACHMENT_DRAFT_CLEANUP_ENABLED;
+  try {
+    for (const enabled of [false, true]) {
+      process.env.ATTACHMENT_DRAFT_CLEANUP_ENABLED = String(enabled);
+      const callbacks: (() => unknown)[] = [];
+      const timers = mock.method(global, 'setInterval', ((callback: () => unknown) => {
+        callbacks.push(callback);
+        return { unref() {} };
+      }) as any);
+      const service = new AttachmentMaintenanceService({} as any, {} as any);
+      let sweeps = 0;
+      let drains = 0;
+      service.sweep = async () => { sweeps++; return 0; };
+      service.processDeletions = async () => { drains++; return { deleted: 0, retrying: 0 }; };
+      try {
+        service.onModuleInit();
+        for (const callback of callbacks) await callback();
+        assert.equal(sweeps, enabled ? 2 : 0);
+        assert.equal(drains, 1);
+      } finally {
+        service.onModuleDestroy();
+        timers.mock.restore();
+      }
+    }
+  } finally {
+    if (original === undefined) delete process.env.ATTACHMENT_DRAFT_CLEANUP_ENABLED;
+    else process.env.ATTACHMENT_DRAFT_CLEANUP_ENABLED = original;
+  }
+});
 
 const tmpDir = mkdtempSync(join(tmpdir(), 'assay-attachment-'));
 

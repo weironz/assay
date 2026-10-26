@@ -18,6 +18,14 @@ test('defaults stay compatible with the previous per-module fallbacks', () => {
   assert.equal(config.storage.s3.forcePathStyle, true);
   assert.equal(config.mail.provider, 'none');
   assert.equal(config.auth.requireEmailVerification, false);
+  assert.equal(config.attachments.draftCleanupEnabled, false);
+});
+
+test('historical draft cleanup requires explicit opt-in', () => {
+  assert.equal(parseConfig({ ATTACHMENT_DRAFT_CLEANUP_ENABLED: 'true' }).attachments.draftCleanupEnabled, true);
+  for (const value of ['', 'false', '1', 'True']) {
+    assert.equal(parseConfig({ ATTACHMENT_DRAFT_CLEANUP_ENABLED: value }).attachments.draftCleanupEnabled, false);
+  }
 });
 
 test('non-production keeps the local rustfsadmin fallback for development', () => {

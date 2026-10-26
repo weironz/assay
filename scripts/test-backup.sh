@@ -118,6 +118,8 @@ elif [[ "$1" == run ]]; then
       esac
     done
   fi
+elif [[ "$1" == stop || "$1" == start ]]; then
+  echo api-id
 else
   exit 92
 fi
@@ -183,3 +185,38 @@ run_case bucket_failure bucket-fail docker-compose.yaml fail
 run_case sync_failure sync-fail docker-compose.yaml fail
 run_case pg_failure pg-fail docker-compose.yaml fail
 run_case compose_drift compose-drift docker-compose.yaml fail
+
+# A quiesced backup must restore the original API even when object export fails.
+export BACKUP_QUIESCE_API=1
+run_case quiesced_success ok docker-compose.yaml pass
+grep -Fxq 'stop --time 30 api-id' "$MOCK_LOG"
+grep -Fxq 'start api-id' "$MOCK_LOG"
+run_case quiesced_failure bucket-fail docker-compose.yaml fail
+grep -Fxq 'start api-id' "$MOCK_LOG"
+export BACKUP_LEAVE_API_STOPPED=1
+run_case quiesced_deployment ok docker-compose.yaml pass
+if grep -Fxq 'start api-id' "$MOCK_LOG"; then echo 'Deployment backup unexpectedly resumed API writes' >&2; exit 1; fi
+unset BACKUP_QUIESCE_API BACKUP_LEAVE_API_STOPPED
+
+# Fixture-only age command tests completion markers/checksums, not encryption.
+mkdir "$TEST_DIR/age-bin"
+cat > "$TEST_DIR/age-bin/age" <<'AGE'
+#!/usr/bin/env bash
+[[ "${MOCK_AGE_FAIL:-0}" == 0 ]] || exit 21
+cp -- "$5" "$4"
+AGE
+chmod +x "$TEST_DIR/age-bin/age"
+export MOCK_SCENARIO=ok MOCK_FILE=docker-compose.yaml
+export MOCK_SELECTED_PATH="$TEST_DIR/project/docker-compose.yaml"
+PATH="$TEST_DIR/age-bin:$PATH" BACKUP_AGE_RECIPIENT=fixture-recipient \
+  bash "$TEST_DIR/project/scripts/backup.sh" "$TEST_DIR/encrypted" docker-compose.yaml >/dev/null
+encrypted="$(find "$TEST_DIR/encrypted" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[[ ! -e "$encrypted/INCOMPLETE" && ! -e "$encrypted/auth-secret.txt" ]]
+(cd "$encrypted" && sha256sum -c SHA256SUMS >/dev/null)
+if PATH="$TEST_DIR/age-bin:$PATH" BACKUP_AGE_RECIPIENT=fixture-recipient MOCK_AGE_FAIL=1 \
+  bash "$TEST_DIR/project/scripts/backup.sh" "$TEST_DIR/encryption-failed" docker-compose.yaml >/dev/null 2>&1; then
+  echo 'Failed encryption marked backup complete' >&2; exit 1
+fi
+failed="$(find "$TEST_DIR/encryption-failed" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[[ -f "$failed/INCOMPLETE" ]]
+echo 'PASS encrypted_checksums_and_failure_marker'

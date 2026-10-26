@@ -19,11 +19,13 @@ RUN bun run build
 # ---- 运行阶段：alpine-slim（不含 perl/geoip 等用不到的模块）----
 FROM nginx:1.27-alpine-slim
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+COPY --chmod=755 docker-entrypoint.d/15-assay-trusted-proxies.sh /docker-entrypoint.d/15-assay-trusted-proxies.sh
 COPY --from=builder /app/dist /usr/share/nginx/html
 # Public assets can arrive with mode 0600 from the checkout; nginx runs as an
 # unprivileged worker and needs read access, including the bundled brand images.
 RUN find /usr/share/nginx/html -type d -exec chmod 755 {} + \
-    && find /usr/share/nginx/html -type f -exec chmod 644 {} +
+    && find /usr/share/nginx/html -type f -exec chmod 644 {} + \
+    && touch /etc/nginx/assay-trusted-proxies.conf
 EXPOSE 80
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD wget -qO- http://127.0.0.1/ >/dev/null 2>&1 || exit 1

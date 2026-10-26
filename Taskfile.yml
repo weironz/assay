@@ -60,6 +60,9 @@ tasks:
   test:smoke:
     desc: Run login, ticket, branding, MFA and throttling checks on an isolated stack
     cmds: ['python3 scripts/local-ci/run.py smoke']
+  test:upgrade:
+    desc: Restore a protected production backup into disposable services and verify the upgrade
+    cmds: ['python3 scripts/local-ci/run.py test-upgrade']
   ci:
     desc: Run the complete local verification pipeline; does not publish or deploy
     cmds:

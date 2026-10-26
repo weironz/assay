@@ -80,6 +80,8 @@ services:
       rustfs: { condition: service_started }
 
   web:
+    environment:
+      ASSAY_TRUSTED_PROXY_IPS: ${ASSAY_TRUSTED_PROXY_IPS:-}
     logging:
       driver: json-file
       options:

@@ -1,6 +1,6 @@
 {
   "name": "greenstor-cop",
-  "version": "1.3.11",
+  "version": "1.3.12",
   "private": true,
   "description": "公司运营服务平台 - 工单、资产和备品备件管理 (NestJS + React)",
   "scripts": {

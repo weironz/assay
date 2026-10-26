@@ -8,7 +8,9 @@ GitHub Actions 免费额度耗尽时，使用仓库根目录 `Taskfile.yml`。�
 主运行环境为 Linux x86_64：Python 3.11+、Docker（Compose v2 / Buildx）、Git、GitHub CLI、
 Rust stable（包含 rustfmt、clippy）、Node.js（部署工具契约测试）。API/Web 的依赖安装和构建
 在 Docker 中执行，不要求主机额外安装 pnpm/Bun。CLI 的 Linux musl 和 Windows MSVC
-发布包分别通过 Docker 和主机 cargo-xwin 交叉构建。主机还需安装 cargo-xwin v0.23.1、
+发布包分别通过一次性 Rust 容器和主机 cargo-xwin 交叉构建。Linux 的编译输出和依赖缓存
+绑定到 `.local-ci/cache`，源码只读，不把完整编译目录保存成镜像层；Agent 镜像复用同一次
+编译的二进制并校验提取文件的 SHA256。主机还需安装 cargo-xwin v0.23.1、
 LLVM（clang-cl、lld-link、llvm-lib、llvm-dlltool）以及 Rust 的 Windows 目标：
 
 ```bash
@@ -76,10 +78,10 @@ GitHub CLI 凭据目录。仅这些 GitHub 子进程会去掉默认的 `GH_TOKEN
 
 ```bash
 task doctor
-task ci VERSION=1.3.11
-task status VERSION=1.3.11
+task ci VERSION=1.3.12
+task status VERSION=1.3.12
 # 所有测试与构建均通过，且源代码已提交后：
-task publish VERSION=1.3.11
+task publish VERSION=1.3.12
 ```
 
 `VERSION` 默认取根 `package.json`，必须与 API、Web、CLI、Samba Agent 一致。
@@ -95,6 +97,7 @@ task publish VERSION=1.3.11
 | `task test` | 部署/备份工具契约、前端测试、后端测试、CLI 测试、Agent fmt/clippy/test |
 | `task build` | API/Web/Agent 三个镜像，以及 Linux/Windows CLI 发布包 |
 | `task test:smoke` | 独立整栈的首页、Logo、路由、登录、角色、工单、MFA、限流验证 |
+| `task test:upgrade` | 在隔离服务中恢复指定生产备份，验证迁移、原记录、附件下载和旧版本回退 |
 | `task ci` | 按顺序执行全部检查与构建，记录对应提交号和源码摘要 |
 | `task push:images` | 仅推送通过验证的版本标签，拒绝覆盖已有发布标签，不更新 latest |
 | `task release` | 发布二进制、SHA256SUMS 和包含镜像 digest 的发布清单 |
@@ -120,19 +123,25 @@ Windows 包在 Linux 交叉编译，本机不执行 Windows 程序。
 
 ## 单独部署生产
 
-本次只构建和发布；下列流程为之后明确执行生产部署时使用。
-在 `.env.local-ci` 设置 `LOCAL_CI_DEPLOY_HOST`、`LOCAL_CI_DEPLOY_USER`、
+先阅读 [v1.3.10 升级说明](upgrade-v1.3.12.md)。在 `.env.local-ci` 设置 `LOCAL_CI_DEPLOY_HOST`、`LOCAL_CI_DEPLOY_USER`、
 `LOCAL_CI_DEPLOY_DIR`，按需设置端口和 SSH 配置路径。SSH 使用严格主机指纹检查和现有授权，
 不会关闭主机验证。然后显式执行：
 
 ```bash
-task deploy:production VERSION=1.3.11
+task deploy:production VERSION=1.3.12
 ```
 
-部署要求本地验证和 Release 已完成，沿用当前提交，按发布清单的不可变 digest 拉取镜像。
-服务器先运行现有备份工具，再保留原 `.env` / Compose / 镜像引用，更新 `REGISTRY` 和
-`IMAGE_TAG` 后只重建 API/Web。数据库、Redis、对象存储容器和数据卷保留。
-API 使用生产的无 seed 启动命令；健康、镜像和公网检查失败时恢复原 `.env` 与 API/Web 镜像。
+部署要求当前提交的本地验证、生产副本升级/回退演练和 Release 全部完成。
+按发布清单的不可变 digest 拉取镜像；设置 `LOCAL_CI_DEPLOY_OFFLINE=true` 时，在构建机
+导出已发布且镜像 ID 相符的 API/Web，校验传输文件后在目标机导入，不依赖生产 Docker Hub 连通性。
+两种模式均验证最终镜像 ID，不修改 `latest`。
+
+服务器在原站服务期间完成镜像准备、配置预检查。进入维护窗口后暂停 Web/API 写入，
+使用当前 API 镜像内已有的 S3 SDK 备份 PostgreSQL、全部对象及恢复配置，不下载备份工具镜像。
+校验备份后只重建 API/Web，沿用生产的无 seed 启动命令。开启 Web 前逐条核对旧数据，
+允许新记录和空附件关联回填，禁止原工单、正文、账号密码哈希、角色分配或既有附件绑定丢失/改变。
+数据库、Redis、对象存储容器和数据卷保留；域名、密钥、代理配置不随环境模板替换。
+检查失败会尝试恢复原 `.env`、Compose 和 API/Web 镜像，并明确报告恢复是否成功。
 
 镜像回退不会自动撤销数据库迁移，也不会覆盖部署后新增的工单。数据库恢复需要根据备份单独操作；
 发布前应核对迁移的兼容性和恢复演练结果。生产部署默认不更新 Samba Agent，文件服务器上的

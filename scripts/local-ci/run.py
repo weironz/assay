@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import datetime
 import fcntl
+import gzip
 import hashlib
 import http.cookiejar
 import json
@@ -216,8 +217,35 @@ class Pipeline:
             args += ['--target', 'builder']
         if service == 'web':
             args += ['--build-arg', 'VITE_API_BASE_URL=']
+        if service == 'samba-agent' and not test:
+            artifact = self.rust_release('agents/samba', 'assay-samba-agent')
+            context = self.state / 'agent-image-artifact'
+            context.mkdir(exist_ok=True)
+            shutil.copy2(artifact, context / 'assay-samba-agent')
+            self.agent_build_sha256 = sha256(artifact)
+            args += ['--build-arg', 'BUILD_FROM=prebuilt-artifact', '--build-context', 'release-artifacts=' + str(context)]
         call([*args, str(ROOT / SERVICES[service])], env=self.env)
         return self.image(service, test)
+
+    def rust_release(self, directory, binary):
+        target = self.state.parent / 'cache' / ('target-agent-musl' if directory == 'agents/samba' else 'target-cli-musl')
+        cargo_home = self.state.parent / 'cache/cargo-musl'
+        registry = Path(self.env.get('CARGO_HOME', Path.home() / '.cargo')) / 'registry'
+        for path in [target, cargo_home, registry]:
+            path.mkdir(parents=True, exist_ok=True)
+        ca = Path(self.env.get('SSL_CERT_FILE', '/etc/ssl/certs/ca-certificates.crt'))
+        if not ca.is_file():
+            raise RuntimeError('A valid CA bundle is required by the Rust release container')
+        call(['docker', 'run', '--rm', '--platform', 'linux/amd64', '--user', f'{os.getuid()}:{os.getgid()}',
+              '--mount', f'type=bind,src={ROOT / directory},dst=/source,readonly',
+              '--mount', f'type=bind,src={target},dst=/target',
+              '--mount', f'type=bind,src={cargo_home},dst=/cargo',
+              '--mount', f'type=bind,src={registry},dst=/cargo/registry',
+              '--mount', f'type=bind,src={ca},dst=/run/ci-ca.pem,readonly',
+              '-e', 'CARGO_HOME=/cargo', '-e', 'CARGO_HTTP_CAINFO=/run/ci-ca.pem', '-e', 'SSL_CERT_FILE=/run/ci-ca.pem',
+              '-w', '/source', self.env.get('LOCAL_CI_RUST_IMAGE', 'rust:1.99-alpine'),
+              'cargo', 'build', '--locked', '--release', '--target-dir', '/target', '--bin', binary], env=self.env)
+        return target / 'release' / binary
 
     @contextlib.contextmanager
     def sandbox(self, purpose, images=None):
@@ -230,6 +258,11 @@ class Pipeline:
             env.update(LOCAL_CI_API_IMAGE=images['api'], LOCAL_CI_WEB_IMAGE=images['web'])
         command = ['docker', 'compose', '--project-directory', str(ROOT), '--env-file', os.devnull,
                    '-p', project, '-f', str(ROOT / 'deploy/local-ci/docker-compose.yaml')]
+        if purpose == 'upgrade':
+            # The default stack seeds an empty database. A production-copy
+            # rehearsal must exercise the no-seed upgrade startup instead.
+            env['LOCAL_CI_UPGRADE_ADMIN_EMAIL'] = 'admin@example.com'
+            command += ['-f', str(ROOT / 'deploy/local-ci/upgrade.compose.yaml')]
         def compose(*args, **kwargs):
             return call([*command, *args], env=env, **kwargs)
         try:
@@ -244,6 +277,7 @@ class Pipeline:
         for directory in ['deploy/aliyun/tests', 'deploy/aliyun-Cloudflare-Tunnel/tests', 'deploy/samba-production', 'scripts/local-ci/tests']:
             call([sys.executable, '-m', 'unittest', 'discover', '-s', directory, '-p', 'test_*.py'], env=self.env)
         call(['bash', 'scripts/test-backup.sh'], env=self.env)
+        call(['node', '--test', 'scripts/test-backup-s3.cjs'], env=self.env)
         call(['node', '--test', 'deploy/samba-test/tests/test-origin.test.cjs'], env=self.env)
         self.mark('test-deployment')
 
@@ -255,6 +289,24 @@ class Pipeline:
         call(['docker', 'run', '--rm', '--mount',
               f'type=bind,src={ROOT / "apps/api/src"},dst=/api/src,readonly',
               image, 'bun', 'run', 'test'], env=self.env)
+        runtime = self.docker_build('web')
+        probe = ('/docker-entrypoint.d/15-assay-trusted-proxies.sh; result=$?; '
+                 'test ! -e /tmp/proxy-injection || exit 99; '
+                 'test "$result" = 0 || exit 42; '
+                 'cat /etc/nginx/assay-trusted-proxies.conf; nginx -t')
+        for addresses, valid in [('', True), ('172.19.0.6,172.19.0.12', True),
+                                 ('172.19.0.0/16', False), ('256.1.2.3', False),
+                                 ('172.19.0.6;touch /tmp/proxy-injection', False)]:
+            checked = subprocess.run(['docker', 'run', '--rm', '--network', 'none',
+                '-e', 'ASSAY_TRUSTED_PROXY_IPS=' + addresses, '--entrypoint', 'sh', runtime,
+                '-c', probe], env=self.env, capture_output=True, text=True)
+            if valid:
+                expected = '\n'.join('set_real_ip_from ' + value + ';' for value in addresses.split(',') if value)
+                if checked.returncode or checked.stdout.strip() != expected:
+                    raise RuntimeError('Web trusted proxy runtime configuration check failed')
+            elif checked.returncode != 42:
+                raise RuntimeError('Web proxy configuration did not reject unsafe input before nginx startup')
+        print('Web proxy runtime checks passed (5 cases)', flush=True)
         self.mark('test-web')
 
     def test_api(self):
@@ -304,15 +356,14 @@ class Pipeline:
             call(['docker', 'cp', container + ':/assay-samba-agent', str(self.dist / ASSETS[2])], env=self.env)
         finally:
             call(['docker', 'rm', container], env=self.env)
+        if sha256(self.dist / ASSETS[2]) != self.agent_build_sha256:
+            raise RuntimeError('Agent image does not contain the binary built from this source')
         self.mark('build-images', images=images, imageIds=ids, agentSha256=sha256(self.dist / ASSETS[2]))
 
     def build_cli(self):
         self.local_docker()
         self.version_check()
-        destination = self.state / 'linux-export'
-        call(['docker', 'buildx', 'build', *self.build_flags(), '-f', str(ROOT / 'cli/Dockerfile.release'),
-              '--target', 'linux-export', '--output', 'type=local,dest=' + str(destination), str(ROOT / 'cli')], env=self.env)
-        shutil.copy2(destination / ASSETS[0], self.dist / ASSETS[0])
+        shutil.copy2(self.rust_release('cli', 'assay'), self.dist / ASSETS[0])
         # Native cargo-xwin avoids expanding a multi-gigabyte compiler image on
         # Docker's copy-based storage drivers. Its SDK/cache stays in CI output.
         env = self.env.copy()
@@ -379,6 +430,10 @@ class Pipeline:
                 compose('logs', '--tail', '80')
                 raise
         self.mark('smoke', imageIds=self.receipt('build-images')['imageIds'])
+
+    def test_upgrade(self):
+        from upgrade import rehearse
+        rehearse(self)
 
     def verify(self):
         clean_source()
@@ -523,17 +578,48 @@ class Pipeline:
             raise RuntimeError('Explicit production SSH host and user are required')
         if not re.fullmatch(r'/[A-Za-z0-9_./-]+', directory) or directory == '/' or not port.isdigit():
             raise RuntimeError('Explicit absolute production directory and valid SSH port are required')
+        upgrade = self.receipt('upgrade')
+        if (not upgrade.get('preserved') or not upgrade.get('rollbackCompatible') or
+                upgrade.get('targetImageIds') != self.receipt('build-images')['imageIds']):
+            raise RuntimeError('Rehearse this production copy against the verified target images before deployment')
+        source_images = upgrade['sourceImages']
+        for image_id in source_images.values():
+            if not re.fullmatch(r'sha256:[0-9a-f]{64}', image_id):
+                raise RuntimeError('Upgrade proof does not identify the original production images')
+        proxy_names = upgrade.get('trustedProxyContainers', [])
+        if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name) for name in proxy_names):
+            raise RuntimeError('Invalid trusted proxy declaration')
+        mode = 'offline' if os.getenv('LOCAL_CI_DEPLOY_OFFLINE') == 'true' else 'online'
         options = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-p', port]
         if os.getenv('LOCAL_CI_SSH_CONFIG'):
             options += ['-F', os.environ['LOCAL_CI_SSH_CONFIG']]
         target = user + '@' + host
-        operation = directory + '/backups/local-ci-' + self.version + '-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())
-        call(['ssh', *options, target, shlex.join(['mkdir', '-p', operation + '/tools'])], env=self.env)
+        operation = directory + '/backups/local-ci-' + self.version + '-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + secrets.token_hex(3)
+        call(['ssh', *options, target, shlex.join(['install', '-d', '-m', '700', operation, operation + '/tools'])], env=self.env)
         scp_options = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-P', port]
         if os.getenv('LOCAL_CI_SSH_CONFIG'):
             scp_options += ['-F', os.environ['LOCAL_CI_SSH_CONFIG']]
-        call(['scp', *scp_options, ROOT / 'scripts/backup.sh', target + ':' + operation + '/tools/backup.sh'], env=self.env)
-        arguments = [directory, operation, self.version, self.namespace, images['api']['digest'], images['web']['digest']]
+        for filename in ['scripts/backup.sh', 'scripts/backup-s3.cjs', 'scripts/local-ci/db_fingerprint.py', 'scripts/local-ci/deploy_config.py']:
+            call(['scp', *scp_options, ROOT / filename, target + ':' + operation + '/tools/' + Path(filename).name], env=self.env)
+        if mode == 'offline':
+            references = [images[service]['reference'] for service in ['api', 'web']]
+            for service, reference in zip(['api', 'web'], references):
+                actual = call(['docker', 'image', 'inspect', reference, '--format', '{{.Id}}'], env=self.env, capture=True)
+                if actual != images[service]['imageId']:
+                    raise RuntimeError('Offline bundle source tag differs from the published image')
+            bundle = self.state / 'deployment-images.tar.gz'
+            saved = subprocess.Popen(['docker', 'save', *references], stdout=subprocess.PIPE, env=self.env)
+            with gzip.open(bundle, 'wb', compresslevel=1) as output:
+                shutil.copyfileobj(saved.stdout, output)
+            if saved.wait():
+                bundle.unlink(missing_ok=True)
+                raise RuntimeError('Could not export the verified deployment images')
+            sums = self.state / 'deployment-images.sha256'
+            sums.write_text(sha256(bundle) + '  images.tar.gz\n')
+            call(['scp', *scp_options, bundle, target + ':' + operation + '/images.tar.gz'], env=self.env)
+            call(['scp', *scp_options, sums, target + ':' + operation + '/images.sha256'], env=self.env)
+        arguments = [directory, operation, self.version, self.namespace, images['api']['digest'], images['web']['digest'],
+                     mode, images['api']['imageId'], images['web']['imageId'], source_images['api'], source_images['web'], ','.join(proxy_names)]
         command = shlex.join(['bash', '-s', '--', *arguments])
         call(['ssh', *options, target, command], data=(ROOT / 'scripts/local-ci/deploy.sh').read_text(), env=self.env)
         self.mark('deployed', host=host, directory=directory, backup=operation)
@@ -551,7 +637,7 @@ def free_port():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['doctor', 'auth-check', *STEPS, 'verify', 'push-images', 'release', 'deploy', 'status'])
+    parser.add_argument('action', choices=['doctor', 'auth-check', 'test-upgrade', *STEPS, 'verify', 'push-images', 'release', 'deploy', 'status'])
     args = parser.parse_args()
     pipeline = Pipeline()
     lock = (pipeline.state.parent / 'pipeline.lock').open('a')

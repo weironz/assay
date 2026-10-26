@@ -20,6 +20,13 @@ ROOT="$SCRIPT_ROOT"
 OUT_DIR="${1:-$ROOT/../assay-backups}"
 COMPOSE_FILE="${2:-docker-compose.yaml}"
 AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:2}"
+BACKUP_S3_CLIENT="${BACKUP_S3_CLIENT:-aws-cli}"
+BACKUP_QUIESCE_API="${BACKUP_QUIESCE_API:-0}"
+BACKUP_LEAVE_API_STOPPED="${BACKUP_LEAVE_API_STOPPED:-0}"
+[[ "$BACKUP_S3_CLIENT" == aws-cli || "$BACKUP_S3_CLIENT" == api-sdk ]] || die "不支持的 BACKUP_S3_CLIENT"
+[[ "$BACKUP_QUIESCE_API" == 0 || "$BACKUP_QUIESCE_API" == 1 ]] || die "BACKUP_QUIESCE_API 只能为 0 或 1"
+[[ "$BACKUP_LEAVE_API_STOPPED" == 0 || "$BACKUP_LEAVE_API_STOPPED" == 1 ]] || die "BACKUP_LEAVE_API_STOPPED 只能为 0 或 1"
+[[ "$BACKUP_LEAVE_API_STOPPED" == 0 || "$BACKUP_QUIESCE_API" == 1 ]] || die "保留停机状态需要显式请求静默备份"
 case "$OUT_DIR" in /*) ;; *) OUT_DIR="$PWD/$OUT_DIR" ;; esac
 case "$COMPOSE_FILE" in /*) ;; *) COMPOSE_FILE="$ROOT/$COMPOSE_FILE" ;; esac
 
@@ -120,11 +127,30 @@ mkdir -p -- "$OUT_DIR"
 OUT_DIR="$(cd "$OUT_DIR" && pwd -P)"
 DEST="$(mktemp -d "$OUT_DIR/backup-$(date +%Y%m%d-%H%M%S)-XXXXXX")"
 printf 'INCOMPLETE: do not restore\n' > "$DEST/INCOMPLETE"
-trap 'status=$?; if (( status != 0 )); then printf "备份中断，保留未完成目录：%s\n" "$DEST" >&2; fi' EXIT
+API_QUIESCED=0
+backup_exit() {
+  local status=$?
+  trap - EXIT
+  if [[ "$API_QUIESCED" == 1 && ( "$status" != 0 || "$BACKUP_LEAVE_API_STOPPED" == 0 ) ]]; then
+    if ! docker start "$API_ID" >/dev/null; then
+      printf '原 API 恢复失败，请检查容器 %s。\n' "$API_ID" >&2
+      status=1
+    fi
+  fi
+  if (( status != 0 )); then
+    printf '备份中断，保留未完成目录：%s\n' "$DEST" >&2
+  fi
+  exit "$status"
+}
+trap backup_exit EXIT
 cp -- "$COMPOSE_FILE" "$DEST/compose.yaml"
 [[ "$(sha256sum -- "$DEST/compose.yaml")" == "$COMPOSE_HASH "* ]] ||
   die "所选 Compose 文件在解析后发生变化，备份已中止"
 printf '[1/3] PostgreSQL 逻辑备份\n'
+if [[ "$BACKUP_QUIESCE_API" == 1 ]]; then
+  API_QUIESCED=1
+  docker stop --time 30 "$API_ID" >/dev/null
+fi
 compose exec -T postgres pg_dump -U "$POSTGRES_USER" "$POSTGRES_DB" | gzip > "$DEST/db.sql.gz"
 gzip -t "$DEST/db.sql.gz"
 
@@ -139,9 +165,22 @@ aws_cli() {
     -e AWS_CONFIG_FILE=/backup/.aws-config -e AWS_EC2_METADATA_DISABLED=true \
     "$AWS_CLI_IMAGE" --endpoint-url http://127.0.0.1:9000 "$@"
 }
-aws_cli s3api head-bucket --bucket "$BUCKET" >/dev/null || die "附件桶不可访问：$BUCKET"
 mkdir -m 700 "$DEST/objects"
-aws_cli s3 sync "s3://$BUCKET/" /backup/objects/ --only-show-errors --no-progress
+if [[ "$BACKUP_S3_CLIENT" == api-sdk ]]; then
+  S3_BACKUP_SCRIPT="$(dirname "${BASH_SOURCE[0]}")/backup-s3.cjs"
+  [[ -f "$S3_BACKUP_SCRIPT" ]] || die "缺少 backup-s3.cjs"
+  S3_BACKUP_SCRIPT="$(cd "$(dirname "$S3_BACKUP_SCRIPT")" && pwd -P)/$(basename "$S3_BACKUP_SCRIPT")"
+  API_IMAGE="$(docker inspect --format '{{.Image}}' "$API_ID")"
+  docker run --rm --pull never --network "container:$RUSTFS_ID" \
+    --user "$(id -u):$(id -g)" \
+    --mount "type=bind,src=$DEST,dst=/backup" \
+    --mount "type=bind,src=$S3_BACKUP_SCRIPT,dst=/app/assay-backup-s3.cjs,readonly" \
+    -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_DEFAULT_REGION \
+    --entrypoint node "$API_IMAGE" /app/assay-backup-s3.cjs "$BUCKET"
+else
+  aws_cli s3api head-bucket --bucket "$BUCKET" >/dev/null || die "附件桶不可访问：$BUCKET"
+  aws_cli s3 sync "s3://$BUCKET/" /backup/objects/ --only-show-errors --no-progress
+fi
 rm -- "$DEST/.aws-config"
 unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_DEFAULT_REGION ACCESS_KEY SECRET_KEY
 
@@ -152,23 +191,29 @@ printf '%s\n' "$AUTH_SECRET" > "$DEST/auth-secret.txt"
 unset AUTH_SECRET
 printf 'project=%s\ncompose_file=%s\nrustfs_volume=%s\npostgres_volume=%s\npostgres_user=%s\npostgres_db=%s\ns3_bucket=%s\ns3_region=%s\n' \
   "$PROJECT" "$COMPOSE_FILE" "$VOLUME" "$PG_VOLUME" "$POSTGRES_USER" "$POSTGRES_DB" "$BUCKET" "$REGION" > "$DEST/backup-info.txt"
-(cd "$DEST" && find compose.yaml db.sql.gz deployment.env auth-secret.txt backup-info.txt objects -type f -print0 |
+BACKUP_FILES=(compose.yaml db.sql.gz deployment.env auth-secret.txt backup-info.txt objects)
+[[ ! -f "$DEST/objects-manifest.json" ]] || BACKUP_FILES+=(objects-manifest.json)
+(cd "$DEST" && find "${BACKUP_FILES[@]}" -type f -print0 |
   sort -z | xargs -0 sha256sum > SHA256SUMS)
 (cd "$DEST" && sha256sum -c SHA256SUMS >/dev/null)
 [[ "$(sha256sum -- "$COMPOSE_FILE")" == "$COMPOSE_HASH "* ]] ||
   die "所选 Compose 文件在备份期间发生变化，备份已中止"
-rm -- "$DEST/INCOMPLETE"
 # 敏感材料单独打组并加密：age 归档包含 deployment.env、auth-secret.txt 与
 # 校验清单（含这两项的哈希）；未配置 age 时回退明文目录并给出醒目警告。
 SECRET_GROUP="backup-secrets.tar"
 if command -v age >/dev/null 2>&1 && [[ -n "${BACKUP_AGE_RECIPIENT:-}" ]]; then
   (cd "$DEST" && tar -cf "$SECRET_GROUP" deployment.env auth-secret.txt)
   (cd "$DEST" && age -r "$BACKUP_AGE_RECIPIENT" -o "${SECRET_GROUP}.age" "$SECRET_GROUP")
-  rm -- "$DEST/deployment.env" "$DEST/auth-secret.txt" "$SECRET_GROUP"
-  chmod 600 "${SECRET_GROUP}.age"
+  rm -- "$DEST/deployment.env" "$DEST/auth-secret.txt" "$DEST/$SECRET_GROUP"
+  chmod 600 "$DEST/${SECRET_GROUP}.age"
+  sed -e '/  deployment\.env$/d' -e '/  auth-secret\.txt$/d' "$DEST/SHA256SUMS" > "$DEST/.checksums-next"
+  (cd "$DEST" && sha256sum "${SECRET_GROUP}.age") >> "$DEST/.checksums-next"
+  mv -- "$DEST/.checksums-next" "$DEST/SHA256SUMS"
   printf '[加密] 敏感材料已用 age 加密为 %s（接收者：%s）\n' "${SECRET_GROUP}.age" "$BACKUP_AGE_RECIPIENT"
 else
   printf '警告：未配置 BACKUP_AGE_RECIPIENT 或未安装 age，deployment.env 与 auth-secret.txt 以明文保留。\n' >&2
   printf '警告：备份目录含 AUTH_SECRET 与数据库凭据，请确保输出目录权限受限并尽快转移。\n' >&2
 fi
+(cd "$DEST" && sha256sum -c SHA256SUMS >/dev/null)
+rm -- "$DEST/INCOMPLETE"
 printf '备份完成：%s\n' "$DEST"

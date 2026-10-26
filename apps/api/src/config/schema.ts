@@ -54,6 +54,9 @@ export interface AppConfig {
     gatewayTokenFile: string;
     uploadTmpDir: string;
   };
+  attachments: {
+    draftCleanupEnabled: boolean;
+  };
   redis: {
     /** 原始 REDIS_URL；未设置时为空，调用方按 HOST/PORT 组合。 */
     url?: string;
@@ -197,6 +200,7 @@ const envSchema = z.object({
   APP_URL: text(),
   AUTH_BASE_URL: text().transform((value) => value ?? 'http://localhost:3000'),
   AUTH_SECRET: text(),
+  ATTACHMENT_DRAFT_CLEANUP_ENABLED: flag(false),
   AUTH_TRUST_ORIGINS: trustedOrigins,
   REQUIRE_EMAIL_VERIFICATION: z.preprocess(
     emptyToUndefined,
@@ -356,6 +360,9 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       gatewayUrl: value.FILES_GATEWAY_URL,
       gatewayTokenFile: value.FILES_GATEWAY_TOKEN_FILE,
       uploadTmpDir: value.UPLOAD_TMP_DIR,
+    },
+    attachments: {
+      draftCleanupEnabled: value.ATTACHMENT_DRAFT_CLEANUP_ENABLED,
     },
     redis: {
       url: value.REDIS_URL,
