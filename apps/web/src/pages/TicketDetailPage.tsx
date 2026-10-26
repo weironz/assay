@@ -1,4 +1,3 @@
-import TicketAssets from '../features/cop/TicketAssets';
 import { useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -156,7 +155,6 @@ export default function TicketDetailPage() {
 
   return (
     <div className="space-y-4">
-      <TicketAssets ticketId={id} />
       <div className="flex items-center gap-3">
         <Link to="/tickets" className="text-sm text-brand-700 hover:underline">
           {t('ticketDetail.back')}

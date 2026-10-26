@@ -9,7 +9,6 @@ import {
   Options,
   Page,
   exportCSV,
-  useCopCatalogue,
   useCopQuery,
 } from './api';
 import {
@@ -241,31 +240,10 @@ export function AssetDetailPage() {
   const { t } = useTranslation();
   const { has } = useAuth();
   const qc = useQueryClient();
-  const [editing, setEditing] = useState(false),
-    [ticketId, setTicketId] = useState('');
+  const [editing, setEditing] = useState(false);
   const asset = useCopQuery<Asset>('/assets/' + id);
   const options = useCopQuery<Options>('/platform/options');
   const fields = useAssetFields(options.data, asset.data);
-  const related = useCopQuery<
-    { id: string; ticketNo: string; title: string; status: string }[]
-  >('/assets/' + id + '/tickets', undefined, has('ticket:read'));
-  const tickets = useCopCatalogue<{
-    id: string;
-    ticketNo: string;
-    title: string;
-  }>('/tickets', has('asset:manage') && has('ticket:read'));
-  const link = useMutation({
-    mutationFn: () => api.post('/assets/' + id + '/tickets', { ticketId }),
-    onSuccess: () => {
-      setTicketId('');
-      qc.invalidateQueries({ queryKey: ['cop'] });
-    },
-  });
-  const unlink = useMutation({
-    mutationFn: (ticket: string) =>
-      api.delete('/assets/' + id + '/tickets/' + ticket),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['cop'] }),
-  });
   const register = useMutation({
     mutationFn: () => api.post('/assets/' + id + '/register'),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['cop'] }),
@@ -354,66 +332,6 @@ export function AssetDetailPage() {
           )}
         </section>
         <Files kind="asset" id={id} canWrite={has('asset:manage')} />
-        {has('ticket:read') && (
-          <section className={panel}>
-            <h2 className="mb-3 font-semibold">{t('cop.relatedTickets')}</h2>
-            {related.isError && <Failure error={related.error} />}
-            <ul className="space-y-2 text-sm">
-              {related.data?.map((ticket) => (
-                <li
-                  key={ticket.id}
-                  className="flex items-center justify-between gap-2"
-                >
-                  <Link
-                    className="text-brand-700 underline"
-                    to={'/tickets/' + ticket.id}
-                  >
-                    {ticket.ticketNo} · {ticket.title}
-                  </Link>
-                  {has('asset:manage') && (
-                    <button
-                      className={secondary}
-                      disabled={unlink.isPending}
-                      onClick={() => unlink.mutate(ticket.id)}
-                    >
-                      {t('cop.unlink')}
-                    </button>
-                  )}
-                </li>
-              ))}
-            </ul>
-            {!related.data?.length && (
-              <p className="text-sm text-gray-400">{t('cop.empty')}</p>
-            )}
-            {has('asset:manage') && (
-              <div className="mt-4 flex gap-2">
-                <select
-                  className={input}
-                  aria-label={t('cop.chooseTicket')}
-                  value={ticketId}
-                  onChange={(e) => setTicketId(e.target.value)}
-                >
-                  <option value="">{t('cop.chooseTicket')}</option>
-                  {tickets.data?.map((ticket) => (
-                    <option key={ticket.id} value={ticket.id}>
-                      {ticket.ticketNo} · {ticket.title}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  className={button + ' shrink-0'}
-                  disabled={!ticketId || link.isPending}
-                  onClick={() => link.mutate()}
-                >
-                  {t('cop.linkTicket')}
-                </button>
-              </div>
-            )}
-            {(link.isError || unlink.isError) && (
-              <Failure error={link.error || unlink.error} />
-            )}
-          </section>
-        )}
         <Activity kind="asset" id={id} />
       </div>
       {editing && (
