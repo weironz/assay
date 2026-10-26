@@ -17,7 +17,9 @@ v1.3.12 包含 v1.3.11 的功能，并修复旧数据库直接升级时的权限
    数据库、所有 S3 当前对象、对象内容 SHA256/元数据、Compose、环境文件和 AUTH_SECRET
    均纳入备份。检查 `INCOMPLETE` 不存在并执行 `sha256sum -c SHA256SUMS`。
    未配置 age 加密时，备份包含凭据，只能保存在管理员可访问的目录，不能上传 GitHub。
-3. 将 `db.sql.gz`、`objects.tar.gz`、`objects-manifest.json`、`backup-info.txt` 复制到仓库外的
+3. 备份保留的是 `objects/` 目录；为了传输到演练机，在完整快照目录中运行
+   `tar -czf objects.tar.gz -C objects .`，另行计算并记录该归档的 SHA256。
+   将 `db.sql.gz`、`objects.tar.gz`、`objects-manifest.json`、`backup-info.txt` 复制到仓库外的
    `0700` 目录，文件 `0600`。另建私有 `source.json`：
 
    ```json
@@ -59,6 +61,11 @@ v1.3.12 包含 v1.3.11 的功能，并修复旧数据库直接升级时的权限
 `ATTACHMENT_DRAFT_CLEANUP_ENABLED=false` 保留历史草稿。其他服务配置、卷、网络、
 密码密钥和域名必须保持指纹一致。代理容器后续重建可能改变动态地址，应重新解析并更新 Web，
 不要通过信任整个 Docker 子网解决。
+
+部署脚本先通过 SCP 完整传入服务器，再按文件执行，不能用 `ssh ... bash -s` 传输脚本正文：
+`docker compose exec` 等子命令会读取标准输入，可能提前读走尚未执行的脚本。
+只有健康、数据和公网检查全部通过后才生成 `deployment-result.json`；构建机核对该文件的
+版本、镜像 ID 及数据保留结果后才记录部署成功，不能单凭 SSH 返回 0 判断成功。
 
 最终备份期间会暂停 Web/API，因此有短暂维护窗口。数据库新迁移为增量操作，新增可选
 Samba 角色和权限，不重新分配员工角色。API 启动后检查每条旧记录和原附件绑定，检查通过

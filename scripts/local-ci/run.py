@@ -599,7 +599,7 @@ class Pipeline:
         scp_options = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-P', port]
         if os.getenv('LOCAL_CI_SSH_CONFIG'):
             scp_options += ['-F', os.environ['LOCAL_CI_SSH_CONFIG']]
-        for filename in ['scripts/backup.sh', 'scripts/backup-s3.cjs', 'scripts/local-ci/db_fingerprint.py', 'scripts/local-ci/deploy_config.py']:
+        for filename in ['scripts/backup.sh', 'scripts/backup-s3.cjs', 'scripts/local-ci/db_fingerprint.py', 'scripts/local-ci/deploy_config.py', 'scripts/local-ci/deploy.sh']:
             call(['scp', *scp_options, ROOT / filename, target + ':' + operation + '/tools/' + Path(filename).name], env=self.env)
         if mode == 'offline':
             references = [images[service]['reference'] for service in ['api', 'web']]
@@ -620,8 +620,17 @@ class Pipeline:
             call(['scp', *scp_options, sums, target + ':' + operation + '/images.sha256'], env=self.env)
         arguments = [directory, operation, self.version, self.namespace, images['api']['digest'], images['web']['digest'],
                      mode, images['api']['imageId'], images['web']['imageId'], source_images['api'], source_images['web'], ','.join(proxy_names)]
-        command = shlex.join(['bash', '-s', '--', *arguments])
-        call(['ssh', *options, target, command], data=(ROOT / 'scripts/local-ci/deploy.sh').read_text(), env=self.env)
+        # Compose exec may consume stdin even when pg_dump does not. Execute a
+        # transferred file so no child can read the remaining deployment code.
+        command = shlex.join(['bash', operation + '/tools/deploy.sh', *arguments])
+        call(['ssh', *options, target, command], env=self.env)
+        result = call(['ssh', *options, target, shlex.join(['cat', operation + '/deployment-result.json'])], env=self.env, capture=True)
+        try:
+            proof = json.loads(result)
+        except (ValueError, TypeError):
+            raise RuntimeError('Remote deployment did not produce a complete verified result') from None
+        if proof != {'version': self.version, 'imageIds': {name: images[name]['imageId'] for name in ('api', 'web')}, 'dataPreserved': True}:
+            raise RuntimeError('Remote deployment completion proof does not match the release')
         self.mark('deployed', host=host, directory=directory, backup=operation)
 
     def status(self):

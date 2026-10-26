@@ -86,6 +86,45 @@ class LocalCiSafety(unittest.TestCase):
                 self.pipeline.deploy()
             commands.assert_not_called()
 
+    def test_deployment_file_survives_a_child_consuming_standard_input(self):
+        script = Path(self.directory.name) / 'deploy.sh'
+        marker = Path(self.directory.name) / 'completed'
+        script.write_text('cat >/dev/null\nprintf complete > "$1"\n')
+        subprocess.run(['bash', str(script), str(marker)], input='child input', text=True, check=True)
+        self.assertEqual(marker.read_text(), 'complete')
+        marker.unlink()
+        subprocess.run(['bash', '-s', '--', str(marker)], input=script.read_text(), text=True, check=True)
+        self.assertFalse(marker.exists(), 'streamed scripts must not be used for deployment')
+
+    def test_ssh_success_without_remote_completion_proof_cannot_record_deployment(self):
+        image_ids = {'api': 'sha256:' + '1' * 64, 'web': 'sha256:' + '2' * 64}
+        images = {name: {'digest': value, 'imageId': value} for name, value in image_ids.items()}
+        receipts = {'release': {}, 'push-images': {'images': images}, 'build-images': {'imageIds': image_ids},
+                    'upgrade': {'preserved': True, 'rollbackCompatible': True, 'targetImageIds': image_ids,
+                                'sourceImages': {'api': 'sha256:' + '3' * 64, 'web': 'sha256:' + '4' * 64},
+                                'trustedProxyContainers': ['trusted-proxy']}}
+        target = {'LOCAL_CI_DEPLOY_HOST': 'example.invalid', 'LOCAL_CI_DEPLOY_USER': 'deploy',
+                  'LOCAL_CI_DEPLOY_DIR': '/srv/assay', 'LOCAL_CI_DEPLOY_OFFLINE': 'false'}
+        proof = {'version': self.pipeline.version, 'imageIds': image_ids, 'dataPreserved': True}
+        for result in ('', json.dumps(proof)):
+            with self.subTest(completion=bool(result)), patch.dict(os.environ, target), patch.object(ci, 'clean_source'), \
+                    patch.object(self.pipeline, 'verified_artifacts'), patch.object(self.pipeline, 'receipt', side_effect=lambda name: receipts[name]), \
+                    patch.object(self.pipeline, 'mark') as mark, patch.object(ci, 'call', return_value=result) as commands:
+                if result:
+                    self.pipeline.deploy()
+                    mark.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(RuntimeError, 'complete verified result'):
+                        self.pipeline.deploy()
+                    mark.assert_not_called()
+                transferred = [item.args[0] for item in commands.call_args_list if item.args[0][0] == 'scp']
+                self.assertTrue(any(str(item[-2]).endswith('/deploy.sh') for item in transferred))
+                execution = [item for item in commands.call_args_list
+                             if item.args[0][0] == 'ssh' and '/tools/deploy.sh ' in item.args[0][-1]]
+                self.assertEqual(len(execution), 1)
+                self.assertNotIn('data', execution[0].kwargs)
+                self.assertNotIn('bash -s', execution[0].args[0][-1])
+
     def test_latest_and_shell_expressions_are_not_valid_versions(self):
         for value in ['latest', 'v1.3.11', '1.3.11; true', '1.3.11\nextra']:
             with patch.dict(os.environ, {'LOCAL_CI_VERSION': value}):

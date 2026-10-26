@@ -116,4 +116,16 @@ public_url=$(docker compose exec -T api node -p process.env.AUTH_BASE_URL)
 [[ "$public_url" == https://* && "$public_url" != *$'\n'* ]]
 [[ "$(curl -sS -A 'Mozilla/5.0' --max-time 20 -o /dev/null -w '%{http_code}' "$public_url/")" == 200 ]]
 [[ "$(curl -sS -A 'Mozilla/5.0' --max-time 20 -o /dev/null -w '%{http_code}' "$public_url/api/me")" == 401 ]]
+python3 - "$operation" "$version" "$expected_api" "$expected_web" <<'PY'
+import json
+from pathlib import Path
+import sys
+operation, version, api, web = sys.argv[1:]
+directory = Path(operation)
+assert json.loads((directory / 'data-preservation.json').read_text())['preserved'] is True
+temporary = directory / 'deployment-result.tmp'
+temporary.write_text(json.dumps({'version': version, 'imageIds': {'api': api, 'web': web}, 'dataPreserved': True}) + '\n')
+temporary.chmod(0o600)
+temporary.replace(directory / 'deployment-result.json')
+PY
 printf 'Version %s deployed; existing records preserved; data-service containers retained. Backup: %s\n' "$version" "$operation"
