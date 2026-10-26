@@ -30,6 +30,33 @@ cargo-xwin 下载并缓存到本地 CI 输出目录，请遵守该工具及 Micr
 受代理控制的环境可以设置 `LOCAL_CI_PROXY_CA`，构建会通过 BuildKit secret 挂载 CA，
 不关闭 TLS 验证，不将会话证书写入发布镜像。
 
+## 云环境中的发布凭据
+
+在云环境配置界面创建机密并绑定为以下环境变量；不要把令牌填入仓库、Taskfile、
+`.env.local-ci.example` 或命令行参数。机密通过环境配置保存和应用后，可供后续环境使用，
+无需每次在聊天中提供。Cloud Environment 状态工具只查询绑定状态，不能代替配置界面写入机密。
+
+| 环境变量 | 配置类型 | 用途 |
+| --- | --- | --- |
+| `ASSAY_RELEASE_GITHUB_TOKEN` | 机密 | GitHub 发布凭据，需有 `weironz/assay` 的 Contents 读写权限 |
+| `DOCKERHUB_TOKEN` | 机密 | Docker Hub 访问令牌，需能读写三个 `assay-*` 镜像仓库 |
+| `DOCKERHUB_USERNAME` | 普通变量 | 登录账号，本项目为 `willdockerhub` |
+
+GitHub 使用独立变量，避免与构建环境自带的 `GH_TOKEN` 混淆。只有 GitHub CLI 子进程
+会选用该发布令牌，继承的代理、认证配置保持不变。Docker Hub 的令牌通过标准输入传入
+`docker login --password-stdin`；登录账号可以与镜像的组织命名空间不同。
+这两个专用令牌不会传给编译器、Docker build 命令或写入发布记录。
+
+配置后执行：
+
+```bash
+task auth:check
+```
+
+该检查只验证 Docker 登录及 GitHub 身份、仓库访问，不推送镜像、不创建 Release，也不部署。
+实际镜像写权限和 Release 附件上传权限仍由 `task publish` 验证。
+未绑定专用令牌时，继续使用现有 Docker 客户端登录及 GitHub CLI 的默认认证。
+
 ## 完整执行
 
 ```bash
@@ -49,6 +76,7 @@ task publish VERSION=1.3.11
 
 | 命令 | 行为 |
 | --- | --- |
+| `task auth:check` | 检查发布登录及仓库访问，不发布、不部署 |
 | `task test` | 部署/备份工具契约、前端测试、后端测试、CLI 测试、Agent fmt/clippy/test |
 | `task build` | API/Web/Agent 三个镜像，以及 Linux/Windows CLI 发布包 |
 | `task test:smoke` | 独立整栈的首页、Logo、路由、登录、角色、工单、MFA、限流验证 |

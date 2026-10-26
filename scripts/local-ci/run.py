@@ -92,6 +92,10 @@ class Pipeline:
         self.state.mkdir(parents=True, exist_ok=True)
         self.dist.mkdir(exist_ok=True)
         self.env = os.environ.copy()
+        # Publication credentials are selected only for the commands that need
+        # them, never forwarded to compilers or Docker build commands.
+        self.env.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
+        self.env.pop('DOCKERHUB_TOKEN', None)
         for key in list(self.env):
             if key.startswith('COMPOSE_'):
                 self.env.pop(key)
@@ -99,6 +103,39 @@ class Pipeline:
         if '/' in cargo:
             self.env['PATH'] = str(Path(cargo).parent) + os.pathsep + self.env.get('PATH', '')
         self.cargo = cargo
+
+    def github_env(self):
+        env = self.env.copy()
+        token = os.getenv('ASSAY_RELEASE_GITHUB_TOKEN')
+        if token:
+            # Keep the platform's inherited authentication unchanged elsewhere.
+            env['GH_TOKEN'] = token
+        return env
+
+    def gh(self, *arguments, capture=False):
+        return call(['gh', *arguments], env=self.github_env(), capture=capture)
+
+    def dockerhub_login(self):
+        token = os.getenv('DOCKERHUB_TOKEN')
+        if not token:
+            print('Docker Hub: using existing Docker client credentials; write access is checked on push', flush=True)
+            return
+        username = os.getenv('DOCKERHUB_USERNAME', '')
+        if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', username):
+            raise RuntimeError('Set DOCKERHUB_USERNAME to the login account when binding DOCKERHUB_TOKEN')
+        result = subprocess.run(['docker', 'login', '--username', username, '--password-stdin'],
+                                input=token + '\n', text=True, env=self.env, capture_output=True)
+        if result.returncode:
+            # Do not relay credential-helper or registry output into CI logs.
+            raise RuntimeError('Docker Hub login failed; check the configured publication credentials')
+        print('Docker Hub login succeeded', flush=True)
+
+    def auth_check(self):
+        self.local_docker()
+        self.dockerhub_login()
+        self.gh('api', 'user', '--jq', '.login')
+        self.gh('api', 'repos/' + self.repository, '--jq', '.full_name')
+        print('Authentication and repository access checked; image pushes and Release uploads are checked during publication', flush=True)
 
     def version_check(self):
         values = [json.loads((ROOT / f).read_text())['version'] for f in ['package.json', 'apps/api/package.json', 'apps/web/package.json']]
@@ -130,7 +167,7 @@ class Pipeline:
         call([self.cargo, 'xwin', '--version'], env=self.env)
         call(['clang-cl', '--version'], env=self.env)
         call(['lld-link', '--version'], env=self.env)
-        call(['gh', 'api', 'user', '--jq', '.login'], env=self.env)
+        self.gh('api', 'user', '--jq', '.login')
         print('Version and local prerequisites checked; Docker Hub write access is checked on push', flush=True)
 
     def mark(self, step, **outputs):
@@ -368,6 +405,7 @@ class Pipeline:
         clean_source()
         self.local_docker()
         self.verified_artifacts()
+        self.dockerhub_login()
         built = self.receipt('build-images')
         published = {}
         previous_path = self.state / 'push-images.json'
@@ -415,7 +453,7 @@ class Pipeline:
         tag_commit = remote.get('refs/tags/' + tag + '^{}') or remote.get('refs/tags/' + tag)
         if tag_commit and tag_commit != current['commit']:
             raise RuntimeError('Release tag belongs to a different commit; refusing overwrite')
-        probe = subprocess.run(['gh', 'release', 'view', tag, '--repo', self.repository, '--json', 'isDraft,assets,url'], env=self.env, text=True, capture_output=True)
+        probe = subprocess.run(['gh', 'release', 'view', tag, '--repo', self.repository, '--json', 'isDraft,assets,url'], env=self.github_env(), text=True, capture_output=True)
         existing = json.loads(probe.stdout) if probe.returncode == 0 else None
         if probe.returncode and not re.search(r'not found|HTTP 404', probe.stderr, re.I):
             raise RuntimeError('Cannot check the existing GitHub release')
@@ -439,23 +477,23 @@ class Pipeline:
                 call(['git', 'tag', '-a', tag, current['commit'], '-m', 'Release ' + tag], env=self.env)
             call(['git', 'push', 'origin', 'refs/tags/' + tag], env=self.env)
         if not existing:
-            call(['gh', 'release', 'create', tag, '--repo', self.repository, '--verify-tag', '--draft',
-                  '--title', 'Assay ' + tag, '--notes-file', notes], env=self.env)
+            self.gh('release', 'create', tag, '--repo', self.repository, '--verify-tag', '--draft',
+                    '--title', 'Assay ' + tag, '--notes-file', notes)
         names = {*ASSETS, 'SHA256SUMS', 'release-manifest.json'}
         already = {asset['name'] for asset in (existing or {}).get('assets', [])}
         if already - names:
             raise RuntimeError('The existing draft has unexpected assets')
         missing = sorted(names - already)
         if missing:
-            call(['gh', 'release', 'upload', tag, '--repo', self.repository, *[self.dist / name for name in missing]], env=self.env)
+            self.gh('release', 'upload', tag, '--repo', self.repository, *[self.dist / name for name in missing])
         downloads = self.state / 'release-download-check'
         downloads.mkdir(exist_ok=True)
-        call(['gh', 'release', 'download', tag, '--repo', self.repository, '--dir', downloads, '--clobber'], env=self.env)
+        self.gh('release', 'download', tag, '--repo', self.repository, '--dir', downloads, '--clobber')
         for name in names:
             if sha256(downloads / name) != sha256(self.dist / name):
                 raise RuntimeError('Uploaded asset checksum differs: ' + name)
-        call(['gh', 'release', 'edit', tag, '--repo', self.repository, '--draft=false', '--latest'], env=self.env)
-        assets = json.loads(call(['gh', 'release', 'view', tag, '--repo', self.repository, '--json', 'assets,url'], capture=True, env=self.env))
+        self.gh('release', 'edit', tag, '--repo', self.repository, '--draft=false', '--latest')
+        assets = json.loads(self.gh('release', 'view', tag, '--repo', self.repository, '--json', 'assets,url', capture=True))
         if {asset['name'] for asset in assets['assets']} != {*ASSETS, 'SHA256SUMS', 'release-manifest.json'}:
             raise RuntimeError('Published release assets do not match the verified set')
         self.mark('release', url=assets['url'], images=images)
@@ -503,7 +541,7 @@ def free_port():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action', choices=['doctor', *STEPS, 'verify', 'push-images', 'release', 'deploy', 'status'])
+    parser.add_argument('action', choices=['doctor', 'auth-check', *STEPS, 'verify', 'push-images', 'release', 'deploy', 'status'])
     args = parser.parse_args()
     pipeline = Pipeline()
     lock = (pipeline.state.parent / 'pipeline.lock').open('a')

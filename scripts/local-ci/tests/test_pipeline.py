@@ -1,5 +1,6 @@
 import contextlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -91,11 +92,58 @@ class LocalCiSafety(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     ci.Pipeline()
 
+    def test_managed_tokens_are_scoped_to_publication_commands(self):
+        with patch.dict(os.environ, {'ASSAY_RELEASE_GITHUB_TOKEN': 'github-test-secret',
+                                     'DOCKERHUB_TOKEN': 'docker-test-secret', 'GH_TOKEN': 'inherited-auth'}):
+            pipeline = ci.Pipeline()
+            self.assertNotIn('ASSAY_RELEASE_GITHUB_TOKEN', pipeline.env)
+            self.assertNotIn('DOCKERHUB_TOKEN', pipeline.env)
+            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
+            with patch.object(ci, 'call', return_value='ok') as commands:
+                pipeline.gh('release', 'upload', 'v1.3.12', 'fixture.bin')
+            self.assertEqual(commands.call_args.kwargs['env']['GH_TOKEN'], 'github-test-secret')
+            self.assertNotIn('github-test-secret', commands.call_args.args[0])
+            self.assertNotIn('DOCKERHUB_TOKEN', commands.call_args.kwargs['env'])
+            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
+
+    def test_unconfigured_github_authentication_is_preserved(self):
+        with patch.dict(os.environ, {'GH_TOKEN': 'inherited-auth'}):
+            os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
+            self.assertEqual(ci.Pipeline().github_env()['GH_TOKEN'], 'inherited-auth')
+
+    def test_docker_login_uses_stdin_and_does_not_relay_secret_output(self):
+        token = 'docker-test-secret'
+        with patch.dict(os.environ, {'DOCKERHUB_TOKEN': token, 'DOCKERHUB_USERNAME': 'test-account'}):
+            result = subprocess.CompletedProcess([], 1, token, token)
+            output = io.StringIO()
+            with patch.object(ci.subprocess, 'run', return_value=result) as commands, contextlib.redirect_stdout(output):
+                with self.assertRaisesRegex(RuntimeError, 'Docker Hub login failed') as failure:
+                    ci.Pipeline().dockerhub_login()
+            self.assertNotIn(token, str(failure.exception) + output.getvalue())
+            self.assertNotIn(token, commands.call_args.args[0])
+            self.assertEqual(commands.call_args.kwargs['input'], token + '\n')
+            self.assertNotIn('DOCKERHUB_TOKEN', commands.call_args.kwargs['env'])
+            self.assertIn('--password-stdin', commands.call_args.args[0])
+
+    def test_docker_token_requires_explicit_login_account(self):
+        with patch.dict(os.environ, {'DOCKERHUB_TOKEN': 'docker-test-secret'}):
+            os.environ.pop('DOCKERHUB_USERNAME', None)
+            with patch.object(ci.subprocess, 'run') as commands:
+                with self.assertRaisesRegex(RuntimeError, 'DOCKERHUB_USERNAME'):
+                    ci.Pipeline().dockerhub_login()
+            commands.assert_not_called()
+
+    def test_auth_check_does_not_push_publish_or_deploy(self):
+        with patch.object(self.pipeline, 'local_docker'), patch.object(self.pipeline, 'dockerhub_login'), patch.object(self.pipeline, 'gh') as commands:
+            self.pipeline.auth_check()
+        self.assertEqual([call.args[:2] for call in commands.call_args_list],
+                         [('api', 'user'), ('api', 'repos/example/assay')])
+
     def test_publish_dry_run_contains_no_production_deployment(self):
         task = shutil.which('task')
         if not task:
             self.skipTest('Task is needed for task graph validation')
-        for name in ['publish', 'ci', 'build', 'release']:
+        for name in ['publish', 'ci', 'build', 'release', 'auth:check']:
             result = subprocess.run([task, '--dry', name], cwd=ci.ROOT, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn('run.py deploy', result.stdout + result.stderr)

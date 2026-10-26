@@ -20,6 +20,9 @@ tasks:
   doctor:
     desc: Check local Docker, Rust, GitHub CLI and version prerequisites
     cmds: ['python3 scripts/local-ci/run.py doctor']
+  auth:check:
+    desc: Check publication credentials without publishing or deploying
+    cmds: ['python3 scripts/local-ci/run.py auth-check']
   test:
     desc: Run deployment, frontend, backend and Rust tests in sequence
     cmds:
