@@ -412,6 +412,13 @@ const en = {
 
   ticketDetail: {
     imagePreview: 'Image preview',
+    imagePrevious: 'Previous image',
+    imageNext: 'Next image',
+    imageZoomIn: 'Zoom in',
+    imageZoomOut: 'Zoom out',
+    imageZoomReset: 'Reset zoom',
+    imageDownload: 'Download original',
+    imageDownloadFailed: 'Download failed; opened in a new tab',
     back: '← Back',
     selectAssignee: 'Select an assignee…',
     assign: 'Assign',

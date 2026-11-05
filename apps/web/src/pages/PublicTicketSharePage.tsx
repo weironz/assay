@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import ImageLightbox from '../components/ImageLightbox';
-import { previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
+import { collectPreviewImages, previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
 import LanguageSwitcher from '../components/LanguageSwitcher';
 import { usePublicTicketShare } from '../features/tickets/api';
 import { PRIORITY_COLOR, STATUS_COLOR, priorityLabel, statusLabel } from '../lib/ticket-meta';
@@ -38,7 +38,7 @@ export default function PublicTicketSharePage() {
   const fmt = useDateFormat();
   const { token = '' } = useParams();
   const { data: ticket, isLoading, isError } = usePublicTicketShare(token);
-  const [preview, setPreview] = useState<PreviewImage | null>(null);
+  const [preview, setPreview] = useState<{ images: PreviewImage[]; index: number } | null>(null);
 
   return (
     <main className="min-h-dvh bg-gray-50 px-4 py-5 text-gray-900 dark:bg-gray-950 dark:text-gray-100 sm:px-6 sm:py-8">
@@ -122,10 +122,10 @@ export default function PublicTicketSharePage() {
                       <div
                         className="rich min-w-0 break-words text-sm text-gray-700 dark:text-gray-200"
                         onClick={(event) => {
-                          const image = previewImageFromTarget(event.target);
-                          if (!image) return;
+                          if (!previewImageFromTarget(event.target)) return;
                           event.preventDefault();
-                          setPreview(image);
+                          const result = collectPreviewImages(event.currentTarget, event.target);
+                          if (result.images.length) setPreview(result);
                         }}
                         dangerouslySetInnerHTML={renderHtml(publicBody(message.body))}
                       />
@@ -146,7 +146,7 @@ export default function PublicTicketSharePage() {
         )}
       </div>
       {preview && (
-        <ImageLightbox image={preview} onClose={() => setPreview(null)} />
+        <ImageLightbox images={preview.images} initialIndex={preview.index} onClose={() => setPreview(null)} />
       )}
     </main>
   );

@@ -44,3 +44,109 @@ export function previewImageFromTarget(target: unknown): PreviewImage | null {
   if (!isPreviewableSrc(src)) return null;
   return { src, alt: attr('alt').trim() };
 }
+
+/**
+ * 事件委托只拿到单个 <img>，轮播却需要整篇正文的图片顺序，故按 DOM 顺序收集。
+ * container 仍按鸭子类型处理（只要有 querySelectorAll），测试无需真实 DOM。
+ */
+export function collectPreviewImages(
+  container: ParentNode | null,
+  target?: EventTarget | null,
+): { images: PreviewImage[]; index: number } {
+  if (!container || typeof container.querySelectorAll !== 'function') {
+    return { images: [], index: 0 };
+  }
+  const images: PreviewImage[] = [];
+  let index = 0;
+  for (const el of container.querySelectorAll('img')) {
+    // 复用点击路径的过滤规则，保证「能点的图」和「能轮播的图」是同一批
+    const image = previewImageFromTarget(el);
+    if (!image) continue;
+    if (target != null && el === target) index = images.length;
+    images.push(image); // 不去重：同一 src 出现两次就是两张
+  }
+  return { images, index };
+}
+
+/** 循环轮播下标：把 current 与 delta 一起归一化，越界值与负向步进都安全。 */
+export function stepIndex(current: number, delta: number, len: number): number {
+  const n = Math.trunc(len);
+  if (!Number.isFinite(len) || n <= 0) return 0;
+  const c = Number.isFinite(current) ? Math.trunc(current) : 0;
+  const d = Number.isFinite(delta) ? Math.trunc(delta) : 0;
+  return (((c + d) % n) + n) % n;
+}
+
+/** 缩放比例钳到 [min, max] 并保留两位小数；非有限数按有效下界处理，避免污染样式。 */
+export function clampZoom(next: number, min = 1, max = 4): number {
+  const lo = Math.min(min, max);
+  const hi = Math.max(min, max);
+  const safe = Number.isFinite(next) ? next : lo;
+  return Math.round(Math.min(hi, Math.max(lo, safe)) * 100) / 100;
+}
+
+const IMAGE_EXT_RE = /\.(png|jpe?g|gif|webp|avif|bmp)$/i;
+
+/** decodeURIComponent 遇到非法 % 序列会抛 URIError，回退原串保住文件名。 */
+function decodeSafe(raw: string): string {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
+  }
+}
+
+/** 剔除路径分隔符与控制字符：download 文件名里出现 / \ 或 .. 会造成路径穿越。 */
+function sanitizeFileName(raw: string): string {
+  // 先解码再净化，防止 %2F 之类在解码后重新变成路径分隔符
+  return decodeSafe(raw)
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .replaceAll('\\', '')
+    .replaceAll('/', '')
+    .trim();
+}
+
+/** 由 alt 或 src 末段生成安全的下载文件名，缺常见图片扩展名时补 .png。 */
+export function downloadFileName(image: PreviewImage): string {
+  const alt = image.alt.trim();
+  let name = alt ? sanitizeFileName(alt) : '';
+  if (!name) {
+    const path = image.src.split(/[?#]/)[0];
+    const cut = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+    name = sanitizeFileName(path.slice(cut + 1));
+  }
+  if (!name) name = 'image';
+  return IMAGE_EXT_RE.test(name) ? name : `${name}.png`;
+}
+
+/**
+ * 带凭证拉取原图再触发浏览器下载。任何失败只返回 false，由调用方降级到
+ * 「新标签打开」，绝不把异常抛给点击处理函数。
+ */
+export async function downloadImage(image: PreviewImage): Promise<boolean> {
+  let objectUrl: string | null = null;
+  let anchor: HTMLAnchorElement | null = null;
+  try {
+    const res = await fetch(image.src, { credentials: 'include' });
+    if (!res.ok) return false;
+    objectUrl = URL.createObjectURL(await res.blob());
+    anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = downloadFileName(image);
+    anchor.style.display = 'none';
+    document.body.appendChild(anchor);
+    anchor.click();
+    // 立刻 revoke 会让尚未开始的下载失败，故延后释放；用快照避免被下方置空影响
+    const url = objectUrl;
+    setTimeout(() => {
+      if (url) URL.revokeObjectURL(url);
+    }, 1000);
+    objectUrl = null;
+    return true;
+  } catch {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
+    return false;
+  } finally {
+    anchor?.remove();
+  }
+}

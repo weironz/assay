@@ -401,6 +401,13 @@ const zhTW: Resource = {
 
   ticketDetail: {
     imagePreview: '圖片預覽',
+    imagePrevious: '上一張',
+    imageNext: '下一張',
+    imageZoomIn: '放大',
+    imageZoomOut: '縮小',
+    imageZoomReset: '重設縮放',
+    imageDownload: '下載原圖',
+    imageDownloadFailed: '下載失敗，已在新分頁開啟',
     back: '← 返回',
     selectAssignee: '選擇處理人…',
     assign: '指派',

@@ -401,6 +401,13 @@ const th: Resource = {
 
   ticketDetail: {
     imagePreview: 'ตัวอย่างรูปภาพ',
+    imagePrevious: 'ภาพก่อนหน้า',
+    imageNext: 'ภาพถัดไป',
+    imageZoomIn: 'ขยาย',
+    imageZoomOut: 'ย่อ',
+    imageZoomReset: 'รีเซ็ตการซูม',
+    imageDownload: 'ดาวน์โหลดภาพต้นฉบับ',
+    imageDownloadFailed: 'ดาวน์โหลดไม่สำเร็จ เปิดในแท็บใหม่แล้ว',
     back: '← กลับ',
     selectAssignee: 'เลือกผู้รับผิดชอบ…',
     assign: 'มอบหมาย',

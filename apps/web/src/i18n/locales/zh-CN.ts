@@ -401,6 +401,13 @@ const zhCN: Resource = {
 
   ticketDetail: {
     imagePreview: '图片预览',
+    imagePrevious: '上一张',
+    imageNext: '下一张',
+    imageZoomIn: '放大',
+    imageZoomOut: '缩小',
+    imageZoomReset: '重置缩放',
+    imageDownload: '下载原图',
+    imageDownloadFailed: '下载失败，已在新标签打开',
     back: '← 返回',
     selectAssignee: '选择处理人…',
     assign: '指派',

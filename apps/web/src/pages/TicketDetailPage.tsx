@@ -39,7 +39,7 @@ import TicketShareDialog from '../components/TicketShareDialog';
 import TicketAttributesDialog from '../components/TicketAttributesDialog';
 import { canEditAttributes } from '../lib/ticket-attributes';
 import { metadataLabel } from '../lib/metadata-labels';
-import { previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
+import { collectPreviewImages, previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
 import ImageLightbox from '../components/ImageLightbox';
 
 export default function TicketDetailPage() {
@@ -83,7 +83,7 @@ export default function TicketDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
   const [attributesSaved, setAttributesSaved] = useState(false);
-  const [preview, setPreview] = useState<PreviewImage | null>(null);
+  const [preview, setPreview] = useState<{ images: PreviewImage[]; index: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !ticket)
@@ -346,10 +346,10 @@ export default function TicketDetailPage() {
                       <div
                         className="rich text-sm text-gray-800 dark:text-gray-200"
                         onClick={(event) => {
-                          const image = previewImageFromTarget(event.target);
-                          if (!image) return;
+                          if (!previewImageFromTarget(event.target)) return;
                           event.preventDefault();
-                          setPreview(image);
+                          const result = collectPreviewImages(event.currentTarget, event.target);
+                          if (result.images.length) setPreview(result);
                         }}
                         dangerouslySetInnerHTML={renderHtml(m.body)}
                       />
@@ -741,7 +741,7 @@ export default function TicketDetailPage() {
       <TicketShareDialog ticketId={id} open={shareOpen} onClose={() => setShareOpen(false)} />
       {attributesOpen && canEditTicket && <TicketAttributesDialog ticket={ticket} onClose={() => setAttributesOpen(false)} onSaved={() => { setAttributesOpen(false); setAttributesSaved(true); }} />}
       {preview && (
-        <ImageLightbox image={preview} onClose={() => setPreview(null)} />
+        <ImageLightbox images={preview.images} initialIndex={preview.index} onClose={() => setPreview(null)} />
       )}
     </div>
   );
