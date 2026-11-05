@@ -400,6 +400,7 @@ const zhCN: Resource = {
   },
 
   ticketDetail: {
+    imagePreview: '图片预览',
     back: '← 返回',
     selectAssignee: '选择处理人…',
     assign: '指派',

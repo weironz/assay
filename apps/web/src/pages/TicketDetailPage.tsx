@@ -39,6 +39,8 @@ import TicketShareDialog from '../components/TicketShareDialog';
 import TicketAttributesDialog from '../components/TicketAttributesDialog';
 import { canEditAttributes } from '../lib/ticket-attributes';
 import { metadataLabel } from '../lib/metadata-labels';
+import { previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
+import ImageLightbox from '../components/ImageLightbox';
 
 export default function TicketDetailPage() {
   const { t } = useTranslation();
@@ -81,6 +83,7 @@ export default function TicketDetailPage() {
   const [shareOpen, setShareOpen] = useState(false);
   const [attributesOpen, setAttributesOpen] = useState(false);
   const [attributesSaved, setAttributesSaved] = useState(false);
+  const [preview, setPreview] = useState<PreviewImage | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   if (isLoading || !ticket)
@@ -342,6 +345,12 @@ export default function TicketDetailPage() {
                       /* 服务端已消毒；此处再经 DOMPurify 二次消毒后渲染 */
                       <div
                         className="rich text-sm text-gray-800 dark:text-gray-200"
+                        onClick={(event) => {
+                          const image = previewImageFromTarget(event.target);
+                          if (!image) return;
+                          event.preventDefault();
+                          setPreview(image);
+                        }}
                         dangerouslySetInnerHTML={renderHtml(m.body)}
                       />
                     )}
@@ -731,6 +740,9 @@ export default function TicketDetailPage() {
       </div>
       <TicketShareDialog ticketId={id} open={shareOpen} onClose={() => setShareOpen(false)} />
       {attributesOpen && canEditTicket && <TicketAttributesDialog ticket={ticket} onClose={() => setAttributesOpen(false)} onSaved={() => { setAttributesOpen(false); setAttributesSaved(true); }} />}
+      {preview && (
+        <ImageLightbox image={preview} onClose={() => setPreview(null)} />
+      )}
     </div>
   );
 }

@@ -90,6 +90,8 @@ body {
 }
 .tiptap code, .rich code { font-family: ui-monospace, monospace; }
 .tiptap img, .rich img { max-width: 100%; border-radius: 6px; margin: 0.4em 0; }
+/* 只有展示态正文可点开放大；编辑器里的图仍保持编辑语义 */
+.rich img { cursor: zoom-in; }
 .tiptap a, .rich a { color: #2563eb; text-decoration: underline; }
 /* 空编辑器占位符 */
 .tiptap p.is-editor-empty:first-child::before {

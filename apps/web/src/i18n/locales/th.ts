@@ -400,6 +400,7 @@ const th: Resource = {
   },
 
   ticketDetail: {
+    imagePreview: 'ตัวอย่างรูปภาพ',
     back: '← กลับ',
     selectAssignee: 'เลือกผู้รับผิดชอบ…',
     assign: 'มอบหมาย',

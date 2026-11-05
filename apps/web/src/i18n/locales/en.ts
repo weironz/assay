@@ -411,6 +411,7 @@ const en = {
   },
 
   ticketDetail: {
+    imagePreview: 'Image preview',
     back: '← Back',
     selectAssignee: 'Select an assignee…',
     assign: 'Assign',

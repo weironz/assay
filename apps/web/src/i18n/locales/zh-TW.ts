@@ -400,6 +400,7 @@ const zhTW: Resource = {
   },
 
   ticketDetail: {
+    imagePreview: '圖片預覽',
     back: '← 返回',
     selectAssignee: '選擇處理人…',
     assign: '指派',
