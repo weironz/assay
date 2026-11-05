@@ -3,6 +3,7 @@ import {
   clampZoom,
   collectPreviewImages,
   downloadFileName,
+  downloadImage,
   stepIndex,
 } from '../src/lib/image-preview';
 
@@ -241,5 +242,122 @@ describe('downloadFileName 生成下载文件名', () => {
         alt: '   ',
       }),
     ).toBe('机架照片.png');
+  });
+});
+
+describe('downloadImage 下载原图与失败降级', () => {
+  const image = { src: '/api/files/photo.png', alt: '机架照片' };
+  const okResponse = () => ({
+    ok: true,
+    blob: async () => new Blob(['x'], { type: 'image/png' }),
+  });
+
+  /**
+   * 下载链路全靠浏览器 API，这里用 stub 替掉 fetch / document / URL / 定时器，
+   * 每个用例结束都恢复全局，避免污染同套件里其他纯函数测试。
+   */
+  async function withStubs(
+    fetchImpl: () => Promise<unknown>,
+    failAtCreateElement = false,
+  ) {
+    const g = globalThis as unknown as Record<string, unknown> & {
+      URL: { createObjectURL?: unknown; revokeObjectURL?: unknown };
+    };
+    const state = {
+      clicks: 0,
+      removes: 0,
+      appends: 0,
+      creates: 0,
+      revokes: [] as string[],
+      fetched: [] as Array<{ url: string; init: unknown }>,
+    };
+    const anchor = {
+      href: '',
+      download: '',
+      style: { display: '' },
+      click: () => { state.clicks++; },
+      remove: () => { state.removes++; },
+    };
+    const saved = {
+      fetch: g.fetch,
+      document: g.document,
+      setTimeout: g.setTimeout,
+      createObjectURL: g.URL.createObjectURL,
+      revokeObjectURL: g.URL.revokeObjectURL,
+    };
+
+    g.fetch = async (url: string, init: unknown) => {
+      state.fetched.push({ url, init });
+      return fetchImpl();
+    };
+    g.document = {
+      createElement: (tag: string) => {
+        if (failAtCreateElement) throw new Error('dom failure');
+        if (tag !== 'a') throw new Error(`unexpected element ${tag}`);
+        return anchor;
+      },
+      body: { appendChild: () => { state.appends++; } },
+    };
+    g.URL.createObjectURL = () => { state.creates++; return 'blob:stub'; };
+    g.URL.revokeObjectURL = (u: string) => { state.revokes.push(u); };
+    // 立刻执行释放回调，便于断言 objectURL 一定被回收
+    g.setTimeout = (fn: () => void) => { fn(); return 0; };
+
+    try {
+      return { result: await downloadImage(image), state, anchor };
+    } finally {
+      g.fetch = saved.fetch;
+      g.setTimeout = saved.setTimeout;
+      g.URL.createObjectURL = saved.createObjectURL;
+      g.URL.revokeObjectURL = saved.revokeObjectURL;
+      if (saved.document === undefined) delete g.document;
+      else g.document = saved.document;
+    }
+  }
+
+  test('成功路径：带凭证拉取、安全文件名、点击下载并释放 objectURL', async () => {
+    const { result, state, anchor } = await withStubs(async () => okResponse());
+    expect(result).toBe(true);
+    expect(state.fetched[0].url).toBe(image.src);
+    expect(state.fetched[0].init).toEqual({ credentials: 'include' });
+    expect(anchor.href).toBe('blob:stub');
+    expect(anchor.download).toBe('机架照片.png');
+    expect(anchor.style.display).toBe('none');
+    expect(state.clicks).toBe(1);
+    expect(state.appends).toBe(1);
+    expect(state.removes).toBe(1);
+    expect(state.revokes).toContain('blob:stub');
+  });
+
+  test('响应非 ok 时返回 false，不触发下载', async () => {
+    const { result, state } = await withStubs(async () => ({ ok: false }));
+    expect(result).toBe(false);
+    expect(state.creates).toBe(0);
+    expect(state.clicks).toBe(0);
+  });
+
+  test('fetch 抛异常时返回 false，不把异常抛给调用方', async () => {
+    const { result, state } = await withStubs(async () => {
+      throw new Error('network down');
+    });
+    expect(result).toBe(false);
+    expect(state.clicks).toBe(0);
+  });
+
+  test('blob 失败时返回 false，且不创建临时 anchor', async () => {
+    const { result, state } = await withStubs(async () => ({
+      ok: true,
+      blob: async () => { throw new Error('decode failed'); },
+    }));
+    expect(result).toBe(false);
+    expect(state.creates).toBe(0);
+    expect(state.clicks).toBe(0);
+  });
+
+  test('DOM 创建失败时释放已生成的 objectURL 并返回 false', async () => {
+    const { result, state } = await withStubs(async () => okResponse(), true);
+    expect(result).toBe(false);
+    expect(state.revokes).toContain('blob:stub');
+    expect(state.clicks).toBe(0);
   });
 });
