@@ -133,7 +133,7 @@ export class TicketMessaging {
     return message;
   }
 
-  /** 编辑消息（作者本人或 admin/supervisor） */
+  /** 编辑消息（仅限消息原作者本人） */
   async updateMessage(
     user: AuthUser,
     ticketId: string,
@@ -163,17 +163,16 @@ export class TicketMessaging {
       if (!canViewTicket(user, current)) {
         throw new ForbiddenException('无权查看该工单');
       }
-      const isStaff =
-        user.roles.includes('admin') || user.roles.includes('supervisor');
       const canSeeInternal = isInternalParticipant(user, current);
 
       // 把编辑权限下推到消息查询里：先取正文、再在内存里判断，会让无权用户
-      // 触发一次内部备注正文的读取，也容易在后续改动中漏掉校验。
+      // 触发一次内部备注正文的读取，也容易在后续改动中漏掉校验。作者归属
+      // 必须恒等下推，任何角色（含 admin/supervisor）都不能编辑他人消息。
       const authorized = await tx.ticketMessage.findFirst({
         where: {
           id: messageId,
           ticketId,
-          ...(isStaff ? {} : { authorId: user.id }),
+          authorId: user.id,
           ...(canSeeInternal ? {} : { isInternal: false }),
         },
         select: { id: true },
@@ -185,7 +184,7 @@ export class TicketMessaging {
           select: { authorId: true, isInternal: true },
         });
         if (!meta) throw new NotFoundException('消息不存在');
-        if (meta.authorId !== user.id && !isStaff) {
+        if (meta.authorId !== user.id) {
           throw new ForbiddenException('只能编辑自己的消息');
         }
         if (meta.isInternal && !canSeeInternal) {

@@ -5,7 +5,7 @@ import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
-import { CodeBlockTail, CODE_BLOCK_OPTIONS } from '../lib/editor-code-block';
+import { CodeBlockTail, CODE_BLOCK_OPTIONS, codeBlockShortcutFromLine } from '../lib/editor-code-block';
 
 interface Props {
   onChange: (html: string) => void;
@@ -105,6 +105,31 @@ export default function RichEditor({
     content,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
+      // 行首输入 ``` 后按 Enter：Tiptap 自带 input rule 的
+      // /^```([a-z]+)?[\s\n]$/ 只在整行恰好是 ``` 时命中，行首后面还跟着
+      // 原有内容就不匹配，表现为「必须先新建空行才能插入代码块」。这里补上
+      // Enter 兜底：删掉 ``` 前缀后把当前段落转成代码块，原文字作为正文保留。
+      handleKeyDown: (view, event) => {
+        if (event.key !== 'Enter') return false;
+        const { $from } = view.state.selection;
+        if ($from.parent.type.name !== 'paragraph') return false;
+        const line = $from.parent.textContent;
+        const shortcut = codeBlockShortcutFromLine(line);
+        if (!shortcut) return false;
+        const codeBlock = view.state.schema.nodes.codeBlock;
+        if (!codeBlock) return false;
+        const from = $from.start();
+        const prefixLength = line.length - shortcut.content.length;
+        const tr = view.state.tr.delete(from, from + prefixLength);
+        tr.setBlockType(
+          from,
+          from,
+          codeBlock,
+          shortcut.language ? { language: shortcut.language } : null,
+        );
+        view.dispatch(tr);
+        return true;
+      },
       // 粘贴截图/图片 → 自动上传插入
       handlePaste: (_v, event) => {
         const imgs = imagesFrom(event.clipboardData?.files);

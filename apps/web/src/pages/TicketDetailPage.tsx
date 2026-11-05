@@ -38,6 +38,7 @@ import SlaBadge from '../components/SlaBadge';
 import TicketShareDialog from '../components/TicketShareDialog';
 import TicketAttributesDialog from '../components/TicketAttributesDialog';
 import { canEditAttributes } from '../lib/ticket-attributes';
+import { canEditMessage } from '../lib/message-edit';
 import { metadataLabel } from '../lib/metadata-labels';
 import { collectPreviewImages, previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
 import ImageLightbox from '../components/ImageLightbox';
@@ -263,7 +264,7 @@ export default function TicketDetailPage() {
               逐条独立描边会把一次对话切成一堆互不相干的方块，读起来费劲。 */}
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
             {ticket.messages.map((m, i) => {
-              const canEditMsg = m.author.id === user?.id || isSupervisorOrAdmin;
+              const canEditMsg = canEditMessage(m.author.id, user?.id);
               const editing = editingMsgId === m.id;
               return (
                 <article

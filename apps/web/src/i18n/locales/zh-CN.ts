@@ -289,7 +289,7 @@ const zhCN: Resource = {
     savePrompt: '保存当前筛选为视图，输入名称：',
     deleteView: '删除视图',
     searchPlaceholder: '搜索标题 / 工单号',
-    titlePlaceholder: '搜索标题',
+    titlePlaceholder: '搜索标题、工单号或正文',
     ticketNoPlaceholder: '搜索工单号',
     allStatuses: '全部状态',
     allPriorities: '全部优先级',

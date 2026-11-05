@@ -289,7 +289,7 @@ const th: Resource = {
     savePrompt: 'บันทึกตัวกรองปัจจุบันเป็นมุมมอง กรุณาตั้งชื่อ:',
     deleteView: 'ลบมุมมอง',
     searchPlaceholder: 'ค้นหาหัวข้อ / เลขที่ทิกเก็ต',
-    titlePlaceholder: 'ค้นหาหัวข้อ',
+    titlePlaceholder: 'ค้นหาหัวข้อ หมายเลขทิกเก็ต หรือเนื้อหาข้อความ',
     ticketNoPlaceholder: 'ค้นหาหมายเลขทิกเก็ต',
     allStatuses: 'ทุกสถานะ',
     allPriorities: 'ทุกระดับความสำคัญ',

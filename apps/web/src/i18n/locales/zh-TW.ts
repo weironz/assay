@@ -289,7 +289,7 @@ const zhTW: Resource = {
     savePrompt: '將目前篩選儲存為檢視，請輸入名稱：',
     deleteView: '刪除檢視',
     searchPlaceholder: '搜尋標題 / 工單編號',
-    titlePlaceholder: '搜尋標題',
+    titlePlaceholder: '搜尋標題、工單號或正文',
     ticketNoPlaceholder: '搜尋工單編號',
     allStatuses: '全部狀態',
     allPriorities: '全部優先順序',

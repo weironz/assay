@@ -198,7 +198,7 @@ GET /api/tickets
 | `requesterId` | string | 提单人 id |
 | `categoryId` | string | 分类 id |
 | `ticketNo` | string | 模糊匹配工单号，可与其他筛选组合 |
-| `keyword` | string | 模糊匹配标题或工单号 |
+| `keyword` | string | 模糊匹配标题、工单号或工单消息正文内容 |
 | `page` | int | 默认 1 |
 | `pageSize` | int | 默认 20，最大 100 |
 | `sort` | string | `createdAt`(默认) `updatedAt` `priority` `status` |
@@ -417,7 +417,7 @@ PATCH /api/tickets/:id/messages/:msgId   权限 ticket:comment
 | `contentType` | string | | 默认 `text/html` |
 | `mentionUserIds` | string[] | | 可选；仅能提及本工单的协作相关人员，收到 `MENTION` 通知 |
 
-编辑消息限作者本人或 admin / supervisor。
+编辑消息仅限消息原作者本人。
 
 ### 3.9 协作成员与关注人
 

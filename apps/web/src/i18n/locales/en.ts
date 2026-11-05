@@ -300,7 +300,7 @@ const en = {
     savePrompt: 'Save the current filter as a view. Name it:',
     deleteView: 'Delete view',
     searchPlaceholder: 'Search title or ticket number',
-    titlePlaceholder: 'Search title',
+    titlePlaceholder: 'Search title, ticket no. or message body',
     ticketNoPlaceholder: 'Search ticket number',
     allStatuses: 'All statuses',
     allPriorities: 'All priorities',

@@ -95,12 +95,34 @@ export class TicketQueries {
     }
 
     if (q.keyword) {
-      filters.push({
-        OR: [
-          { title: { contains: q.keyword, mode: 'insensitive' } },
-          { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
-        ],
-      });
+      const keywordOr: Prisma.TicketWhereInput[] = [
+        { title: { contains: q.keyword, mode: 'insensitive' } },
+        { ticketNo: { contains: q.keyword, mode: 'insensitive' } },
+      ];
+      // 消息正文多为 HTML，含大量空白；纯空白关键字一旦用于正文匹配，会命中
+      // 几乎所有工单、等于取消筛选。只对含非空白字符的关键字扩展到正文，
+      // 空 / 纯空白关键字保持改动前 title/ticketNo 的匹配行为不变。
+      if (q.keyword.trim()) {
+        // 内部备注只对内部参与方可见。若让非内部参与方用关键字命中内部备注，
+        // 就能从「工单出现在结果里 / total 变化」推断出该备注存在，属信息泄漏。
+        // isInternalParticipant 里 admin/supervisor 是与具体工单无关的全局能力，
+        // assignee / collaborator 则依赖单条工单；列表 where 没有单条工单上下文，
+        // 故用中性 ticket 取 user 级判定，其余用户（含仅有 ticket:read:all 的
+        // 只读账号）一律只搜公开消息，与 ticket-messaging 的 isInternal:false 同口径。
+        const canSeeInternalNotes = isInternalParticipant(user, {
+          assigneeId: null,
+          participants: [],
+        });
+        keywordOr.push({
+          messages: {
+            some: {
+              body: { contains: q.keyword, mode: 'insensitive' },
+              ...(canSeeInternalNotes ? {} : { isInternal: false }),
+            },
+          },
+        });
+      }
+      filters.push({ OR: keywordOr });
     }
     const where: Prisma.TicketWhereInput =
       filters.length === 1 ? filters[0] : { AND: filters };
