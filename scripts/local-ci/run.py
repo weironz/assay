@@ -12,11 +12,11 @@ import os
 from pathlib import Path
 import re
 import secrets
-import shlex
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -95,8 +95,9 @@ class Pipeline:
         self.env = os.environ.copy()
         # Publication credentials are selected only for the commands that need
         # them, never forwarded to compilers or Docker build commands.
-        self.env.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
-        self.env.pop('DOCKERHUB_TOKEN', None)
+        for key in ('ASSAY_RELEASE_GITHUB_TOKEN', 'DOCKERHUB_TOKEN', 'GH_TOKEN', 'GITHUB_TOKEN',
+                    'DEPLOY_PASSWORD', 'DEPLOY_BECOME_PASSWORD'):
+            self.env.pop(key, None)
         for key in list(self.env):
             if key.startswith('COMPOSE_'):
                 self.env.pop(key)
@@ -107,43 +108,53 @@ class Pipeline:
 
     def github_env(self):
         env = self.env.copy()
-        token = os.getenv('ASSAY_RELEASE_GITHUB_TOKEN')
-        config_dir = os.getenv('ASSAY_RELEASE_GH_CONFIG_DIR')
-        if token:
-            # Keep the platform's inherited authentication unchanged elsewhere.
-            env['GH_TOKEN'] = token
-        elif config_dir:
-            # An explicitly selected local gh login is a fallback when managed
-            # secret configuration is unavailable. Let gh read its own store.
-            directory = Path(config_dir).expanduser().resolve()
-            if not (directory / 'hosts.yml').is_file():
-                raise RuntimeError('Configured release GitHub login is unavailable; authenticate in ASSAY_RELEASE_GH_CONFIG_DIR')
-            env['GH_CONFIG_DIR'] = str(directory)
-            env.pop('GH_TOKEN', None)
-            env.pop('GITHUB_TOKEN', None)
+        token = os.getenv('ASSAY_RELEASE_GITHUB_TOKEN') or os.getenv('GH_TOKEN') or os.getenv('GITHUB_TOKEN')
+        if not token:
+            raise RuntimeError('Export ASSAY_RELEASE_GITHUB_TOKEN (or GH_TOKEN/GITHUB_TOKEN) for GitHub operations')
+        # Keep the platform's inherited authentication unchanged elsewhere.
+        env['GH_TOKEN'] = token
         return env
 
     def gh(self, *arguments, capture=False):
         return call(['gh', *arguments], env=self.github_env(), capture=capture)
 
+    @contextlib.contextmanager
     def dockerhub_login(self):
         token = os.getenv('DOCKERHUB_TOKEN')
         if not token:
-            print('Docker Hub: using existing Docker client credentials; write access is checked on push', flush=True)
-            return
+            raise RuntimeError('Export DOCKERHUB_TOKEN for publication; saved Docker logins are not used')
         username = os.getenv('DOCKERHUB_USERNAME', '')
         if not re.fullmatch(r'[a-z0-9][a-z0-9_-]*', username):
             raise RuntimeError('Set DOCKERHUB_USERNAME to the login account when binding DOCKERHUB_TOKEN')
-        result = subprocess.run(['docker', 'login', '--username', username, '--password-stdin'],
-                                input=token + '\n', text=True, env=self.env, capture_output=True)
-        if result.returncode:
-            # Do not relay credential-helper or registry output into CI logs.
-            raise RuntimeError('Docker Hub login failed; check the configured publication credentials')
-        print('Docker Hub login succeeded', flush=True)
+        with tempfile.TemporaryDirectory(prefix='assay-docker-auth-') as directory:
+            env = self.env.copy()
+            # Keep the selected local endpoint while isolating login state.
+            endpoint = env.get('DOCKER_HOST')
+            if env.get('DOCKER_CONTEXT') or not endpoint:
+                context = env.get('DOCKER_CONTEXT') or call(['docker', 'context', 'show'], env=env, capture=True)
+                endpoint = call(['docker', 'context', 'inspect', context, '--format', '{{(index .Endpoints "docker").Host}}'], env=env, capture=True)
+            if not endpoint.startswith(('unix://', 'npipe://')):
+                raise RuntimeError('Publication refuses remote Docker daemons')
+            original = Path(env.get('DOCKER_CONFIG', Path.home() / '.docker'))
+            config = json.loads((original / 'config.json').read_text()) if (original / 'config.json').is_file() else {}
+            private = Path(directory) / 'config.json'
+            private.write_text(json.dumps({'proxies': config.get('proxies', {})}))
+            private.chmod(0o600)
+            if (original / 'cli-plugins').is_dir():
+                (Path(directory) / 'cli-plugins').symlink_to((original / 'cli-plugins').resolve(), target_is_directory=True)
+            env.update(DOCKER_CONFIG=directory, DOCKER_HOST=endpoint)
+            env.pop('DOCKER_CONTEXT', None)
+            result = subprocess.run(['docker', 'login', '--username', username, '--password-stdin'],
+                                    input=token + '\n', text=True, env=env, capture_output=True)
+            if result.returncode:
+                raise RuntimeError('Docker Hub login failed; check the configured publication credentials')
+            print('Docker Hub login succeeded (temporary credentials)', flush=True)
+            yield env
 
     def auth_check(self):
         self.local_docker()
-        self.dockerhub_login()
+        with self.dockerhub_login():
+            pass
         self.gh('api', 'user', '--jq', '.login')
         self.gh('api', 'repos/' + self.repository, '--jq', '.full_name')
         print('Authentication and repository access checked; image pushes and Release uploads are checked during publication', flush=True)
@@ -178,7 +189,6 @@ class Pipeline:
         call([self.cargo, 'xwin', '--version'], env=self.env)
         call(['clang-cl', '--version'], env=self.env)
         call(['lld-link', '--version'], env=self.env)
-        self.gh('api', 'user', '--jq', '.login')
         print('Version and local prerequisites checked; Docker Hub write access is checked on push', flush=True)
 
     def mark(self, step, **outputs):
@@ -470,14 +480,17 @@ class Pipeline:
         clean_source()
         self.local_docker()
         self.verified_artifacts()
-        self.dockerhub_login()
+        with self.dockerhub_login() as env:
+            self.publish_images(env)
+
+    def publish_images(self, env):
         built = self.receipt('build-images')
         published = {}
         previous_path = self.state / 'push-images.json'
         previous = self.receipt('push-images').get('images', {}) if previous_path.exists() else {}
         for service, local in built['images'].items():
             reference = f'{self.namespace}/assay-{service}:{self.version}'
-            probe = subprocess.run(['docker', 'buildx', 'imagetools', 'inspect', reference, '--format', '{{json .Manifest}}'], env=self.env, text=True, capture_output=True)
+            probe = subprocess.run(['docker', 'buildx', 'imagetools', 'inspect', reference, '--format', '{{json .Manifest}}'], env=env, text=True, capture_output=True)
             if probe.returncode == 0:
                 remote = json.loads(probe.stdout)['digest']
                 if (previous.get(service, {}).get('digest') != remote or
@@ -488,11 +501,11 @@ class Pipeline:
             missing = re.search(r'manifest unknown|not found|no such manifest', probe.stderr, re.I)
             if not missing or re.search(r'unauthorized|denied|forbidden|429|timeout', probe.stderr, re.I):
                 raise RuntimeError('Cannot verify remote tag availability; check Docker Hub login and network: ' + reference)
-            call(['docker', 'tag', local, reference], env=self.env)
-            call(['docker', 'push', reference], env=self.env)
-            manifest = json.loads(call(['docker', 'buildx', 'imagetools', 'inspect', reference, '--format', '{{json .Manifest}}'], capture=True, env=self.env))
+            call(['docker', 'tag', local, reference], env=env)
+            call(['docker', 'push', reference], env=env)
+            manifest = json.loads(call(['docker', 'buildx', 'imagetools', 'inspect', reference, '--format', '{{json .Manifest}}'], capture=True, env=env))
             digest = manifest['digest']
-            raw = json.loads(call(['docker', 'buildx', 'imagetools', 'inspect', reference + '@' + digest, '--raw'], capture=True, env=self.env))
+            raw = json.loads(call(['docker', 'buildx', 'imagetools', 'inspect', reference + '@' + digest, '--raw'], capture=True, env=env))
             if raw.get('config', {}).get('digest') != built['imageIds'][service]:
                 raise RuntimeError('Registry image config differs from the verified local image')
             if not re.fullmatch(r'sha256:[0-9a-f]{64}', digest):
@@ -535,12 +548,13 @@ class Pipeline:
                          'Verify downloads against `SHA256SUMS`. `release-manifest.json` records the source and image digests.\n\n'
                          '**Production was not deployed. No latest image tags were updated.**\n')
         if not tag_commit:
-            local_tag = subprocess.run(['git', 'rev-parse', '--verify', tag + '^{}'], cwd=ROOT, text=True, capture_output=True)
-            if local_tag.returncode == 0 and local_tag.stdout.strip() != current['commit']:
-                raise RuntimeError('Local release tag belongs to another commit')
-            if local_tag.returncode:
-                call(['git', 'tag', '-a', tag, current['commit'], '-m', 'Release ' + tag], env=self.env)
-            call(['git', 'push', 'origin', 'refs/tags/' + tag], env=self.env)
+            # Use the same explicitly scoped token for tag creation and release
+            # uploads; checkout does not need persisted git write credentials.
+            annotated = self.gh('api', '--method', 'POST', f'repos/{self.repository}/git/tags',
+                                '-f', 'tag=' + tag, '-f', 'message=Release ' + tag,
+                                '-f', 'object=' + current['commit'], '-f', 'type=commit', '--jq', '.sha', capture=True)
+            self.gh('api', '--method', 'POST', f'repos/{self.repository}/git/refs',
+                    '-f', 'ref=refs/tags/' + tag, '-f', 'sha=' + annotated)
         if not existing:
             self.gh('release', 'create', tag, '--repo', self.repository, '--verify-tag', '--draft',
                     '--title', 'Assay ' + tag, '--notes-file', notes)
@@ -566,18 +580,12 @@ class Pipeline:
 
     def deploy(self):
         # No other pipeline action calls this method.
+        from deployment import execute, target
+        host, _user, directory = target()
         clean_source()
         self.receipt('release')
         self.verified_artifacts()
         images = self.receipt('push-images')['images']
-        host = os.getenv('LOCAL_CI_DEPLOY_HOST', '')
-        user = os.getenv('LOCAL_CI_DEPLOY_USER', '')
-        directory = os.getenv('LOCAL_CI_DEPLOY_DIR', '')
-        port = os.getenv('LOCAL_CI_DEPLOY_PORT', '22')
-        if not re.fullmatch(r'[A-Za-z0-9_.:-]+', host) or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]*', user):
-            raise RuntimeError('Explicit production SSH host and user are required')
-        if not re.fullmatch(r'/[A-Za-z0-9_./-]+', directory) or directory == '/' or not port.isdigit():
-            raise RuntimeError('Explicit absolute production directory and valid SSH port are required')
         upgrade = self.receipt('upgrade')
         if (not upgrade.get('preserved') or not upgrade.get('rollbackCompatible') or
                 upgrade.get('targetImageIds') != self.receipt('build-images')['imageIds']):
@@ -589,18 +597,8 @@ class Pipeline:
         proxy_names = upgrade.get('trustedProxyContainers', [])
         if any(not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]*', name) for name in proxy_names):
             raise RuntimeError('Invalid trusted proxy declaration')
-        mode = 'offline' if os.getenv('LOCAL_CI_DEPLOY_OFFLINE') == 'true' else 'online'
-        options = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-p', port]
-        if os.getenv('LOCAL_CI_SSH_CONFIG'):
-            options += ['-F', os.environ['LOCAL_CI_SSH_CONFIG']]
-        target = user + '@' + host
+        mode = 'offline' if os.getenv('DEPLOY_OFFLINE') == 'true' else 'online'
         operation = directory + '/backups/local-ci-' + self.version + '-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + secrets.token_hex(3)
-        call(['ssh', *options, target, shlex.join(['install', '-d', '-m', '700', operation, operation + '/tools'])], env=self.env)
-        scp_options = ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', '-P', port]
-        if os.getenv('LOCAL_CI_SSH_CONFIG'):
-            scp_options += ['-F', os.environ['LOCAL_CI_SSH_CONFIG']]
-        for filename in ['scripts/backup.sh', 'scripts/backup-s3.cjs', 'scripts/local-ci/db_fingerprint.py', 'scripts/local-ci/deploy_config.py', 'scripts/local-ci/deploy.sh']:
-            call(['scp', *scp_options, ROOT / filename, target + ':' + operation + '/tools/' + Path(filename).name], env=self.env)
         if mode == 'offline':
             references = [images[service]['reference'] for service in ['api', 'web']]
             for service, reference in zip(['api', 'web'], references):
@@ -616,19 +614,11 @@ class Pipeline:
                 raise RuntimeError('Could not export the verified deployment images')
             sums = self.state / 'deployment-images.sha256'
             sums.write_text(sha256(bundle) + '  images.tar.gz\n')
-            call(['scp', *scp_options, bundle, target + ':' + operation + '/images.tar.gz'], env=self.env)
-            call(['scp', *scp_options, sums, target + ':' + operation + '/images.sha256'], env=self.env)
         arguments = [directory, operation, self.version, self.namespace, images['api']['digest'], images['web']['digest'],
                      mode, images['api']['imageId'], images['web']['imageId'], source_images['api'], source_images['web'], ','.join(proxy_names)]
-        # Compose exec may consume stdin even when pg_dump does not. Execute a
-        # transferred file so no child can read the remaining deployment code.
-        command = shlex.join(['bash', operation + '/tools/deploy.sh', *arguments])
-        call(['ssh', *options, target, command], env=self.env)
-        result = call(['ssh', *options, target, shlex.join(['cat', operation + '/deployment-result.json'])], env=self.env, capture=True)
-        try:
-            proof = json.loads(result)
-        except (ValueError, TypeError):
-            raise RuntimeError('Remote deployment did not produce a complete verified result') from None
+        proof = execute({'assay_operation': operation, 'assay_arguments': arguments, 'assay_mode': mode,
+                         'assay_bundle': str(bundle) if mode == 'offline' else '',
+                         'assay_sums': str(sums) if mode == 'offline' else ''})
         if proof != {'version': self.version, 'imageIds': {name: images[name]['imageId'] for name in ('api', 'web')}, 'dataPreserved': True}:
             raise RuntimeError('Remote deployment completion proof does not match the release')
         self.mark('deployed', host=host, directory=directory, backup=operation)

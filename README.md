@@ -124,45 +124,17 @@ Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](dep
 
 ### 本地 CI 与备用发布
 
-GitHub Actions 额度不可用时，使用根目录 `Taskfile.yml`：`task ci VERSION=1.3.11` 完成测试和构建，`task publish VERSION=1.3.11` 推送 Docker Hub 并发布 GitHub Release。生产部署是单独的 `task deploy:production`，不会由发布任务自动触发。安装、参数、产物和回滚步骤见 [本地 CI 说明](scripts/local-ci/README.md)。
+根目录 `Taskfile.yml` 是统一入口：`task local:ci` / `task local:publish` / `task local:deploy` 在本机执行；`task github:ci` / `task github:publish` / `task github:deploy` 触发 GitHub Actions。两条路线共用测试、构建和 Ansible 部署逻辑，发布不会自动部署生产。凭据从环境变量读取。安装、参数、runner 配置和回滚步骤见 [CI 与部署说明](scripts/local-ci/README.md)。
 
-### 发版（GitHub Actions 自动完成）
+### GitHub 路线
 
-推送**只跑测试**（类型检查 + 编译 + 整栈冒烟测试），不会自动发版。
-发版一律手动触发，跑完整流水线：**测试 → 构建镜像 → 双仓库推送 → 部署 → 健康校验 → 构建 CLI → 创建 GitHub Release**，
-健康校验失败自动回滚到上一版本。
+推送和 PR **只跑测试**。手动发版通过 `task github:publish`，在专用 `assay-release`
+自托管 runner 上完成测试、镜像与二进制构建，推送 Docker Hub 明确版本标签并创建 GitHub Release。
+不再提供另一套直接 SSH/ACR 部署流程，也不推送 `latest`。
 
-```bash
-gh workflow run ci-cd.yml -f release_version=1.3.10                    # 统一发版：镜像、部署、CLI、GitHub Release
-gh workflow run ci-cd.yml -f image_tag=1.3.10 -f skip_deploy=true      # 仅构建推送指定镜像，不部署或创建 Release
-gh workflow run ci-cd.yml -f skip_deploy=true                         # 用 commit SHA 标记镜像，仅推送不部署
-gh run watch                                       # 跟踪进度
-```
-
-镜像同时推送到两处：
-
-| 仓库 | 地址 | 用途 |
-|---|---|---|
-| 阿里云 ACR | `registry.cn-shenzhen.aliyuncs.com/willspace/assay-{api,web}` | 生产服务器拉取（国内，秒级） |
-| Docker Hub | `willdockerhub/assay-{api,web}` | 对外分发 |
-
-生产默认从 ACR 拉取；想改用 Docker Hub 就在 `.env` 里加 `REGISTRY=willdockerhub`。
-
-> **改 compose 要当心**：流水线只做 `docker compose pull && up -d`（只换镜像），
-> 不会自动同步 compose 文件——这是有意为之。阿里云环境使用 `deploy/aliyun/docker-compose.yaml`
-> 那套卷名（`pg-data` 等），而 `docker-compose.yaml` 用的是 `*-prod` 卷名；
-> 拿后者覆盖服务器会挂载一组空卷，看起来就像数据全没了。同步前务必先 diff。
-
-需要的 GitHub Secrets：`DOCKERHUB_USERNAME` `DOCKERHUB_TOKEN` `ACR_URL` `ACR_USERNAME` `ACR_PASSWORD`
-`DEPLOY_HOST` `DEPLOY_USER` `DEPLOY_SSH_KEY` `DEPLOY_KNOWN_HOSTS`。站点地址从运行中的 API 配置读取，不再另设域名 Secret。
-
-手动构建（应急用）：
-
-```bash
-docker build -t willdockerhub/assay-api:latest ./apps/api
-docker build -t willdockerhub/assay-web:latest --build-arg VITE_API_BASE_URL="" ./apps/web
-# 服务器上： docker compose pull && docker compose up -d
-```
+生产是独立的 `task github:deploy`：要求同一提交的验证、发布和生产副本升级/回退演练记录，
+通过 Ansible 完成完整备份、仅 API/Web 更新和数据保留检查。部署沿用服务器的 Compose、
+环境配置和数据卷，不用仓库模板覆盖；具体 runner、环境变量和 Secrets 配置见上述说明。
 
 ## 镜像体积
 

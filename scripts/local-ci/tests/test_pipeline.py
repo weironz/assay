@@ -6,11 +6,14 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
 
 MODULE = Path(__file__).resolve().parents[1] / 'run.py'
+sys.path.insert(0, str(MODULE.parent))
+import deployment
 spec = importlib.util.spec_from_file_location('local_ci', MODULE)
 ci = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(ci)
@@ -79,7 +82,7 @@ class LocalCiSafety(unittest.TestCase):
             self.assertEqual(command[-5:], ['--profile', 'smoke', 'down', '--volumes', '--remove-orphans'])
 
     def test_unconfigured_deploy_cannot_attempt_ssh(self):
-        for key in ['LOCAL_CI_DEPLOY_HOST', 'LOCAL_CI_DEPLOY_USER', 'LOCAL_CI_DEPLOY_DIR']:
+        for key in ['DEPLOY_HOST', 'DEPLOY_USER', 'DEPLOY_DIR']:
             os.environ.pop(key, None)
         with patch.object(ci, 'clean_source'), patch.object(self.pipeline, 'verified_artifacts'), patch.object(self.pipeline, 'receipt', return_value={'images': {}}), patch.object(ci, 'call') as commands:
             with self.assertRaisesRegex(RuntimeError, 'Explicit production SSH'):
@@ -103,27 +106,26 @@ class LocalCiSafety(unittest.TestCase):
                     'upgrade': {'preserved': True, 'rollbackCompatible': True, 'targetImageIds': image_ids,
                                 'sourceImages': {'api': 'sha256:' + '3' * 64, 'web': 'sha256:' + '4' * 64},
                                 'trustedProxyContainers': ['trusted-proxy']}}
-        target = {'LOCAL_CI_DEPLOY_HOST': 'example.invalid', 'LOCAL_CI_DEPLOY_USER': 'deploy',
-                  'LOCAL_CI_DEPLOY_DIR': '/srv/assay', 'LOCAL_CI_DEPLOY_OFFLINE': 'false'}
+        known_hosts = Path(self.directory.name) / 'known_hosts'
+        known_hosts.touch()
+        target = {'DEPLOY_HOST': 'example.invalid', 'DEPLOY_USER': 'deploy',
+                  'DEPLOY_DIR': '/srv/assay', 'DEPLOY_OFFLINE': 'false', 'DEPLOY_KNOWN_HOSTS': str(known_hosts)}
         proof = {'version': self.pipeline.version, 'imageIds': image_ids, 'dataPreserved': True}
-        for result in ('', json.dumps(proof)):
+        for result in (None, proof):
             with self.subTest(completion=bool(result)), patch.dict(os.environ, target), patch.object(ci, 'clean_source'), \
                     patch.object(self.pipeline, 'verified_artifacts'), patch.object(self.pipeline, 'receipt', side_effect=lambda name: receipts[name]), \
-                    patch.object(self.pipeline, 'mark') as mark, patch.object(ci, 'call', return_value=result) as commands:
+                    patch.object(self.pipeline, 'mark') as mark, patch.object(deployment, 'execute', return_value=result) as execution:
                 if result:
                     self.pipeline.deploy()
                     mark.assert_called_once()
                 else:
-                    with self.assertRaisesRegex(RuntimeError, 'complete verified result'):
+                    with self.assertRaisesRegex(RuntimeError, 'completion proof'):
                         self.pipeline.deploy()
                     mark.assert_not_called()
-                transferred = [item.args[0] for item in commands.call_args_list if item.args[0][0] == 'scp']
-                self.assertTrue(any(str(item[-2]).endswith('/deploy.sh') for item in transferred))
-                execution = [item for item in commands.call_args_list
-                             if item.args[0][0] == 'ssh' and '/tools/deploy.sh ' in item.args[0][-1]]
-                self.assertEqual(len(execution), 1)
-                self.assertNotIn('data', execution[0].kwargs)
-                self.assertNotIn('bash -s', execution[0].args[0][-1])
+                arguments = execution.call_args.args[0]['assay_arguments']
+                self.assertEqual(arguments[0], '/srv/assay')
+                self.assertEqual(arguments[-1], 'trusted-proxy')
+                self.assertEqual(arguments[7:9], list(image_ids.values()))
 
     def test_latest_and_shell_expressions_are_not_valid_versions(self):
         for value in ['latest', 'v1.3.11', '1.3.11; true', '1.3.11\nextra']:
@@ -137,13 +139,13 @@ class LocalCiSafety(unittest.TestCase):
             pipeline = ci.Pipeline()
             self.assertNotIn('ASSAY_RELEASE_GITHUB_TOKEN', pipeline.env)
             self.assertNotIn('DOCKERHUB_TOKEN', pipeline.env)
-            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
+            self.assertNotIn('GH_TOKEN', pipeline.env)
             with patch.object(ci, 'call', return_value='ok') as commands:
                 pipeline.gh('release', 'upload', 'v1.3.12', 'fixture.bin')
             self.assertEqual(commands.call_args.kwargs['env']['GH_TOKEN'], 'github-test-secret')
             self.assertNotIn('github-test-secret', commands.call_args.args[0])
             self.assertNotIn('DOCKERHUB_TOKEN', commands.call_args.kwargs['env'])
-            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
+            self.assertNotIn('GH_TOKEN', pipeline.env)
 
     def test_unconfigured_github_authentication_is_preserved(self):
         with patch.dict(os.environ, {'GH_TOKEN': 'inherited-auth'}):
@@ -151,25 +153,9 @@ class LocalCiSafety(unittest.TestCase):
             os.environ.pop('ASSAY_RELEASE_GH_CONFIG_DIR', None)
             self.assertEqual(ci.Pipeline().github_env()['GH_TOKEN'], 'inherited-auth')
 
-    def test_explicit_local_github_login_is_scoped_to_github_commands(self):
-        directory = Path(self.directory.name) / 'gh-login'
-        directory.mkdir()
-        (directory / 'hosts.yml').touch()
-        with patch.dict(os.environ, {'ASSAY_RELEASE_GH_CONFIG_DIR': str(directory),
-                                     'GH_TOKEN': 'inherited-auth', 'GITHUB_TOKEN': 'inherited-secondary'}):
-            os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
-            pipeline = ci.Pipeline()
-            github = pipeline.github_env()
-            self.assertEqual(github['GH_CONFIG_DIR'], str(directory))
-            self.assertNotIn('GH_TOKEN', github)
-            self.assertNotIn('GITHUB_TOKEN', github)
-            self.assertEqual(pipeline.env['GH_TOKEN'], 'inherited-auth')
-            self.assertEqual(pipeline.env['GITHUB_TOKEN'], 'inherited-secondary')
-
-    def test_unavailable_local_login_never_falls_back_to_inherited_auth(self):
-        with patch.dict(os.environ, {'ASSAY_RELEASE_GH_CONFIG_DIR': str(Path(self.directory.name) / 'missing')}):
-            os.environ.pop('ASSAY_RELEASE_GITHUB_TOKEN', None)
-            with self.assertRaisesRegex(RuntimeError, 'release GitHub login is unavailable'):
+    def test_github_credentials_must_come_from_environment(self):
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, 'Export ASSAY_RELEASE_GITHUB_TOKEN'):
                 ci.Pipeline().github_env()
 
     def test_managed_github_secret_takes_priority_over_local_login(self):
@@ -182,9 +168,11 @@ class LocalCiSafety(unittest.TestCase):
         with patch.dict(os.environ, {'DOCKERHUB_TOKEN': token, 'DOCKERHUB_USERNAME': 'test-account'}):
             result = subprocess.CompletedProcess([], 1, token, token)
             output = io.StringIO()
-            with patch.object(ci.subprocess, 'run', return_value=result) as commands, contextlib.redirect_stdout(output):
+            with patch.object(ci.subprocess, 'run', return_value=result) as commands, contextlib.redirect_stdout(output), \
+                    patch.dict(os.environ, {'DOCKER_HOST': 'unix:///var/run/docker.sock', 'DOCKER_CONTEXT': ''}):
                 with self.assertRaisesRegex(RuntimeError, 'Docker Hub login failed') as failure:
-                    ci.Pipeline().dockerhub_login()
+                    with ci.Pipeline().dockerhub_login():
+                        pass
             self.assertNotIn(token, str(failure.exception) + output.getvalue())
             self.assertNotIn(token, commands.call_args.args[0])
             self.assertEqual(commands.call_args.kwargs['input'], token + '\n')
@@ -196,11 +184,41 @@ class LocalCiSafety(unittest.TestCase):
             os.environ.pop('DOCKERHUB_USERNAME', None)
             with patch.object(ci.subprocess, 'run') as commands:
                 with self.assertRaisesRegex(RuntimeError, 'DOCKERHUB_USERNAME'):
-                    ci.Pipeline().dockerhub_login()
+                    with ci.Pipeline().dockerhub_login():
+                        pass
             commands.assert_not_called()
 
+    def test_release_creates_tag_with_scoped_github_auth_and_verifies_downloads(self):
+        for name in ci.ASSETS:
+            (self.pipeline.dist / name).write_bytes(b'fixture')
+        checksums = {name: ci.sha256(self.pipeline.dist / name) for name in ci.ASSETS}
+        images = {name: {'reference': 'example/' + name, 'digest': 'sha256:' + '1' * 64,
+                         'imageId': 'sha256:' + '2' * 64} for name in ci.SERVICES}
+        receipts = {'verified': {}, 'push-images': {'images': images}}
+        def github(*args, capture=False):
+            if args[:2] == ('release', 'download'):
+                destination = Path(args[args.index('--dir') + 1])
+                for asset in self.pipeline.dist.iterdir():
+                    shutil.copyfile(asset, destination / asset.name)
+            if args[:2] == ('release', 'view'):
+                return json.dumps({'url': 'https://example.test/release',
+                    'assets': [{'name': path.name} for path in self.pipeline.dist.iterdir()]})
+            return 'f' * 40 if '--jq' in args else ''
+        with patch.object(ci, 'clean_source', return_value=ci.source()), \
+                patch.object(self.pipeline, 'verified_artifacts', return_value=checksums), \
+                patch.object(self.pipeline, 'receipt', side_effect=lambda name: receipts[name]), \
+                patch.object(self.pipeline, 'mark') as mark, patch.object(self.pipeline, 'gh', side_effect=github) as gh, \
+                patch.object(ci, 'call', return_value='') as call, \
+                patch.object(ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'not found')), \
+                patch.object(self.pipeline, 'github_env', return_value={}):
+            self.pipeline.release()
+        endpoints = [item.args[3] for item in gh.call_args_list if item.args[:3] == ('api', '--method', 'POST')]
+        self.assertEqual(endpoints, ['repos/example/assay/git/tags', 'repos/example/assay/git/refs'])
+        self.assertFalse(any('push' in item.args[0] for item in call.call_args_list))
+        mark.assert_called_once_with('release', url='https://example.test/release', images=images)
+
     def test_auth_check_does_not_push_publish_or_deploy(self):
-        with patch.object(self.pipeline, 'local_docker'), patch.object(self.pipeline, 'dockerhub_login'), patch.object(self.pipeline, 'gh') as commands:
+        with patch.object(self.pipeline, 'local_docker'), patch.object(self.pipeline, 'dockerhub_login', return_value=contextlib.nullcontext()), patch.object(self.pipeline, 'gh') as commands:
             self.pipeline.auth_check()
         self.assertEqual([call.args[:2] for call in commands.call_args_list],
                          [('api', 'user'), ('api', 'repos/example/assay')])
@@ -209,7 +227,8 @@ class LocalCiSafety(unittest.TestCase):
         task = shutil.which('task')
         if not task:
             self.skipTest('Task is needed for task graph validation')
-        for name in ['publish', 'ci', 'build', 'release', 'auth:check']:
+        for name in ['publish', 'ci', 'check', 'build', 'release', 'auth:check',
+                     'local:publish', 'local:ci', 'github:ci', 'github:publish']:
             result = subprocess.run([task, '--dry', name], cwd=ci.ROOT, capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertNotIn('run.py deploy', result.stdout + result.stderr)

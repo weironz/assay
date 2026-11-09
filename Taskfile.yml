@@ -1,7 +1,5 @@
 version: '3'
 
-dotenv: ['.env.local-ci']
-
 vars:
   VERSION:
     sh: python3 -c 'import json; print(json.load(open("package.json"))["version"])'
@@ -15,7 +13,7 @@ env:
 
 tasks:
   default:
-    desc: List the local CI tasks (never deploys)
+    desc: List local and GitHub pipeline tasks (never deploys)
     cmds: ['task --list']
   doctor:
     desc: Check local Docker, Rust, GitHub CLI and version prerequisites
@@ -33,7 +31,9 @@ tasks:
       - task: test:agent
   test:deployment:
     desc: Validate deployment templates, backup boundaries and local CI safety
-    cmds: ['python3 scripts/local-ci/run.py test-deployment']
+    cmds:
+      - task: deploy:check
+      - python3 scripts/local-ci/run.py test-deployment
   test:web:
     desc: Build the frontend test stage and run the locked Bun tests
     cmds: ['python3 scripts/local-ci/run.py test-web']
@@ -71,6 +71,12 @@ tasks:
       - task: build
       - task: test:smoke
       - python3 scripts/local-ci/run.py verify
+  check:
+    desc: Test and smoke-check application images without publishing or cross-compiling CLI releases
+    cmds:
+      - task: test
+      - task: build:images
+      - task: test:smoke
   push:images:
     desc: Push only verified version tags to Docker Hub (does not update latest)
     cmds: ['python3 scripts/local-ci/run.py push-images']
@@ -83,8 +89,37 @@ tasks:
       - task: push:images
       - task: release
   deploy:production:
-    desc: Explicitly back up and deploy a published release using configured SSH
+    desc: Deploy a rehearsed, published release through Ansible (explicit production action)
     cmds: ['python3 scripts/local-ci/run.py deploy']
+  tools:ansible:
+    desc: Install the pinned Ansible control environment locally
+    cmds:
+      - python3 -m venv .local-ci/tools/ansible
+      - .local-ci/tools/ansible/bin/python -m pip install -r deploy/ansible/requirements.txt
+  deploy:check:
+    desc: Check Ansible syntax without connecting to production
+    cmds: ['python3 scripts/local-ci/deployment.py --syntax-check']
+  local:ci:
+    desc: Run tests and builds on this machine
+    cmds: [{task: ci}]
+  local:publish:
+    desc: Publish locally verified images and binaries; never deploy
+    cmds: [{task: publish}]
+  local:deploy:
+    desc: Deploy locally verified and rehearsed release through Ansible
+    cmds: [{task: deploy:production}]
+  github:ci:
+    desc: Dispatch the GitHub CI route on the dedicated self-hosted runner
+    env: {ASSAY_ACTION: ci}
+    cmds: ['python3 scripts/local-ci/actions.py']
+  github:publish:
+    desc: Dispatch GitHub test, build and publication; never deploy
+    env: {ASSAY_ACTION: publish}
+    cmds: ['python3 scripts/local-ci/actions.py']
+  github:deploy:
+    desc: Dispatch Ansible production deployment of an already rehearsed release
+    env: {ASSAY_ACTION: deploy}
+    cmds: ['python3 scripts/local-ci/actions.py']
   status:
     desc: Show local verification and publishing receipts for this version
     cmds: ['python3 scripts/local-ci/run.py status']

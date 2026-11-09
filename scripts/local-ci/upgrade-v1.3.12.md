@@ -53,8 +53,9 @@ v1.3.12 包含 v1.3.11 的功能，并修复旧数据库直接升级时的权限
 
 ## 正式部署
 
-先执行 `task publish VERSION=1.3.12`。在被忽略的本地配置中设置明确的 SSH 目标和部署目录，
-必要时启用离线镜像传输，再运行 `task deploy:production VERSION=1.3.12`。
+先执行 `task local:publish VERSION=1.3.12`。通过环境变量设置 `DEPLOY_HOST`、`DEPLOY_USER`、
+`DEPLOY_DIR`、`DEPLOY_KNOWN_HOSTS` 及授权方式，必要时设置 `DEPLOY_OFFLINE=true`，
+再运行 `task local:deploy VERSION=1.3.12`。当前统一入口及完整参数见 [CI 与部署说明](README.md)。
 
 部署检查当前旧镜像仍与演练来源一致。它仅调整 API/Web 镜像及本次必要的两项设置：
 `ASSAY_TRUSTED_PROXY_IPS` 从明确指定的可信代理当前 IPv4 地址解析；
@@ -62,7 +63,7 @@ v1.3.12 包含 v1.3.11 的功能，并修复旧数据库直接升级时的权限
 密码密钥和域名必须保持指纹一致。代理容器后续重建可能改变动态地址，应重新解析并更新 Web，
 不要通过信任整个 Docker 子网解决。
 
-部署脚本先通过 SCP 完整传入服务器，再按文件执行，不能用 `ssh ... bash -s` 传输脚本正文：
+部署脚本先通过 Ansible 完整传入服务器，再按文件执行，不能用 `ssh ... bash -s` 传输脚本正文：
 `docker compose exec` 等子命令会读取标准输入，可能提前读走尚未执行的脚本。
 只有健康、数据和公网检查全部通过后才生成 `deployment-result.json`；构建机核对该文件的
 版本、镜像 ID 及数据保留结果后才记录部署成功，不能单凭 SSH 返回 0 判断成功。

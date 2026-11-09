@@ -1,0 +1,8 @@
+all:
+  hosts:
+    assay:
+      ansible_host: "{{ lookup('env', 'DEPLOY_HOST') }}"
+      ansible_user: "{{ lookup('env', 'DEPLOY_USER') }}"
+      ansible_port: "{{ lookup('env', 'DEPLOY_PORT') | default('22', true) | int }}"
+      ansible_connection: ssh
+      ansible_ssh_private_key_file: "{{ lookup('env', 'DEPLOY_SSH_KEY') | default(omit, true) }}"

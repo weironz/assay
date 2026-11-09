@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Explicit SSH deployment only; publish/release never invoke this file.
+# Shared Ansible deployment helper; publish/release never invoke this file.
 set -Eeuo pipefail
 umask 077
 deploy_dir=$1

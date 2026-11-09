@@ -1,0 +1,92 @@
+---
+- name: Deploy the verified Assay release
+  hosts: assay
+  gather_facts: false
+  become: "{{ lookup('env', 'DEPLOY_BECOME') | default('false', true) | bool }}"
+  vars:
+    # Resolve secrets only inside the play; they never appear in inventory dumps.
+    ansible_password: "{{ lookup('env', 'DEPLOY_PASSWORD') | default(omit, true) }}"
+    ansible_become_password: "{{ lookup('env', 'DEPLOY_BECOME_PASSWORD') | default(omit, true) }}"
+  tasks:
+    - name: Require the controller's validated operation
+      ansible.builtin.assert:
+        that:
+          - assay_operation is defined
+          - assay_arguments | length == 12
+          - assay_arguments[1] == assay_operation
+          - assay_mode in ['online', 'offline']
+        quiet: true
+
+    - name: Create the private backup and tools directory
+      ansible.builtin.file:
+        path: "{{ assay_operation }}/tools"
+        state: directory
+        mode: '0700'
+
+    - name: Restrict access to the entire operation directory
+      ansible.builtin.file:
+        path: "{{ assay_operation }}"
+        state: directory
+        mode: '0700'
+
+    - name: Transfer the shared backup and deployment tools
+      ansible.builtin.copy:
+        src: "{{ assay_repository }}/{{ item }}"
+        dest: "{{ assay_operation }}/tools/{{ item | basename }}"
+        mode: '0600'
+      loop:
+        - scripts/backup.sh
+        - scripts/backup-s3.cjs
+        - scripts/local-ci/db_fingerprint.py
+        - scripts/local-ci/deploy_config.py
+        - scripts/local-ci/deploy.sh
+
+    - name: Transfer the verified offline image bundle
+      ansible.builtin.copy:
+        src: "{{ item.source }}"
+        dest: "{{ assay_operation }}/{{ item.name }}"
+        mode: '0600'
+      loop:
+        - {source: "{{ assay_bundle }}", name: images.tar.gz}
+        - {source: "{{ assay_sums }}", name: images.sha256}
+      when: assay_mode == 'offline'
+
+    - name: Back up, deploy and verify data preservation
+      # Run a transferred file, never stream a script to stdin: compose exec and
+      # pg_dump may otherwise consume the remainder of the deployment program.
+      ansible.builtin.command:
+        argv: "{{ ['bash', assay_operation + '/tools/deploy.sh'] + assay_arguments }}"
+      register: assay_execution
+      failed_when: false
+      changed_when: assay_execution.rc == 0
+      no_log: true
+
+    - name: Save private deployment diagnostics on the target
+      ansible.builtin.copy:
+        content: "{{ assay_execution.stdout | default('') }}\n{{ assay_execution.stderr | default('') }}\n"
+        dest: "{{ assay_operation }}/ansible-deploy.log"
+        mode: '0600'
+      no_log: true
+
+    - name: Require successful deployment
+      ansible.builtin.assert:
+        that: assay_execution.rc == 0
+        fail_msg: "Deployment failed; inspect {{ assay_operation }}/ansible-deploy.log and rollback output."
+        quiet: true
+
+    - name: Read the remote completion proof
+      ansible.builtin.slurp:
+        src: "{{ assay_operation }}/deployment-result.json"
+      register: assay_completion
+
+    - name: Return completion proof to the controller
+      ansible.builtin.copy:
+        content: "{{ assay_completion.content | b64decode }}"
+        dest: "{{ assay_result }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+
+    - name: Report the preserved backup location
+      ansible.builtin.debug:
+        msg: "Deployment completed; retained backup and diagnostics: {{ assay_operation }}"

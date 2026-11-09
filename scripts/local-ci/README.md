@@ -1,148 +1,185 @@
-# 本地 CI / 发布备用流程
+# Taskfile 统一 CI、发布与 Ansible 部署
 
-GitHub Actions 免费额度耗尽时，使用仓库根目录 `Taskfile.yml`。测试、构建、Docker Hub
-推送、GitHub Release 和生产部署相互独立；`task ci` 和 `task publish` 均不部署生产。
+根目录 `Taskfile.yml` 是统一触发入口。本地与 GitHub 两条路线执行相同的 Python 管线；
+生产部署统一进入 `deploy/ansible/deploy.yml`，由 Ansible 传送并执行已有的备份、部署、
+数据保留校验与恢复脚本。参考 Cormex 的环境变量 inventory 模式，未复制其应用配置。
 
-## 安装与前置条件
+| 阶段 | 当前机器执行 | 提交 GitHub Actions |
+| --- | --- | --- |
+| 测试、构建、隔离整栈验证 | `task local:ci` | `task github:ci` |
+| 测试通过的版本镜像和 GitHub Release | `task local:publish` | `task github:publish` |
+| 已发布且已演练版本的生产部署 | `task local:deploy` | `task github:deploy` |
 
-主运行环境为 Linux x86_64：Python 3.11+、Docker（Compose v2 / Buildx）、Git、GitHub CLI、
-Rust stable（包含 rustfmt、clippy）、Node.js（部署工具契约测试）。API/Web 的依赖安装和构建
-在 Docker 中执行，不要求主机额外安装 pnpm/Bun。CLI 的 Linux musl 和 Windows MSVC
-发布包分别通过一次性 Rust 容器和主机 cargo-xwin 交叉构建。Linux 的编译输出和依赖缓存
-绑定到 `.local-ci/cache`，源码只读，不把完整编译目录保存成镜像层；Agent 镜像复用同一次
-编译的二进制并校验提取文件的 SHA256。主机还需安装 cargo-xwin v0.23.1、
-LLVM（clang-cl、lld-link、llvm-lib、llvm-dlltool）以及 Rust 的 Windows 目标：
+`github:*` 只提交任务，终端显示成功不代表构建或部署已完成。到输出的 Actions 地址查看结果。
+`local:publish` 复用本机已验证产物；`github:publish` 在 runner 上先运行完整 CI 再发布。
+发布任务不会连生产 SSH，也不更新 Docker `latest`。默认任务只列出帮助。
+原 `ci`、`publish`、`deploy:production` 等入口保留，与 `local:*` 使用同一实现。
+
+## 控制机安装
+
+控制机使用 Linux x86_64 或 Linux WSL。要求 Python **3.12+**、Docker（Compose v2、Buildx）、
+Git、GitHub CLI、Node.js、Rust stable（rustfmt、clippy）。API/Web 在 Docker 内安装依赖并测试。
+Windows 原生不是 Ansible 控制机，请在 WSL 内执行以下流程。
+
+Task 固定使用 v3.54.0。从 [官方 Release](https://github.com/go-task/task/releases/tag/v3.54.0)
+下载对应平台压缩包及 `task_checksums.txt`，校验 SHA256 后把 `task` 放到 PATH。
 
 ```bash
+task --version
+task --list
+task tools:ansible
+task deploy:check
 rustup target add x86_64-pc-windows-msvc
 cargo install cargo-xwin --version 0.23.1 --locked
-# Debian/Ubuntu：apt install clang lld llvm
-```
-
-也可从 cargo-xwin 官方 Release 下载并校验预编译工具。Windows SDK 首次构建时由
-cargo-xwin 下载并缓存到本地 CI 输出目录，请遵守该工具及 Microsoft SDK 的许可条款。
-此方式避免下载和展开完整的 Windows 编译器容器镜像，适合磁盘有限的备用构建主机。
-
-安装 Task v3.54.0 时，从 [官方 Release](https://github.com/go-task/task/releases/tag/v3.54.0)
-下载对应平台的压缩包与 `task_checksums.txt`，验证 SHA256 后将 `task` 放到 PATH。
-执行 `task --version` 和 `task --list` 检查安装。
-
-按需复制 `.env.local-ci.example` 为 `.env.local-ci`。该文件、`.local-ci/`、`.task/` 均被 Git 忽略。
-使用正常的 `gh auth login` 和 `docker login` 配置账号，不把令牌放进 Taskfile 或命令参数。
-受代理控制的环境可以设置 `LOCAL_CI_PROXY_CA`，构建会通过 BuildKit secret 挂载 CA，
-不关闭 TLS 验证，不将会话证书写入发布镜像。
-
-## 云环境中的发布凭据
-
-在云环境配置界面创建机密并绑定为以下环境变量；不要把令牌填入仓库、Taskfile、
-`.env.local-ci.example` 或命令行参数。机密通过环境配置保存和应用后，可供后续环境使用，
-无需每次在聊天中提供。Cloud Environment 状态工具只查询绑定状态，不能代替配置界面写入机密。
-
-| 环境变量 | 配置类型 | 用途 |
-| --- | --- | --- |
-| `ASSAY_RELEASE_GITHUB_TOKEN` | 机密 | GitHub 发布凭据，需有 `weironz/assay` 的 Contents 读写权限 |
-| `DOCKERHUB_TOKEN` | 机密 | Docker Hub 访问令牌，需能读写三个 `assay-*` 镜像仓库 |
-| `DOCKERHUB_USERNAME` | 普通变量 | 登录账号，本项目为 `willdockerhub` |
-
-GitHub 使用独立变量，避免与构建环境自带的 `GH_TOKEN` 混淆。只有 GitHub CLI 子进程
-会选用该发布令牌，继承的代理、认证配置保持不变。Docker Hub 的令牌通过标准输入传入
-`docker login --password-stdin`；登录账号可以与镜像的组织命名空间不同。
-这两个专用令牌不会传给编译器、Docker build 命令或写入发布记录。
-
-配置后执行：
-
-```bash
-task auth:check
-```
-
-该检查只验证 Docker 登录及 GitHub 身份、仓库访问，不推送镜像、不创建 Release，也不部署。
-实际镜像写权限和 Release 附件上传权限仍由 `task publish` 验证。
-未绑定专用令牌时，继续使用现有 Docker 客户端登录及 GitHub CLI 的默认认证。
-
-### 环境配置入口暂不可用时
-
-也可在当前构建主机保存专用 GitHub CLI 登录，再在被忽略的 `.env.local-ci` 中设置
-`ASSAY_RELEASE_GH_CONFIG_DIR=/绝对路径/专用凭据目录`。目录放在仓库外并设为 `0700`，
-凭据文件仅当前用户可读写；通过 `gh auth login --with-token` 的标准输入完成登录，
-不要把令牌写进命令行参数。Docker Hub 继续使用正常 `docker login` 保存的客户端认证。
-
-发布命令优先使用 `ASSAY_RELEASE_GITHUB_TOKEN`；未绑定时，才使用明确选定的本地
-GitHub CLI 凭据目录。仅这些 GitHub 子进程会去掉默认的 `GH_TOKEN` / `GITHUB_TOKEN`，
-让 CLI 读取专用登录；其他构建命令和平台认证保持原样。选定目录未就绪时会报错，
-不会静默换回其他身份。
-
-这是当前主机的本地保存方式，不会登记成托管机密，也不保证云环境重建后保留。
-配置入口恢复后，可改用前述托管机密绑定；原有发布版本不受影响。
-
-## 完整执行
-
-```bash
+# Debian/Ubuntu 的 Windows 交叉编译工具：apt install clang lld llvm
 task doctor
-task ci VERSION=1.3.12
-task status VERSION=1.3.12
-# 所有测试与构建均通过，且源代码已提交后：
-task publish VERSION=1.3.12
 ```
 
-`VERSION` 默认取根 `package.json`，必须与 API、Web、CLI、Samba Agent 一致。
-`DOCKERHUB_NAMESPACE` 默认 `willdockerhub`，`GITHUB_REPOSITORY` 默认 `weironz/assay`，
-都可通过 Task 参数覆盖。输出默认在 `.local-ci/<版本>/`，可用 `LOCAL_CI_STATE_DIR` 指定专用目录。
-本工具不切换分支、不自动提交源代码；源代码变化会使已有测试、构建和发布凭据失效，需重新验证。
+`tools:ansible` 在被忽略的 `.local-ci/tools/ansible` 创建 venv，安装固定的 ansible-core 2.21.6。
+可以使用 PATH 中已安装的 Ansible；团队控制机应保持同一版本。
+`deploy:check` 仅做语法检查，不读取生产凭据、不连接服务器。
+LLVM 的 clang-cl、lld-link、llvm-lib、llvm-dlltool 必须都在 PATH。
+cargo-xwin 首次下载 Windows SDK 并缓存，请遵守其许可。
 
-## 任务
+Linux musl CLI/Agent 通过一次性 Rust 容器构建，输出缓存绑定到 CI 状态目录，源码只读。
+Agent 镜像复用同一二进制并校验 SHA256。受代理控制时设置 `LOCAL_CI_PROXY_CA`；CA 通过
+BuildKit secret 挂载，不关闭 TLS 验证，不写进正式镜像。
 
-| 命令 | 行为 |
+## 本地环境变量和凭据
+
+Taskfile **不再自动加载 `.env.local-ci`**，也不读取保存的 `gh auth login`、Docker 登录作为发布凭据。
+原文件不会被删除；迁移时请由受控 shell/机密管理器显式导出所需变量。
+`.env.local-ci.example` 仅列变量，不是自动加载入口。
+
+| 变量 | 要求及用途 |
 | --- | --- |
-| `task auth:check` | 检查发布登录及仓库访问，不发布、不部署 |
-| `task test` | 部署/备份工具契约、前端测试、后端测试、CLI 测试、Agent fmt/clippy/test |
-| `task build` | API/Web/Agent 三个镜像，以及 Linux/Windows CLI 发布包 |
-| `task test:smoke` | 独立整栈的首页、Logo、路由、登录、角色、工单、MFA、限流验证 |
-| `task test:upgrade` | 在隔离服务中恢复指定生产备份，验证迁移、原记录、附件下载和旧版本回退 |
-| `task ci` | 按顺序执行全部检查与构建，记录对应提交号和源码摘要 |
-| `task push:images` | 仅推送通过验证的版本标签，拒绝覆盖已有发布标签，不更新 latest |
-| `task release` | 发布二进制、SHA256SUMS 和包含镜像 digest 的发布清单 |
-| `task publish` | 依次推送镜像、创建 Release，**不部署生产** |
-| `task deploy:production` | 使用明确配置的 SSH 目标，备份后只更新生产 API/Web |
+| `ASSAY_RELEASE_GITHUB_TOKEN` | GitHub 发布需 Contents 读写；触发 Actions 另需 Actions 写权限。可使用环境中的 `GH_TOKEN` / `GITHUB_TOKEN` |
+| `DOCKERHUB_TOKEN` | Docker Hub 读写令牌，仅推送或认证检查时读取 |
+| `DOCKERHUB_USERNAME` | Docker Hub 登录账号，与组织命名空间可以不同 |
+| `DOCKERHUB_NAMESPACE` | 默认 `willdockerhub` |
+| `GITHUB_REPOSITORY` | 默认 `weironz/assay` |
+| `LOCAL_CI_STATE_DIR` | 构建输出、缓存与校验记录目录；默认 `.local-ci`，runner 必须显式设置到 checkout 外 |
+| `CARGO`、`CARGO_HOME`、`RUSTUP_HOME` | 按需选择编译器和缓存位置 |
 
-测试数据库、缓存、附件存储使用每次独立的 `assay-local-ci-*` 项目；端口仅绑定回环地址，
-不会读取生产 `.env`、连接生产数据库、使用生产卷或停止其他容器。测试结束仅清理本次项目。
-同一个输出目录同时只允许运行一个任务，防止并发发布或覆盖验证结果。
-
-## 发布产物
-
-- `assay-x86_64-unknown-linux-musl`：Linux x86_64 静态 CLI，构建后执行 `--version` 验证。
-- `assay-x86_64-pc-windows-msvc.exe`：Windows x86_64 CLI，交叉构建并检查 PE 格式。
-- `assay-samba-agent-x86_64-unknown-linux-musl`：从已验证 Agent 镜像提取的 Linux Agent。
-  单独运行时仍需安装 Agent 使用的 Samba 配置校验工具；常规部署建议使用 Agent 镜像。
-- `SHA256SUMS`、`release-manifest.json`：二进制校验值、源码提交、测试记录、镜像 digest。
-
-镜像为 `willdockerhub/assay-api:<版本>`、`willdockerhub/assay-web:<版本>`、
-`willdockerhub/assay-samba-agent:<版本>`。Release 先作为草稿上传并下载校验文件，再发布为
-`v<版本>` 正式 Release。重复发布不覆盖已有正式 Release；同一提交的未完成草稿可以继续上传。
-Windows 包在 Linux 交叉编译，本机不执行 Windows 程序。
-
-## 单独部署生产
-
-先阅读 [v1.3.10 升级说明](upgrade-v1.3.12.md)。在 `.env.local-ci` 设置 `LOCAL_CI_DEPLOY_HOST`、`LOCAL_CI_DEPLOY_USER`、
-`LOCAL_CI_DEPLOY_DIR`，按需设置端口和 SSH 配置路径。SSH 使用严格主机指纹检查和现有授权，
-不会关闭主机验证。然后显式执行：
+请从系统机密管理器注入令牌，或通过终端隐藏输入设置变量，不把值写在命令历史、Git 或聊天中。
+GitHub 令牌仅传给相应 GitHub CLI 子进程；SSH 密码、GitHub 和 Docker Hub 令牌不会进入编译器。
+Docker 登录使用临时 `0700` 目录和 `--password-stdin`，保留客户端代理设置，成功或失败退出均清理，
+不覆盖机器上原来的 Docker 登录。
 
 ```bash
-task deploy:production VERSION=1.3.12
+export DOCKERHUB_USERNAME=willdockerhub
+export LOCAL_CI_STATE_DIR=/private/assay-ci
+task auth:check
+task local:ci
+task status
+task local:publish
 ```
 
-部署要求当前提交的本地验证、生产副本升级/回退演练和 Release 全部完成。
-按发布清单的不可变 digest 拉取镜像；设置 `LOCAL_CI_DEPLOY_OFFLINE=true` 时，在构建机
-导出已发布且镜像 ID 相符的 API/Web，校验传输文件后在目标机导入，不依赖生产 Docker Hub 连通性。
-两种模式均验证最终镜像 ID，不修改 `latest`。
+`VERSION` 默认取 `package.json`，也可显式 `task local:ci VERSION=X.Y.Z`，必须与 API/Web/CLI/Agent
+版本一致。已发布版本不可覆盖：新代码应先按版本管理流程统一升版，再运行 CI/发布。
+任务不自动改版本、切分支或提交源码；源码或镜像/二进制变化会使原校验记录失效。
+`auth:check` 不发布、不部署，真实写权限仍由发布操作验证。
 
-服务器在原站服务期间完成镜像准备、配置预检查。进入维护窗口后暂停 Web/API 写入，
-使用当前 API 镜像内已有的 S3 SDK 备份 PostgreSQL、全部对象及恢复配置，不下载备份工具镜像。
-校验备份后只重建 API/Web，沿用生产的无 seed 启动命令。开启 Web 前逐条核对旧数据，
-允许新记录和空附件关联回填，禁止原工单、正文、账号密码哈希、角色分配或既有附件绑定丢失/改变。
-数据库、Redis、对象存储容器和数据卷保留；域名、密钥、代理配置不随环境模板替换。
-检查失败会尝试恢复原 `.env`、Compose 和 API/Web 镜像，并明确报告恢复是否成功。
+## 生产 Ansible 配置
 
-镜像回退不会自动撤销数据库迁移，也不会覆盖部署后新增的工单。数据库恢复需要根据备份单独操作；
-发布前应核对迁移的兼容性和恢复演练结果。生产部署默认不更新 Samba Agent，文件服务器上的
-Agent 升级仍按该环境的现有流程单独执行。
+所有连接参数从环境变量读取，inventory 没有硬编码主机、账号或部署目录。
+与 Cormex 可共用主机、端口、密钥和 verified known_hosts；**`DEPLOY_DIR` 必须重新指向 Assay**，
+不能沿用 Cormex 的目录。现有 `.env`、Compose 和生产卷是部署依据，不用模板覆盖。
+
+| 变量 | 含义 |
+| --- | --- |
+| `DEPLOY_HOST`、`DEPLOY_USER`、`DEPLOY_DIR` | 必填；目标地址、SSH 用户、现有 Assay 的绝对目录 |
+| `DEPLOY_PORT` | 默认 `22` |
+| `DEPLOY_KNOWN_HOSTS` | 必填；已由可信渠道验证的 known_hosts 文件路径，不做首次连接自动信任 |
+| `DEPLOY_SSH_KEY` | 可选；本机私钥路径，也支持已有 SSH agent |
+| `DEPLOY_SSH_CONFIG` | 可选；本机 SSH 配置文件路径 |
+| `DEPLOY_PASSWORD` | 可选 SSH 密码，环境注入，不写参数文件或命令行；推荐密钥 |
+| `DEPLOY_BECOME` | 默认 `false`；非 root 用户需要提权时设置 `true` |
+| `DEPLOY_BECOME_PASSWORD` | 可选提权密码；仅 Ansible 子进程可见 |
+| `DEPLOY_OFFLINE` | `true` 导出并传输已经发布的本地镜像；默认 `false` 按 digest 拉取 |
+| `LOCAL_CI_UPGRADE_BACKUP_DIR` | 仓库外的受保护生产副本，用于独立升级/回退演练 |
+
+旧 `LOCAL_CI_DEPLOY_*` / `LOCAL_CI_SSH_CONFIG` 不再选择目标，避免两套参数意外连错机器。
+严格主机指纹检查强制开启，不能通过继承的 `ANSIBLE_*` 环境变量关闭。
+密码方式要求控制机上的 OpenSSH 支持 Ansible 的密码机制；优先使用密钥或 SSH agent。
+目标用户须具备 Docker、现有目录及 `/run/lock` 的所需权限，或通过 become 提权。
+
+```bash
+# 设置以上目标变量，并取得符合 upgrade.py 格式的完整私有生产副本后：
+task test:upgrade
+task local:deploy
+```
+
+部署必须同时具备当前源码的完整验证、正式发布、生产副本升级及旧版本兼容演练记录。
+不会因缺少记录降级为直接 `docker compose up`。原生产镜像 ID 与演练来源不同也会拒绝。
+演练副本须含 PostgreSQL、对象归档/清单、来源与原运行镜像证明，详见
+[升级说明](upgrade-v1.3.12.md) 及 `upgrade.py`。
+
+Ansible 在目标创建独立 `0700` 操作目录，传送脚本后按 argv 执行，避免 stdin 被备份子进程消费。
+镜像准备和配置预检后暂停 Web/API 写入，备份 PostgreSQL、全部 S3 对象及恢复配置，验证备份；
+仅升级 API/Web，逐条检查原工单、正文、密码哈希、角色、附件绑定，检查通过才开放 Web。
+数据库/Redis/RustFS 容器和数据卷必须保持。Samba Agent 不在此工单站点升级流程内。
+成功后还必须取回精确匹配版本、镜像 ID、`dataPreserved=true` 的完成证明，才能登记部署成功。
+
+失败时既有脚本尝试恢复原 Compose、环境配置和 API/Web；Ansible 会报告失败，日志保存在
+本次操作目录 `ansible-deploy.log`。保留的备份、指纹、配置和日志都不上传到 GitHub。
+应用回退不覆盖数据库，也不自动撤销迁移，避免覆盖部署后的新工单；数据库恢复须单独处理。
+
+## GitHub Actions 路线
+
+自动 push/PR 执行 `task check`（测试、应用镜像及整栈冒烟，不构建 CLI 发布包或发布），
+使用 GitHub 托管 runner，会消耗托管额度。
+手动 `github:*` 路线使用专用自托管 Linux x86_64 runner，标签为 **`assay-release`**，
+避免依赖当前耗尽的托管额度，并在本地保留构建产物及敏感演练副本。
+本改动只提供工作流，不自动注册 runner，也没有在生产机器安装 runner。
+
+设置步骤：
+
+1. 在可信构建机安装前述工具，按 GitHub 的 runner 注册向导添加 `assay-release` 标签。
+   用 runner group/仓库权限限制到本仓库的可信工作流；不让不受信任 PR 在该机器执行。
+2. 仓库变量 `ASSAY_CI_STATE_DIR` 指向 runner 用户拥有的私有持久目录，必须在 checkout 外。
+   使用单台专用 runner；如有多台同标签机器，必须提供相同有效状态和镜像，否则安全检查会拒绝。
+3. 创建 `release` Environment，限定可信 `main` 和版本标签。设置 `DOCKERHUB_TOKEN` secret，
+   `DOCKERHUB_USERNAME` 普通变量。GitHub 自带的短期 token 用于 Release/标签，无需保存 PAT。
+4. 创建 `production` Environment，限定相同可信分支/标签。设置 secrets `DEPLOY_HOST`、
+   `DEPLOY_USER`、`DEPLOY_SSH_KEY`（**密钥内容**）、`DEPLOY_KNOWN_HOSTS`（**指纹文件内容**）；
+   设置普通变量 `DEPLOY_DIR`，可选 `DEPLOY_PORT`、`DEPLOY_OFFLINE`、`DEPLOY_BECOME`，
+   如需 sudo 则设置 secret `DEPLOY_BECOME_PASSWORD`。这与本地变量的“文件路径”表示不同，
+   适配器会转换为临时 `0600` 文件，结束后清理。
+5. 在专用 runner 的同一提交和状态目录完成私有生产副本 `task test:upgrade`。
+   工作流不会下载公开备份或跳过演练；未准备好的部署必须失败。
+
+```bash
+# 源码已提交并推送，当前 checkout 与远端 main 相同：
+task github:ci
+task github:publish
+# 确认 publish 成功，且同一 runner 上已有对应升级/回退演练记录后：
+task github:deploy
+```
+
+`ASSAY_ACTIONS_REF` 默认 `main`，也可设为匹配当前提交的版本标签。
+触发前查询远端 SHA 并与本地比较；runner 再次核对输入 SHA、版本及 checkout，防止分支漂移。
+不能用 `latest`、未提交源码或不同版本的演练记录。
+GitHub `deploy` job 只部署已验证的发布，不构建镜像；构建/发布 job 不注入生产凭据。
+需要交互审批时可使用 GitHub Environment 的既有保护规则，Task 不另加确认弹窗。
+
+## 产物及验证
+
+输出在 `$LOCAL_CI_STATE_DIR/<版本>/`；测试容器属于唯一的 `assay-local-ci-*` 项目，端口只绑定回环，
+结束只清理本次项目。源码摘要、提交号、镜像 ID、文件 SHA256 共同绑定每步记录。
+同一状态目录的单步操作使用非阻塞锁，重叠执行会失败；GitHub 手动任务还有工作流级并发串行。
+
+GitHub Release 含 Linux musl CLI、Windows MSVC CLI、Linux musl Samba Agent、`SHA256SUMS`、
+`release-manifest.json`。草稿上传后下载校验再发布。镜像推送 `assay-api`、`assay-web`、
+`assay-samba-agent` 的明确版本标签，拒绝覆盖已存在的其他产物，不更新 `latest`。
+
+本次工具调整可单独验证，不需要重复发布旧版本或重启生产：
+
+```bash
+task tools:ansible
+task deploy:check
+task test:deployment
+```
+
+部署测试包含真实 Ansible 在临时本机 fixture 上的传送、执行、完成凭证回传和失败中止；
+不连接生产、不复制真实用户数据。完整发布前仍需运行 `task local:ci` 和私有副本演练。

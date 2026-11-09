@@ -1,751 +1,112 @@
-name: CI / CD
+name: Task CI / CD
 
-# 推送只跑测试，不会自动发版。
-# 构建镜像与部署一律手动触发：Actions 页面点 "Run workflow"，
-# 或命令行 `gh workflow run ci-cd.yml`（加 -f skip_deploy=true 则只推镜像不部署）。
+# Taskfile is the shared entry point. Pushes/PRs only test; publishing and
+# deploying are independent explicit operations on a trusted persistent runner.
 on:
   pull_request:
   push:
     branches: [main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
     inputs:
-      release_version:
-        description: '统一发布版本（例如 1.3.5；会部署、创建 v1.3.5 Release 并附带 CLI）'
+      operation:
+        description: 'ci = test/build; publish = test/build/release; deploy = rehearsed release only'
+        required: true
+        type: choice
+        default: ci
+        options: [ci, publish, deploy]
+      version:
+        description: 'Exact X.Y.Z matching package versions'
+        required: true
         type: string
-        default: ''
-      skip_deploy:
-        description: '只构建推送镜像，不部署到服务器'
-        type: boolean
-        default: false
-      image_tag:
-        description: '镜像版本号（留空则用 commit sha）'
+      expected_sha:
+        description: 'Exact commit SHA; task github:* supplies this automatically'
+        required: true
         type: string
-        default: ''
-      publish_latest:
-        description: '同时更新 latest（候选构建默认只推送指定标签）'
-        type: boolean
-        default: false
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
-  # PR 可以互相取消；main 上的发布流程不取消，避免服务器停在半途状态
-  group: cicd-${{ github.ref }}
+  group: assay-${{ github.event_name == 'workflow_dispatch' && 'release' || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-env:
-  HUB_API: willdockerhub/assay-api
-  HUB_WEB: willdockerhub/assay-web
-  HUB_AGENT: willdockerhub/assay-samba-agent
-
 jobs:
-  deployment:
-    name: 阿里云部署配置与备份契约
+  tests:
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: 环境参数与生产数据卷兼容性
-        run: |
-          python3 -m unittest discover -s deploy/aliyun/tests -p 'test_*.py'
-          python3 -m unittest discover -s deploy/aliyun-Cloudflare-Tunnel/tests -p 'test_*.py'
-      - name: 备份项目、配置与卷边界
-        run: bash scripts/test-backup.sh
-
-  samba_agent:
-    name: Samba Agent · 原生 Rust 检查
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: 部署工具与测试目标契约
-        run: |
-          python3 -m unittest discover -s deploy/samba-production -p 'test_*.py'
-          node --test deploy/samba-test/tests/test-origin.test.cjs
+        with: {persist-credentials: false}
+      - uses: go-task/setup-task@v1
+        with: {version: '3.54.0'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '22'}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+        with: {components: 'rustfmt, clippy'}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: agents/samba
-      - run: cargo fmt --manifest-path agents/samba/Cargo.toml --check
-      - run: cargo clippy --locked --manifest-path agents/samba/Cargo.toml --all-targets -- -D warnings
-      - run: cargo test --locked --manifest-path agents/samba/Cargo.toml
+          workspaces: |
+            cli -> ../.local-ci/cache/target-cli
+            agents/samba -> ../../.local-ci/cache/target-agent
+      - run: task tools:ansible
+      - run: task check
 
-  cli:
-    name: CLI · 测试与构建
-    runs-on: ubuntu-latest
+  pipeline:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'deploy' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/v{0}', inputs.version))
+    runs-on: [self-hosted, Linux, X64, assay-release]
+    environment: release
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      LOCAL_CI_STATE_DIR: ${{ vars.ASSAY_CI_STATE_DIR }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'willdockerhub' }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: 测试
-        working-directory: cli
-        run: cargo test --locked
-      - name: 构建
-        working-directory: cli
-        run: cargo build --locked --release
-
-  web:
-    name: 前端 · 测试、类型检查与构建
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-
-      - name: 安装依赖（锁定版本）
-        working-directory: apps/web
-        run: bun install --frozen-lockfile
-
-      - name: 前端安全契约测试
-        working-directory: apps/web
-        run: bun run test
-
-      - name: 类型检查
-        working-directory: apps/web
-        run: bunx tsc -p tsconfig.json --noEmit --incremental false
-
-      - name: 生产构建
-        working-directory: apps/web
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Validate source and persistent runner state
+        run: python3 scripts/local-ci/actions_check.py
+      - name: Test and build through Taskfile
+        run: task local:ci VERSION="$RELEASE_VERSION"
+      - name: Publish verified release (never deploy)
+        if: inputs.operation == 'publish'
         env:
-          VITE_API_BASE_URL: ''
-        run: bun run build
-
-  api:
-    name: 后端 · 类型检查与构建
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: ci
-          POSTGRES_PASSWORD: ci_test_password
-          POSTGRES_DB: assay
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U ci -d assay"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-      redis:
-        image: redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 10.13.1
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: apps/api/pnpm-lock.yaml
-
-      # 根 pnpm-workspace.yaml 还包含用 Bun 管理、没有 pnpm 锁文件的 web。
-      # 在 runner 临时目录中安装 API，使用 apps/api/pnpm-lock.yaml 的独立 importer。
-      - name: 准备独立 API 工作目录
-        run: |
-          mkdir -p "$RUNNER_TEMP/assay-api"
-          cp -a apps/api/. "$RUNNER_TEMP/assay-api/"
-
-      - name: 安装依赖（锁定版本）
-        working-directory: ${{ runner.temp }}/assay-api
-        run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: 生成 Prisma Client
-        working-directory: ${{ runner.temp }}/assay-api
-        run: pnpm prisma generate
-
-      - name: 校验 Prisma schema
-        working-directory: ${{ runner.temp }}/assay-api
-        # validate 会解析 datasource 里的 env()，需要变量存在；这里不连库，给个占位即可
-        env:
-          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
-        run: pnpm prisma validate
-
-      - name: 编译
-        working-directory: ${{ runner.temp }}/assay-api
-        run: pnpm build
-
-      - name: 创建隔离测试数据库结构
-        working-directory: ${{ runner.temp }}/assay-api
-        env:
-          DATABASE_URL: postgresql://ci:ci_test_password@127.0.0.1:5432/assay?schema=public
-        run: pnpm prisma migrate deploy
-
-      - name: API 测试（必须发现并执行非零数量）
-        working-directory: ${{ runner.temp }}/assay-api
-        env:
-          REDIS_URL: redis://127.0.0.1:6379
-          SESSION_EPOCH_TEST_DATABASE_URL: postgresql://ci:ci_test_password@127.0.0.1:5432/assay?schema=public
-          SAMBA_AUDIT_TEST_DATABASE_URL: postgresql://ci:ci_test_password@127.0.0.1:5432/assay?schema=public
-        run: pnpm test
-
-  smoke:
-    name: 集成冒烟测试（整栈拉起）
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 构建镜像
-        run: |
-          # Reproduce uploads/checkouts whose public assets start owner-only.
-          chmod 600 apps/web/public/brand/*.png
-          docker build -t assay-api:ci ./apps/api
-          docker build -t assay-web:ci --build-arg VITE_API_BASE_URL="" ./apps/web
-
-      - name: 拉起整栈
-        run: |
-          cat > .env <<'EOF'
-          PUBLIC_URL=http://localhost:8088
-          WEB_PORT=8088
-          IMAGE_TAG=ci
-          POSTGRES_USER=assay
-          POSTGRES_PASSWORD=ci_test_password
-          POSTGRES_DB=assay
-          S3_BUCKET=assay-attachments
-          S3_REGION=us-east-1
-          S3_ACCESS_KEY=ciaccesskey
-          S3_SECRET_KEY=cisecretkey
-          S3_FORCE_PATH_STYLE=true
-          AUTH_SECRET=ci_only_secret_not_used_in_production_xxxxx
-          ADMIN_EMAIL=admin@example.com
-          ADMIN_PASSWORD=ciadmin12345
-          ADMIN_NAME=CI Admin
-          EOF
-          # 用本地刚构建的镜像替代仓库镜像（CI 里不该去拉远端）
-          sed -i -E 's#image: \$\{REGISTRY:-[^}]*\}/assay-api:[^ ]*#image: assay-api:ci#; s#image: \$\{REGISTRY:-[^}]*\}/assay-web:[^ ]*#image: assay-web:ci#' docker-compose.yaml
-          grep -E 'image: assay-(api|web):ci' docker-compose.yaml
-          docker compose up -d
-
-      - name: 等待服务就绪
-        run: |
-          for i in $(seq 1 60); do
-            if curl -fsS -m 3 http://localhost:8088/ >/dev/null 2>&1; then echo "web 就绪"; break; fi
-            sleep 3
-          done
-          for i in $(seq 1 60); do
-            if docker compose exec -T api node -e "fetch('http://127.0.0.1:' + (Number(process.env.API_PORT)||3000) + '/health', {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"; then echo "api 就绪"; exit 0; fi
-            sleep 3
-          done
-          echo "::error::API /health 未就绪"
-          exit 1
-
-      - name: 冒烟断言
-        run: |
-          set -e
-          echo "— 首页可访问"
-          curl -fsS -o /dev/null -w "  HTTP %{http_code}\n" http://localhost:8088/
-
-          for asset in greenstor-lockup.png greenstor-lockup-dark.png favicon.png; do
-            curl -fsS -o /dev/null "http://localhost:8088/brand/$asset"
-          done
-
-          echo "— SPA 路由回退（前端路由不能被 API 前缀吃掉）"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/tickets)" = "200"
-
-          echo "— 未登录访问受保护接口应 401"
-          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8088/api/me)" = "401"
-
-          echo "— 管理员登录"
-          JAR=$(mktemp)
-          test "$(curl -s -o /dev/null -w '%{http_code}' -c "$JAR" \
-            -X POST http://localhost:8088/api/auth/sign-in/email \
-            -H 'Content-Type: application/json' -H 'Origin: http://localhost:8088' \
-            -d '{"email":"admin@example.com","password":"ciadmin12345"}')" = "200"
-
-          echo "— 登录后能取到自己的角色"
-          curl -fsS -b "$JAR" http://localhost:8088/api/me | grep -q '"roles":\["admin"\]'
-
-          echo "— 工单列表可访问"
-          curl -fsS -b "$JAR" -o /dev/null "http://localhost:8088/api/tickets?pageSize=1"
-
-          echo "— 两步验证端到端"
-          ASSAY_TEST_PASSWORD=ciadmin12345 python3 scripts/smoke-two-factor.py
-
-          echo "— 登录限流生效（连打 8 次后应出现 429）"
-          CODES=""
-          for i in $(seq 1 8); do
-            CODES="$CODES $(curl -s -o /dev/null -w '%{http_code}' \
-              -X POST http://localhost:8088/api/auth/sign-in/email \
-              -H 'Content-Type: application/json' -H 'Origin: http://localhost:8088' \
-              -d '{"email":"admin@example.com","password":"wrong"}')"
-          done
-          echo "  返回码:$CODES"
-          echo "$CODES" | grep -q 429
-
-          echo "全部冒烟断言通过"
-
-
-      - name: 失败时输出日志
-        if: failure()
-        run: docker compose logs --tail 120
-
-      - name: 清理
-        if: always()
-        run: docker compose down -v
-
-  build:
-    name: 构建并推送镜像
-    # 只有类型检查、编译、整栈冒烟测试全过，才允许构建发布镜像；
-    # 且必须是手动触发——推代码不会自动发版
-    needs: [cli, web, api, smoke, samba_agent, deployment]
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-      acr_registry: ${{ steps.meta.outputs.acr_registry }}
-      api_digest: ${{ steps.digests.outputs.api_digest }}
-      web_digest: ${{ steps.digests.outputs.web_digest }}
-      samba-agent_digest: ${{ steps.digests.outputs.samba-agent_digest }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: 计算镜像标签与仓库地址
-        id: meta
-        env:
-          RELEASE_VERSION: ${{ inputs.release_version }}
-          IMAGE_TAG: ${{ inputs.image_tag }}
-        run: |
-          set -euo pipefail
-          if [ -n "$RELEASE_VERSION" ]; then
-            VERSION="$RELEASE_VERSION"
-            if ! echo "$VERSION" | grep -Eq '^1\.3\.[0-9]+$'; then
-              echo "::error::统一发布版本必须为 1.3.x，例如 1.3.5"
-              exit 1
-            fi
-            echo "tag=$VERSION" >> "$GITHUB_OUTPUT"
-          elif [ -n "$IMAGE_TAG" ]; then
-            [[ "$IMAGE_TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ && "$IMAGE_TAG" != latest ]] || { echo '::error::无效或可变镜像标签'; exit 1; }
-            echo "tag=$IMAGE_TAG" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=sha-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          fi
-          # ACR_URL 形如 registry.cn-shenzhen.aliyuncs.com/namespace，登录只需域名部分
-          echo "acr_registry=$(echo '${{ secrets.ACR_URL }}' | cut -d/ -f1)" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-
-      - name: 登录 Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: 登录阿里云 ACR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ steps.meta.outputs.acr_registry }}
-          username: ${{ secrets.ACR_USERNAME }}
-          password: ${{ secrets.ACR_PASSWORD }}
-
-      - name: 构建并推送 api（一次构建，双仓库分发）
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/api
-          push: true
-          tags: |
-            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_API) || '' }}
-            ${{ env.HUB_API }}:${{ steps.meta.outputs.tag }}
-            ${{ inputs.publish_latest && format('{0}/assay-api:latest', secrets.ACR_URL) || '' }}
-            ${{ secrets.ACR_URL }}/assay-api:${{ steps.meta.outputs.tag }}
-          # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
-          # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=api
-          cache-to: type=gha,scope=api,mode=max
-
-      - name: 构建并推送 web（一次构建，双仓库分发）
-        uses: docker/build-push-action@v6
-        with:
-          context: ./apps/web
-          push: true
-          build-args: VITE_API_BASE_URL=
-          tags: |
-            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_WEB) || '' }}
-            ${{ env.HUB_WEB }}:${{ steps.meta.outputs.tag }}
-            ${{ inputs.publish_latest && format('{0}/assay-web:latest', secrets.ACR_URL) || '' }}
-            ${{ secrets.ACR_URL }}/assay-web:${{ steps.meta.outputs.tag }}
-          # 阿里云 ACR 不支持 buildx 默认附带的 provenance/SBOM 证明清单
-          # （application/vnd.oci.empty.v1+json），会直接 denied，必须关掉
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=web
-          cache-to: type=gha,scope=web,mode=max
-
-      - name: 构建并推送统一 Samba Agent
-        uses: docker/build-push-action@v6
-        with:
-          context: ./agents/samba
-          push: true
-          tags: |
-            ${{ env.HUB_AGENT }}:${{ steps.meta.outputs.tag }}
-            ${{ secrets.ACR_URL }}/assay-samba-agent:${{ steps.meta.outputs.tag }}
-            ${{ inputs.publish_latest && format('{0}:latest', env.HUB_AGENT) || '' }}
-            ${{ inputs.publish_latest && format('{0}/assay-samba-agent:latest', secrets.ACR_URL) || '' }}
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=samba-agent
-          cache-to: type=gha,scope=samba-agent,mode=max
-
-      - name: 记录 ACR 中本次镜像的 digest
-        id: digests
-        env:
-          ACR_URL: ${{ secrets.ACR_URL }}
-          TAG: ${{ steps.meta.outputs.tag }}
-        run: |
-          set -euo pipefail
-          for service in api web samba-agent; do
-            digest=$(docker buildx imagetools inspect "$ACR_URL/assay-$service:$TAG" | awk '$1 == "Digest:" { print $2; exit }')
-            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::$service 的 ACR digest 缺失"; exit 1; }
-            echo "${service}_digest=$digest" >> "$GITHUB_OUTPUT"
-          done
-
-  cli_assets:
-    name: CLI · ${{ matrix.target }}
-    needs: [cli, web, api, smoke]
-    if: github.event_name == 'workflow_dispatch' && inputs.release_version != ''
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-            asset: assay-x86_64-unknown-linux-musl
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            asset: assay-x86_64-pc-windows-msvc.exe
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-      - name: 安装 musl 交叉链接器
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y musl-tools
-      - name: 构建 CLI
-        working-directory: cli
-        run: cargo build --locked --release --target ${{ matrix.target }}
-      - name: 整理 Linux 安装包
-        if: runner.os == 'Linux'
-        run: cp cli/target/${{ matrix.target }}/release/assay ${{ matrix.asset }}
-      - name: 整理 Windows 安装包
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: Copy-Item cli/target/${{ matrix.target }}/release/assay.exe ${{ matrix.asset }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
-          if-no-files-found: error
+          ASSAY_RELEASE_GITHUB_TOKEN: ${{ github.token }}
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || 'willdockerhub' }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: task local:publish VERSION="$RELEASE_VERSION"
 
   deploy:
-    name: 部署到阿里云
-    needs: build
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.skip_deploy }}
-    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.operation == 'deploy' && (github.ref == 'refs/heads/main' || github.ref == format('refs/tags/v{0}', inputs.version))
+    runs-on: [self-hosted, Linux, X64, assay-release]
     environment: production
-    concurrency:
-      group: assay-production
-      cancel-in-progress: false
-    steps:
-      - name: 准备 SSH
-        run: |
-          mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          # 固定主机指纹，不用 StrictHostKeyChecking=no（那等于放弃中间人防护）
-          printf '%s\n' "${{ secrets.DEPLOY_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
-          chmod 644 ~/.ssh/known_hosts
-
-      - name: 服务器登录 ACR
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          ACR_REGISTRY: ${{ needs.build.outputs.acr_registry }}
-          ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
-          ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
-        run: |
-          # 密码经 stdin 传入，不写进命令行（否则会出现在服务器进程列表里）
-          printf '%s' "$ACR_PASSWORD" | ssh -o BatchMode=yes "$USER@$HOST"             "docker login --username='$ACR_USERNAME' --password-stdin '$ACR_REGISTRY'"
-
-      - name: 部署指定版本并验证（失败自动回滚一次）
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          TAG: ${{ needs.build.outputs.tag }}
-          EXPECTED_API_DIGEST: ${{ needs.build.outputs.api_digest }}
-          EXPECTED_WEB_DIGEST: ${{ needs.build.outputs.web_digest }}
-        run: |
-          [[ "$TAG" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo "::error::无效镜像标签"; exit 1; }
-          [[ "$EXPECTED_API_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::无效 API digest"; exit 1; }
-          [[ "$EXPECTED_WEB_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::无效 Web digest"; exit 1; }
-          ssh -o BatchMode=yes "$USER@$HOST" "bash -s -- '$TAG' '$EXPECTED_API_DIGEST' '$EXPECTED_WEB_DIGEST'" <<'REMOTE'
-            set -Eeuo pipefail
-            cd /data/assay
-            tag=$1
-            api_digest=$2
-            web_digest=$3
-
-            image_ref() {
-              local service=$1 version=$2 image found=''
-              while IFS= read -r image; do
-                case "$image" in
-                  */assay-"$service":"$version")
-                    [ -z "$found" ] || return 1
-                    found=$image ;;
-                esac
-              done < <(IMAGE_TAG="$version" docker compose config --images)
-              [ -n "$found" ] || return 1
-              printf '%s' "$found"
-            }
-
-            container_image() {
-              local container
-              container=$(docker compose ps -q "$1")
-              [ -n "$container" ] || return 1
-              docker inspect "$container" --format '{{.Image}}'
-            }
-
-            container_ref() {
-              local container
-              container=$(docker compose ps -q "$1")
-              [ -n "$container" ] || return 1
-              docker inspect "$container" --format '{{.Config.Image}}'
-            }
-
-            api_ready() {
-              docker compose exec -T api node -e 'fetch("http://127.0.0.1:" + (Number(process.env.API_PORT)||3000) + "/health", {signal:AbortSignal.timeout(4000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))' </dev/null >/dev/null 2>&1
-            }
-
-            ready() {
-              [ "$(container_image api)" = "$1" ] || return 1
-              [ "$(container_image web)" = "$2" ] || return 1
-              [ "$(container_ref api)" = "$3" ] || return 1
-              [ "$(container_ref web)" = "$4" ] || return 1
-              [ "$(docker compose ps -q rustfs)" = "$old_rustfs_container" ] || return 1
-              api_ready || return 1
-              [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$public_url/" || true)" = 200 ] || return 1
-              [ "$(curl -s -o /dev/null -m 10 -w '%{http_code}' "$public_url/api/me" || true)" = 401 ]
-            }
-
-            wait_ready() {
-              local attempt
-              for attempt in $(seq 1 "$5"); do
-                if ready "$1" "$2" "$3" "$4"; then return 0; fi
-                sleep 5
-              done
-              return 1
-            }
-
-            [ -f .env ] || { echo '::error::服务器缺少 .env'; exit 1; }
-            mapfile -t tag_lines < <(grep '^IMAGE_TAG=' .env || true)
-            [ "${#tag_lines[@]}" -le 1 ] || { echo '::error::重复的 IMAGE_TAG'; exit 1; }
-            old_tag=latest
-            if [ "${#tag_lines[@]}" -eq 1 ]; then
-              old_tag=${tag_lines[0]#IMAGE_TAG=}
-              old_tag=${old_tag:-latest}
-            fi
-            [[ "$old_tag" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]] || { echo '::error::原 IMAGE_TAG 格式无效'; exit 1; }
-            # 环境只维护 PUBLIC_DOMAIN；完整 URL 从已解析的应用配置取得。
-            public_url=$(docker compose config --format json | python3 -c 'import json,sys; print(json.load(sys.stdin)["services"]["api"]["environment"]["AUTH_BASE_URL"])')
-            public_url=${public_url%/}
-            case "$public_url" in https://*) ;; *) echo '::error::阿里云 AUTH_BASE_URL 必须为 HTTPS'; exit 1;; esac
-
-            old_api_ref=$(image_ref api "$old_tag")
-            old_web_ref=$(image_ref web "$old_tag")
-            new_api_ref=$(image_ref api "$tag")
-            new_web_ref=$(image_ref web "$tag")
-            old_api_id=$(container_image api)
-            old_web_id=$(container_image web)
-            old_rustfs_container=$(docker compose ps -q rustfs)
-            [ -n "$old_rustfs_container" ] && api_ready || { echo '::error::原 API 未就绪'; exit 1; }
-            docker image inspect "$old_api_id" "$old_web_id" >/dev/null
-
-            umask 077
-            backup=$(mktemp ./.env.assay-backup.XXXXXX)
-            cp -p .env "$backup" || { rm -f "$backup"; exit 1; }
-            next_env=$(mktemp ./.env.assay-next.XXXXXX)
-
-            rollback() {
-              local failure=$?
-              trap - EXIT HUP INT TERM
-              [ "$failure" -ne 0 ] || return 0
-              set +e
-              echo '::error::部署失败，回滚 API/Web 和 IMAGE_TAG'
-              if ! mv -f "$backup" .env; then
-                echo "::error::无法恢复 .env；备份保留在 $backup" >&2
-                exit "$failure"
-              fi
-              rm -f "$next_env"
-              local restored=1
-              docker tag "$old_api_id" "$old_api_ref" || restored=0
-              docker tag "$old_web_id" "$old_web_ref" || restored=0
-              if [ "$restored" -eq 1 ]; then
-                IMAGE_TAG="$old_tag" docker compose up -d --no-deps --force-recreate api web || restored=0
-              fi
-              if [ "$restored" -eq 1 ] && wait_ready "$old_api_id" "$old_web_id" "$old_api_ref" "$old_web_ref" 30; then
-                echo "回滚就绪：API=$old_api_id Web=$old_web_id IMAGE_TAG=$old_tag"
-              else
-                echo '::error::回滚后镜像或服务未就绪，需要人工检查' >&2
-              fi
-              exit "$failure"
-            }
-            trap rollback EXIT
-            trap 'exit 1' HUP INT TERM
-
-            cp -p .env "$next_env"
-            awk -v version="$tag" '
-              /^IMAGE_TAG=/ { if (!seen++) print "IMAGE_TAG=" version; next }
-              { print }
-              END { if (!seen) print "IMAGE_TAG=" version }
-            ' .env > "$next_env"
-            mv -f "$next_env" .env
-
-            IMAGE_TAG="$tag" docker compose pull --policy always api web
-            expected_api_id=$(docker image inspect "$new_api_ref" --format '{{.Id}}')
-            expected_web_id=$(docker image inspect "$new_web_ref" --format '{{.Id}}')
-            expected_api_digest=$(docker image inspect "$new_api_ref" --format '{{json .RepoDigests}}')
-            expected_web_digest=$(docker image inspect "$new_web_ref" --format '{{json .RepoDigests}}')
-            [[ "$expected_api_digest" == *"${new_api_ref%:*}@$api_digest"* ]] || { echo '::error::API digest 与本次构建不符'; exit 1; }
-            [[ "$expected_web_digest" == *"${new_web_ref%:*}@$web_digest"* ]] || { echo '::error::Web digest 与本次构建不符'; exit 1; }
-            IMAGE_TAG="$tag" docker compose up -d --no-deps --force-recreate api web
-            wait_ready "$expected_api_id" "$expected_web_id" "$new_api_ref" "$new_web_ref" 30 || { echo '::error::新版本未就绪或镜像不符'; exit 1; }
-
-            echo "部署就绪：API=$expected_api_id Web=$expected_web_id IMAGE_TAG=$tag"
-            echo "API RepoDigests=$expected_api_digest"
-            echo "Web RepoDigests=$expected_web_digest"
-            rm -f "$backup"
-          REMOTE
-
-      - name: 独立核验生产版本
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-          TAG: ${{ needs.build.outputs.tag }}
-          ACR_URL: ${{ secrets.ACR_URL }}
-        run: |
-          set -euo pipefail
-          ssh -o BatchMode=yes "$USER@$HOST" "cd /data/assay && grep -Fx 'IMAGE_TAG=$TAG' .env >/dev/null && docker compose ps --format json" |
-            jq -s -e --arg api "$ACR_URL/assay-api:$TAG" --arg web "$ACR_URL/assay-web:$TAG" '
-              any(.[]; .Service == "api" and .State == "running" and .Health == "healthy" and .Image == $api) and
-              any(.[]; .Service == "web" and .State == "running" and .Health == "healthy" and .Image == $web)
-            '
-
-      - name: 读取实际部署站点
-        id: deployed_site
-        env:
-          HOST: ${{ secrets.DEPLOY_HOST }}
-          USER: ${{ secrets.DEPLOY_USER }}
-        run: |
-          set -euo pipefail
-          public_url=$(ssh -o BatchMode=yes "$USER@$HOST" 'cd /data/assay && docker compose exec -T api node -p process.env.AUTH_BASE_URL')
-          [[ "$public_url" == https://* && "$public_url" != *$'\n'* ]] || exit 1
-          printf 'url=%s\n' "$public_url" >> "$GITHUB_OUTPUT"
-
-      - name: 部署摘要
-        if: always()
-        run: |
-          {
-            echo "### 部署结果"
-            echo ""
-            echo "- 镜像标签：\`${{ needs.build.outputs.tag }}\`"
-            echo "- 站点：${{ steps.deployed_site.outputs.url }}"
-            echo "- 结果：${{ job.status }}"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  release:
-    name: 创建统一 GitHub Release
-    needs: [build, deploy, cli_assets]
-    if: github.event_name == 'workflow_dispatch' && inputs.release_version != '' && needs.deploy.result == 'success'
-    runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      LOCAL_CI_STATE_DIR: ${{ vars.ASSAY_CI_STATE_DIR }}
+      DOCKERHUB_NAMESPACE: ${{ vars.DOCKERHUB_NAMESPACE || 'willdockerhub' }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: 校验仓库内版本号
+        with: {fetch-depth: 0, persist-credentials: false}
+      - name: Validate source and persistent runner state
+        run: python3 scripts/local-ci/actions_check.py
+      - name: Deploy through Taskfile and the shared Ansible playbook
         env:
-          VERSION: ${{ inputs.release_version }}
-        run: |
-          test "$(node -p "require('./package.json').version")" = "$VERSION"
-          test "$(node -p "require('./apps/api/package.json').version")" = "$VERSION"
-          test "$(node -p "require('./apps/web/package.json').version")" = "$VERSION"
-          test "$(sed -nE 's/^version = "([^"]+)"/\1/p' cli/Cargo.toml | head -1)" = "$VERSION"
-      - uses: actions/download-artifact@v4
-        with:
-          # build-push-action 也会上传 *.dockerbuild 调试产物；Release 只需要 CLI 安装包。
-          pattern: assay-*
-          path: dist
-          merge-multiple: true
-      - name: 创建校验文件与发布标签
-        env:
-          VERSION: ${{ inputs.release_version }}
-        run: |
-          TAG="v$VERSION"
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG"; then
-            echo "::error::标签 $TAG 已存在，拒绝覆盖"
-            exit 1
-          fi
-          (cd dist && sha256sum assay-* > SHA256SUMS)
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-      - name: 创建 GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.release_version }}
-          ACR_URL: ${{ secrets.ACR_URL }}
-        run: |
-          TAG="v$VERSION"
-          cat > release-notes.md <<EOF
-          ## 部署
-
-          - 已部署镜像：\`$ACR_URL/assay-api:$VERSION\`、\`$ACR_URL/assay-web:$VERSION\`
-          - CLI 与 Web/API 使用统一版本：\`$VERSION\`
-
-          ## CLI 安装包
-
-          - Linux x86_64：\`assay-x86_64-unknown-linux-musl\`
-          - Windows x86_64：\`assay-x86_64-pc-windows-msvc.exe\`
-          - 下载前请使用 \`SHA256SUMS\` 校验文件完整性。
-          EOF
-          gh release create "$TAG" dist/assay-* dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Assay $TAG" \
-            --notes-file release-notes.md \
-            --generate-notes
-      - name: 创建旧版 CLI 更新兼容 Release
-        # v0.1.x 的更新器只识别 assay-cli-v*；保留一次兼容入口，让既有安装能自动迁移到统一版本。
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.release_version }}
-        run: |
-          LEGACY_TAG="assay-cli-v$VERSION"
-          if git ls-remote --exit-code --tags origin "refs/tags/$LEGACY_TAG"; then
-            echo "::error::兼容标签 $LEGACY_TAG 已存在，拒绝覆盖"
-            exit 1
-          fi
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$LEGACY_TAG" -m "CLI compatibility release $LEGACY_TAG"
-          git push origin "$LEGACY_TAG"
-          gh release create "$LEGACY_TAG" dist/assay-* dist/SHA256SUMS \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Assay CLI $VERSION（兼容更新）" \
-            --notes "此 Release 仅用于让旧版 assay-cli-v* 自动更新到统一版本 $VERSION。请使用 v$VERSION 作为产品正式 Release。"
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          DEPLOY_OFFLINE: ${{ vars.DEPLOY_OFFLINE || 'false' }}
+          DEPLOY_BECOME: ${{ vars.DEPLOY_BECOME || 'false' }}
+          DEPLOY_BECOME_PASSWORD: ${{ secrets.DEPLOY_BECOME_PASSWORD }}
+          ASSAY_DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          ASSAY_DEPLOY_HOST_KEYS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # Release/upgrade receipts and local images must already be valid on
+        # this runner. Missing rehearsal or a different SHA fails closed.
+        run: python3 scripts/local-ci/actions_deploy.py
