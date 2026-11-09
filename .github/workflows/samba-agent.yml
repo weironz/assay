@@ -1,11 +1,6 @@
 name: Samba Agent
 on:
-  push:
-    branches: [main]
-    paths: ['agents/samba/**', '.github/workflows/samba-agent.yml']
-  pull_request:
-    paths: ['agents/samba/**', '.github/workflows/samba-agent.yml']
-  workflow_dispatch:
+  workflow_dispatch: null
 permissions:
   contents: read
 jobs:

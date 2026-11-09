@@ -3,24 +3,23 @@ name: Task CI / CD
 # Taskfile is the shared entry point. Pushes/PRs only test; publishing and
 # deploying are independent explicit operations on a trusted persistent runner.
 on:
-  pull_request:
-  push:
-    branches: [main]
-    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
     inputs:
       operation:
-        description: 'ci = test/build; publish = test/build/release; deploy = rehearsed release only'
+        description: ci = test/build; publish = test/build/release; deploy = rehearsed release only
         required: true
         type: choice
         default: ci
-        options: [ci, publish, deploy]
+        options:
+        - ci
+        - publish
+        - deploy
       version:
-        description: 'Exact X.Y.Z matching package versions'
+        description: Exact X.Y.Z matching package versions
         required: true
         type: string
       expected_sha:
-        description: 'Exact commit SHA; task github:* supplies this automatically'
+        description: Exact commit SHA; task github:* supplies this automatically
         required: true
         type: string
 
