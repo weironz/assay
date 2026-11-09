@@ -1,5 +1,6 @@
 import {
   Controller,
+  Delete,
   Get,
   Param,
   Post,
@@ -51,6 +52,12 @@ export class AttachmentsController {
   @RequirePermissions('ticket:read')
   list(@CurrentUser() user: AuthUser, @Param('id') ticketId: string) {
     return this.attachments.list(user, ticketId);
+  }
+
+  @Delete('attachments/:id')
+  @RequirePermissions('ticket:read')
+  remove(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.attachments.remove(user, id);
   }
 
   /** 代理下载（鉴权 + 可见性校验），供 <img>/下载链接使用 */

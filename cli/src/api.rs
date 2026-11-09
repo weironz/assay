@@ -122,6 +122,104 @@ impl ApiClient {
             .context("解析 API 响应失败")
     }
 
+    /// Upload a local file as a draft belonging to the authenticated user.
+    pub fn upload_draft(&self, path: &std::path::Path) -> Result<Value> {
+        self.upload_file(path, "/uploads?kind=attachment")
+    }
+
+    pub fn upload_to_ticket(&self, path: &std::path::Path, ticket: &str) -> Result<Value> {
+        let id = self.resolve_ticket_id(ticket)?;
+        self.upload_file(path, &format!("/tickets/{id}/attachments?kind=attachment"))
+    }
+
+    fn upload_file(&self, path: &std::path::Path, endpoint: &str) -> Result<Value> {
+        let metadata = std::fs::metadata(path).context("无法读取附件")?;
+        if !metadata.is_file() || metadata.len() > 512 * 1024 * 1024 {
+            bail!("附件必须是普通文件，且不超过 512 MB");
+        }
+        let file_name = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .context("附件文件名无效")?;
+        let part = reqwest::blocking::multipart::Part::file(path)
+            .context("无法打开附件")?
+            .file_name(file_name.to_owned());
+        let form = reqwest::blocking::multipart::Form::new().part("file", part);
+        self.request(self.http.post(self.url(endpoint)))
+            .multipart(form)
+            .send()?
+            .pipe(ensure_success)?
+            .json()
+            .context("解析附件上传响应失败")
+    }
+
+    pub fn list_attachments(&self, ticket: &str) -> Result<Value> {
+        let id = self.resolve_ticket_id(ticket)?;
+        self.get(&format!("/tickets/{id}/attachments"))
+    }
+
+    fn resolve_ticket_id(&self, ticket: &str) -> Result<String> {
+        let value = self.get_ticket(ticket)?;
+        let id = value
+            .get("id")
+            .and_then(Value::as_str)
+            .context("工单详情缺少 ID")?;
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            bail!("工单 ID 无效");
+        }
+        Ok(id.to_owned())
+    }
+
+    pub fn download_attachment(&self, id: &str, destination: &std::path::Path) -> Result<Value> {
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            bail!("附件 ID 无效");
+        }
+        let mut response = self
+            .request(
+                self.http
+                    .get(self.url(&format!("/attachments/{id}/download"))),
+            )
+            .send()?
+            .pipe(ensure_success)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)
+            .context("无法创建目标文件（目标不得已存在）")?;
+        let size = match std::io::copy(&mut response, &mut file) {
+            Ok(size) => size,
+            Err(error) => {
+                drop(file);
+                let _ = std::fs::remove_file(destination);
+                return Err(error).context("附件下载中断");
+            }
+        };
+        Ok(json!({"id": id, "path": destination, "bytes": size}))
+    }
+
+    pub fn delete_attachment(&self, id: &str) -> Result<Value> {
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        {
+            bail!("附件 ID 无效");
+        }
+        self.request(self.http.delete(self.url(&format!("/attachments/{id}"))))
+            .send()?
+            .pipe(ensure_success)?
+            .json()
+            .context("解析附件删除响应失败")
+    }
+
     /// Read ticket-bound image attachments through the ordinary authenticated download route.
     /// The caller receives raw bytes only after MIME, count and size constraints are checked.
     pub fn get_ticket_images(

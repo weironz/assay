@@ -78,6 +78,15 @@ Token 用于提单时，在 **设置 → API Token** 勾选 **创建工单 (`tic
 选中读取权限。需要后续回复时也勾选 `ticket:comment`。账号本身必须拥有对应权限，
 例如提单人角色。已有只读 Token 以及它的轮换版本不会自动获得新权限，需要新建并更新凭据。
 
+### 为 MCP 创建专用访问令牌
+
+1. 使用专门的 Assay 账号登录目标站点，确认该账号只具有需要的业务角色。
+2. 点击右上角账号 → **设置 → API Token**，填写易识别的名称和有效期。
+3. 查询/下载需要 `ticket:read`；新建工单和上传或删除草稿需要 `ticket:create`；向已有工单上传或删除本人附件需要 `ticket:comment`。只勾选实际需要的权限，系统会按规则自动包含读取权限。
+4. 点击创建并完成系统要求的身份验证。令牌仅在创建时完整显示，立即存入受保护的密钥管理器；不要放入聊天、Git、命令参数或日志。
+5. 在 MCP 运行环境中配置 `ASSAY_BASE_URL=https://ticket.greenstor.ai/api`，并通过宿主密钥机制注入 `ASSAY_TOKEN`；或者通过 `assay auth token --token-stdin` 读取令牌，CLI 会在当前用户的配置目录以受限权限保存。运行 `assay auth whoami` 确认身份与权限。
+6. 令牌过期、泄露或不再使用时，在同一页面轮换或吊销，并更新宿主机密。账号权限变更会影响令牌的有效权限。
+
 默认访问 `https://assay.cloudcele.com/api`。连接测试环境可任选一种方式：
 
 ```bash
@@ -122,6 +131,10 @@ assay ticket comment --help
 | --- | --- | --- |
 | `assay ticket create --input <JSON文件>` | `--dry-run` | 以当前身份创建工单，返回工单 ID 和工单号等详情；`--dry-run` 仅校验并输出请求预览，不要求登录。 |
 | `assay ticket create --input -` | 标准输入 | 从管道读取 UTF-8 JSON 请求。 |
+| `assay ticket upload <文件路径>` | `--ticket <工单号或 ID>` | 不指定工单时上传草稿附件；指定工单时直接上传。草稿 ID 可在建单的 `attachmentIds` 中使用。 |
+| `assay ticket attachments <工单号或 ID>` | | 列出可访问的附件。 |
+| `assay ticket download <附件 ID> <目标路径>` | | 下载到新文件；不覆盖已有文件。 |
+| `assay ticket delete-attachment <附件 ID>` | | 删除本人上传的附件，正文引用中的附件需先移除引用。 |
 | `assay ticket list` | `--status` `--priority` `--keyword` `--assignee-id` `--page` `--page-size` | 返回当前身份可见的工单；`page-size` 最大 100。 |
 | `assay ticket get <id>` | 工单数据库 ID 或工单号 | 返回详情、讨论、附件、SLA 与协作成员。 |
 | `assay ticket comment <id> --body <文本>` | `--internal` `--mention-user-id <用户ID>` | 立即写入一条评论；`--internal` 为内部备注；提及参数可重复。 |
@@ -200,6 +213,10 @@ Shell 脚本。若 MCP 宿主有专用服务身份，建议注入最小权限、
 | 工具 | 行为 | 风险级别 |
 | --- | --- | --- |
 | `assay_ticket_create` | 以当前身份创建工单，字段与 REST API 相同；`dryRun: true` 时仅返回请求预览 | 写操作；用户已授权提单时调用，需要 `ticket:create` |
+| `assay_attachment_upload` | 上传 MCP 服务所在机器上的文件为草稿附件，返回附件 ID | 写操作；仅上传用户明确授权的文件 |
+| `assay_attachment_list` | 列出有权查看的工单附件 | 只读 |
+| `assay_attachment_download` | 下载附件到本地新文件，不覆盖已有文件 | 读取附件并写本地文件 |
+| `assay_attachment_delete` | 删除本人上传的附件；被正文引用时先移除引用 | 写操作；需用户明确要求，且具有对应工单权限 |
 | `assay_ticket_get` | 读取详情、讨论、附件元数据和协作成员；传 `includeImages: true` 时也返回图片内容 | 只读 |
 | `assay_ticket_search` | 搜索当前身份可见的工单 | 只读 |
 | `assay_ticket_add_comment` | 写入评论或内部备注，并可提及用户 | 写操作；AI 必须先获得用户明确确认 |

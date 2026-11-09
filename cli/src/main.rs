@@ -102,6 +102,21 @@ enum ConfigCommand {
 
 #[derive(Subcommand, Debug)]
 enum TicketCommand {
+    /// 上传工单草稿附件，返回可用于建单的附件 ID
+    Upload {
+        path: std::path::PathBuf,
+        #[arg(long)]
+        ticket: Option<String>,
+    },
+    /// 查看工单附件
+    Attachments { ticket: String },
+    /// 下载附件到尚不存在的文件
+    Download {
+        id: String,
+        path: std::path::PathBuf,
+    },
+    /// 删除本人上传的附件
+    DeleteAttachment { id: String },
     /// 提交工单（立即写入）；可先用 --dry-run 预览，超时后请先搜索再重试
     Create(TicketCreateArgs),
     /// 列出或搜索工单
@@ -252,6 +267,24 @@ fn run(cli: Cli) -> Result<()> {
         Command::Auth {
             command: AuthCommand::Whoami,
         } => ApiClient::from_config(&store.config)?.get("/me")?,
+        Command::Ticket {
+            command: TicketCommand::Upload { path, ticket },
+        } => {
+            let client = ApiClient::from_config(&store.config)?;
+            match ticket {
+                Some(id) => client.upload_to_ticket(&path, &id)?,
+                None => client.upload_draft(&path)?,
+            }
+        }
+        Command::Ticket {
+            command: TicketCommand::Attachments { ticket },
+        } => ApiClient::from_config(&store.config)?.list_attachments(&ticket)?,
+        Command::Ticket {
+            command: TicketCommand::Download { id, path },
+        } => ApiClient::from_config(&store.config)?.download_attachment(&id, &path)?,
+        Command::Ticket {
+            command: TicketCommand::DeleteAttachment { id },
+        } => ApiClient::from_config(&store.config)?.delete_attachment(&id)?,
         Command::Ticket {
             command: TicketCommand::Create(args),
         } => {

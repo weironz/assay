@@ -385,6 +385,43 @@ export class AttachmentsService {
       .map((row) => this.serialize(row));
   }
 
+  /** 只允许上传者删除本人附件；正文仍引用时先要求移除引用。 */
+  async remove(user: AuthUser, id: string) {
+    const result = await this.prisma.$transaction(async (tx) => {
+      const rec = await tx.ticketAttachment.findUnique({ where: { id } });
+      if (!rec) throw new NotFoundException('附件不存在');
+      if (rec.uploaderId !== user.id) throw new ForbiddenException('只能删除自己上传的附件');
+      if (rec.ticketId) {
+        if (!user.permissions.includes('ticket:comment')) throw new ForbiddenException('缺少工单回复权限');
+        const ticket = await tx.ticket.findUnique({
+          where: { id: rec.ticketId },
+          select: { requesterId: true, assigneeId: true, participants: { select: { userId: true, role: true } } },
+        });
+        if (!ticket) throw new NotFoundException('工单不存在');
+        if (!canUploadToTicket(user, ticket)) throw new ForbiddenException('无权操作该工单');
+        const reference = await tx.ticketMessage.findFirst({
+          where: { ticketId: rec.ticketId, body: { contains: `/attachments/${id}/download` } },
+          select: { id: true },
+        });
+        if (reference) throw new BadRequestException('附件仍被工单正文引用，请先移除引用');
+      } else if (!user.permissions.includes('ticket:create')) {
+        throw new ForbiddenException('缺少创建工单权限');
+      }
+      const deleted = await tx.ticketAttachment.deleteMany({
+        where: { id, uploaderId: user.id, ticketId: rec.ticketId, messageId: rec.messageId },
+      });
+      if (deleted.count !== 1) throw new BadRequestException('附件状态已变化，请刷新后重试');
+      await enqueueObjectDeletions(tx, [rec.objectKey], 'ATTACHMENT_DELETED');
+      if (rec.ticketId) await tx.ticketHistory.create({ data: {
+        ticketId: rec.ticketId, userId: user.id, action: 'UPDATE', field: 'attachment',
+        oldValue: rec.fileName, newValue: '删除附件',
+      } });
+      return { ok: true };
+    }, { isolationLevel: 'Serializable' });
+    void this.processPendingDeletions().catch(() => undefined);
+    return result;
+  }
+
   async getForDownload(user: AuthUser, id: string) {
     const rec = await this.prisma.ticketAttachment.findUnique({
       where: { id },

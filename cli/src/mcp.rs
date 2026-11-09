@@ -57,6 +57,26 @@ fn tools() -> Vec<Value> {
             definition
         },
         tool(
+            "assay_attachment_upload",
+            "上传本机文件作为当前用户的工单草稿附件。仅在用户明确要求上传该文件时使用；返回的 ID 可传给 assay_ticket_create。",
+            json!({"type":"object","required":["path"],"additionalProperties":false,"properties":{"path":{"type":"string","minLength":1,"description":"MCP 服务所在机器上用户明确授权上传的文件路径"},"ticket":{"type":"string","description":"可选工单号或 ID；省略则上传草稿"}}}),
+        ),
+        tool(
+            "assay_attachment_list",
+            "列出工单附件。",
+            json!({"type":"object","required":["ticket"],"properties":{"ticket":{"type":"string"}}}),
+        ),
+        tool(
+            "assay_attachment_download",
+            "下载附件到本地新文件；不会覆盖已有文件。",
+            json!({"type":"object","required":["id","path"],"properties":{"id":{"type":"string"},"path":{"type":"string"}}}),
+        ),
+        tool(
+            "assay_attachment_delete",
+            "删除本人上传的附件；须由用户明确要求，正文引用中的附件不可删除。",
+            json!({"type":"object","required":["id"],"properties":{"id":{"type":"string"}}}),
+        ),
+        tool(
             "assay_ticket_get",
             "读取工单详情、讨论、附件和参与人。只读。需要分析截图时设置 includeImages=true；默认不下载图片。",
             json!({"type":"object","required":["id"],"properties":{"id":{"type":"string","description":"工单数据库 ID 或工单号"},"includeImages":{"type":"boolean","default":false,"description":"设为 true 时返回图片内容供视觉分析；默认仅返回文字与附件元数据"},"imageIds":{"type":"array","maxItems":4,"items":{"type":"string"},"description":"只读取指定图片附件 ID；不传则读取该工单全部图片，最多 4 张"}}}),
@@ -104,6 +124,19 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
     }
     let client = ApiClient::from_config(config)?;
     let value = match name {
+        "assay_attachment_upload" => {
+            let path = std::path::Path::new(required_string(&args, "path")?);
+            match args.get("ticket").and_then(Value::as_str) {
+                Some(ticket) => client.upload_to_ticket(path, ticket)?,
+                None => client.upload_draft(path)?,
+            }
+        }
+        "assay_attachment_list" => client.list_attachments(required_string(&args, "ticket")?)?,
+        "assay_attachment_download" => client.download_attachment(
+            required_string(&args, "id")?,
+            std::path::Path::new(required_string(&args, "path")?),
+        )?,
+        "assay_attachment_delete" => client.delete_attachment(required_string(&args, "id")?)?,
         "assay_ticket_get" => {
             let ticket = client.get_ticket(required_string(&args, "id")?)?;
             let mut content = vec![json!({
