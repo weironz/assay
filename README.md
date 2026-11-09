@@ -21,6 +21,7 @@ GreenStor Company Operations Platform（公司运营服务平台）。在现有 
 - **CLI 与 MCP 文档**：[docs/06-Assay CLI.md](docs/06-Assay%20CLI.md)（安装、命令参数、`assay update`、本地 MCP）
 - **工单分享链接**：[docs/08-工单分享链接实现与运维.md](docs/08-工单分享链接实现与运维.md)（外部只读分享、权限边界、安全与运维）
 - **部署文档**：[docs/05-部署文档.md](docs/05-部署文档.md)（IP 直连 / Traefik / Cloudflare Tunnel，含备份与排错）
+- **CI、发布与 Agent 交接**：[scripts/local-ci/README.md](scripts/local-ci/README.md)（Taskfile 两条路线、Ansible、凭据、接手检查表和完成证据）
 
 ## 目录结构
 

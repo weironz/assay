@@ -15,6 +15,82 @@
 发布任务不会连生产 SSH，也不更新 Docker `latest`。默认任务只列出帮助。
 原 `ci`、`publish`、`deploy:production` 等入口保留，与 `local:*` 使用同一实现。
 
+## Agent 接手：先检查什么
+
+本说明是现行发布流程的维护入口，`AGENTS.md` 和根 README 均链接到这里。无需依赖历史聊天、
+某台开发机的临时脚本或已有登录状态。环境初始化、网络接入和灾难恢复见
+[部署文档](../../docs/05-部署文档.md)，生产副本格式见 [升级演练说明](upgrade-v1.3.12.md)。
+版本示例及历史发布记录不代表当前生产状态，接手时须重新核对。
+
+1. 阅读根 `AGENTS.md`，检查当前任务与已有授权要求的是修代码、构建、发布，还是更新指定生产环境。
+   发布与部署分开执行，普通代码提交不自动触发这两步。
+2. 检查 `git status --short`、当前分支及 `git fetch origin main` 后的差异，保留其他人的改动。
+   新工作区应在目标提交上开始；已有改动的工作区先处理差异，不执行强制重置或强推。
+3. 核对根/API/Web `package.json`、CLI/Agent `Cargo.toml` 与相应锁文件的版本，
+   并检查 GitHub Release/标签是否已经存在。已发布版本不可覆盖；只有文档或工具修改时，
+   不需要为验证说明而重复发布旧版本。
+4. 运行 `task --list`；需要发布时按下文安装控制机工具、注入环境变量并运行 `task doctor`。
+   只核对变量是否配置和权限是否足够，不打印令牌、生产 `.env` 或私钥。
+5. 选择本地或 GitHub 路线，检查对应执行机的状态目录、镜像和记录是否仍匹配当前提交。
+   本地记录不会自动传给 GitHub runner；缺失或过期时在选定执行机重新验证。
+6. 涉及生产时核对 `DEPLOY_HOST`、`DEPLOY_DIR`、实际 Compose 项目、原 API/Web 镜像 ID、
+   数据卷和备份位置。生产运行版本以该目标机器为准，不能由仓库版本或 Release 推断。
+   文件服务器上的 Assay/Samba 与阿里云工单站点是不同目标，本流程默认只更新所选站点的 API/Web。
+
+### 一次发布的执行顺序
+
+先完成改动、必要验证和提交推送，再对最终提交执行 CI；提交、源码摘要或产物变化后，旧记录失效。
+以下命令假定已完成工具与变量配置；默认使用包内版本，显式传 `VERSION` 时所有步骤必须一致。
+
+```bash
+task local:ci               # 全部测试、三镜像、CLI 发布包和整栈检查
+task status                 # 查看本机记录；存在记录不等于记录仍有效
+task local:publish          # 推 Docker Hub 和 GitHub Release；不更新生产
+
+# 仅当本次目标包含生产部署：在同一执行机准备该生产的私有完整副本，
+# 设置 LOCAL_CI_UPGRADE_BACKUP_DIR，核对 DEPLOY_* 后继续。
+task test:upgrade           # 恢复、迁移、数据/对象校验及旧程序兼容演练
+task local:deploy           # Ansible：最终停写备份、更新、校验、开放 Web
+```
+
+只发布时执行到 `local:publish` 即完成对应目标。GitHub 路线用 `github:ci` / `github:publish` /
+`github:deploy` 提交相应阶段；其中 `github:publish` 会再执行完整 CI。
+生产演练仍须在专用 runner 的同一状态目录完成，再触发 `github:deploy`，详见下文。
+不要并行对同一状态目录运行两条发布流程，也不要复制/编辑 JSON 记录来跳过演练。
+
+### 实现在哪里
+
+| 文件 | 职责 |
+| --- | --- |
+| [`Taskfile.yml`](../../Taskfile.yml) | 所有人工/Agent 触发入口及任务顺序 |
+| [`.github/workflows/ci-cd.yml`](../../.github/workflows/ci-cd.yml) | 自动检查、手动构建发布、独立生产部署 job；调用同一 Taskfile |
+| [`run.py`](run.py) | 源码与产物校验记录、测试/构建、镜像推送、Release 与部署前置检查 |
+| [`actions.py`](actions.py)、[`actions_check.py`](actions_check.py)、[`actions_deploy.py`](actions_deploy.py) | Actions 提交/SHA 核对、runner 检查、临时密钥文件适配 |
+| [`deployment.py`](deployment.py)、[`deploy/ansible`](../../deploy/ansible) | 环境变量目标、严格主机校验、Ansible 传送/执行与完成凭证回传 |
+| [`deploy.sh`](deploy.sh)、[`deploy_config.py`](deploy_config.py) | 主机锁、配置边界、最终备份、仅 API/Web 更新、失败恢复 |
+| [`backup.sh`](../backup.sh)、[`backup-s3.cjs`](../backup-s3.cjs) | PostgreSQL、S3 当前对象、配置与恢复密钥备份 |
+| [`upgrade.py`](upgrade.py)、[`db_fingerprint.py`](db_fingerprint.py) | 隔离恢复、升级/旧程序兼容演练及原记录完整性校验 |
+
+### 如何判断完成与交接
+
+| 阶段 | 必须核对的证据 |
+| --- | --- |
+| 代码同步 | 当前提交 SHA 与远端目标分支一致；不是仅有本地 commit |
+| CI | 当前源码的测试/构建记录有效；GitHub 路线还须确认相应 run 最终成功，不能只看 dispatch 成功 |
+| 发布 | 正式 Release URL/标签、附件 SHA256、`release-manifest.json` 和 Docker Hub 三镜像 digest 相符 |
+| 生产演练 | 当前目标镜像的 `upgrade.json`，包含数据保留、对象校验、`rollbackCompatible` 及原生产镜像证明 |
+| 部署 | 目标上的 `deployment-result.json` 精确匹配版本、API/Web 镜像 ID、`dataPreserved=true`，且控制端登记 `deployed.json` |
+| 生产验收 | 实际 API/Web 版本及健康、站点访问/权限和附件检查；明确未能执行或未通过的项目 |
+
+`task status` 仅列出记录名称，真正的源码/产物一致性由执行后续步骤时检查；不能用“文件存在”代替验证。
+部署返回成功也不代替无法从控制机验证的浏览器或业务检查。发现外网策略限制时，分别报告
+主机健康和公网验收的结果，不把未验收写成通过。
+
+交接报告至少列：源码提交、Release 版本/URL、实际部署目标与运行版本、CI/run 或本地验证结果、
+备份/操作目录、数据保留结果，以及未完成项。未发布、未部署就明确写明。
+备份、密钥、客户附件和生产副本留在受保护位置，不加入 Git、Release 或公开 Actions artifact。
+失败时先保留操作目录与日志，按下文恢复规则处理；不删除业务卷或直接用旧数据库覆盖当前写入。
+
 ## 控制机安装
 
 控制机使用 Linux x86_64 或 Linux WSL。要求 Python **3.12+**、Docker（Compose v2、Buildx）、
@@ -130,7 +206,7 @@ Ansible 在目标创建独立 `0700` 操作目录，传送脚本后按 argv 执�
 自动 push/PR 执行 `task check`（测试、应用镜像及整栈冒烟，不构建 CLI 发布包或发布），
 使用 GitHub 托管 runner，会消耗托管额度。
 手动 `github:*` 路线使用专用自托管 Linux x86_64 runner，标签为 **`assay-release`**，
-避免依赖当前耗尽的托管额度，并在本地保留构建产物及敏感演练副本。
+可在托管额度不足时继续使用，并在本地保留构建产物及敏感演练副本。
 本改动只提供工作流，不自动注册 runner，也没有在生产机器安装 runner。
 
 设置步骤：
