@@ -70,6 +70,7 @@ def main():
 
     original = (directory / 'agent.json').read_bytes()
     config['acl_admin_sids'] = [users[leader]['sid']]
+    config['acl_max_entries'] = 100_000
     (directory / 'agent.json').write_text(json.dumps(config, indent=2) + '\n')
     # Only the dedicated test Agent is recreated; never target an arbitrary
     # production compose file, and never stop the AD during an ACL operation.
@@ -118,6 +119,9 @@ def main():
         'mode':'write_no_delete','inherit':True,'normalize_delete_permissions':True,'revision':before['revision']}
     preview=request('/v1/acl-preview',arguments)
     assert preview['ready'] and preview['writes'] is False and preview['entries']>=4
+    assert request(query)['revision']==before['revision']
+    async_preview=command('acl.preview',arguments)['result']
+    assert async_preview['ready'] and async_preview['writes'] is False and async_preview['entries']==preview['entries']
     assert request(query)['revision']==before['revision']
     result = command('acl.grant',arguments)
     assert result['result']['deleteProtection'] is True

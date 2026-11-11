@@ -44,15 +44,16 @@ pub(crate) fn append(base: &UncPath, relative: &str) -> UncPath {
     }
 }
 pub async fn prepare(client: &Client, base: &UncPath) -> Result<Vec<Node>> {
-    prepare_scope(client, base, false).await
+    prepare_scope(client, base, false, MAX_CHILDREN).await
 }
-pub async fn prepare_all(client: &Client, base: &UncPath) -> Result<Vec<Node>> {
-    prepare_scope(client, base, true).await
+pub async fn prepare_all(client: &Client, base: &UncPath, max_entries: usize) -> Result<Vec<Node>> {
+    prepare_scope(client, base, true, max_entries).await
 }
 async fn prepare_scope(
     client: &Client,
     base: &UncPath,
     include_protected: bool,
+    max_entries: usize,
 ) -> Result<Vec<Node>> {
     let mut stack = vec![String::new()];
     let mut nodes = vec![];
@@ -113,8 +114,8 @@ async fn prepare_scope(
                 revision: crate::acl::revision(&sd),
             });
             ensure!(
-                nodes.len() <= MAX_CHILDREN,
-                "ACL scope exceeds 10000 entries; apply changes to a smaller directory"
+                nodes.len() < max_entries,
+                "ACL scope exceeds configured entry limit ({max_entries}); review deployment capacity before retrying"
             );
             if directory {
                 stack.push(path);

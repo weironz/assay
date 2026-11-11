@@ -12,6 +12,7 @@ export const employeeProfile = z.object({
   phone: optionalText(64), company: optionalText(64), office: optionalText(128),
 }).strict();
 const path = z.string().max(1024).refine(v => v === '' || (!v.startsWith('/') && !/[\\\x00:]/.test(v) && v.split('/').every(p => p && p !== '.' && p !== '..')));
+const aclGrant = z.object({ share: name, path, principal_id: id, group: z.boolean(), mode: z.enum(['read', 'modify', 'write_no_delete', 'full', 'remove']), inherit: z.boolean(), normalize_delete_permissions: z.boolean().optional(), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict().refine(v => v.mode !== 'write_no_delete' || (v.inherit && v.path === ''), { message: '禁删模式需从共享根目录应用到全部现有子目录与文件' });
 export const directoryPath = z.object({ share: shareName, path }).strict();
 export const renameSchema = z.object({ kind: z.enum(['user','group','share']), id:id.transform(v=>v.toLowerCase()), name, revision:z.string().regex(/^[a-f0-9]{64}$/), acknowledge_connections:z.boolean().default(false) }).strict();
 export const actions = {
@@ -40,7 +41,8 @@ export const actions = {
   'share.remove': z.object({ name }).strict(),
   'directory.create': directoryPath.refine(v => v.path.length > 0),
   'directory.delete': directoryPath.refine(v => v.path.length > 0),
-  'acl.grant': z.object({ share: name, path, principal_id: id, group: z.boolean(), mode: z.enum(['read', 'modify', 'write_no_delete', 'full', 'remove']), inherit: z.boolean(), normalize_delete_permissions: z.boolean().optional(), revision: z.string().regex(/^[a-f0-9]{64}$/) }).strict().refine(v => v.mode !== 'write_no_delete' || (v.inherit && v.path === ''), { message: '禁删模式需从共享根目录应用到全部现有子目录与文件' }),
+  'acl.grant': aclGrant,
+  'acl.preview': aclGrant.refine(v => v.mode === 'write_no_delete'),
 };
 export const commandSchema = z.object({ requestId: z.uuid(), action: z.enum(Object.keys(actions) as [keyof typeof actions, ...(keyof typeof actions)[]]), args: z.record(z.string(), z.unknown()) }).strict();
 export const bulkCreateSchema = z.object({

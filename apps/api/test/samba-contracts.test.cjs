@@ -4,6 +4,9 @@ const { actions, commandSchema, directoryPath, metadata, bindingSchema } = requi
 test('no-delete policy requires a complete root scope and cannot inject privileged SID exceptions', () => {
   const base = { share: 'finance', path: '', principal_id: 'a'.repeat(32), group: true, mode: 'write_no_delete', inherit: true, normalize_delete_permissions: true, revision: 'b'.repeat(64) };
   assert.equal(actions['acl.grant'].safeParse(base).success, true);
+  assert.equal(actions['acl.preview'].safeParse(base).success, true);
+  assert.equal(actions['acl.preview'].safeParse({...base, mode:'full'}).success, false);
+  assert.equal(actions['acl.preview'].safeParse({...base, acl_max_entries:100000}).success, false);
   for (const change of [{inherit:false},{path:'nested'},{acl_admin_sids:['S-1-1-0']},{normalize_delete_permissions:'yes'},{mode:'custom_mask'}]) {
     assert.equal(actions['acl.grant'].safeParse({...base,...change}).success,false);
   }

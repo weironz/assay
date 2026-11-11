@@ -513,8 +513,12 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
             let x: DirectoryPath = parse(cmd.args.clone())?;
             acl::directory(&a.c, &x.share, &x.path, true).await
         }
-        "acl.grant" => {
+        "acl.grant" | "acl.preview" => {
             let x: Grant = parse(cmd.args.clone())?;
+            ensure!(
+                cmd.action != "acl.preview" || x.mode == "write_no_delete",
+                "invalid ACL preview mode"
+            );
             let sid = d.principal_sid(&x.principal_id, x.group).await?;
             let service_sid = d.service_sid().await?;
             acl::access(
@@ -529,7 +533,7 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
                     normalize_delete_permissions: x.normalize_delete_permissions,
                     service_sid: &service_sid,
                     request_id: &cmd.request_id,
-                    preview: false,
+                    preview: cmd.action == "acl.preview",
                 }),
             )
             .await
@@ -583,7 +587,12 @@ async fn command(State(a): State<App>, Json(cmd): Json<Command>) -> Response {
             if start {
                 tokio::spawn(async move {
                     // Independent of the HTTP connection; secrets stay in this worker's memory only.
-                    let outcome = tokio::time::timeout(Duration::from_secs(300), async {
+                    let seconds = if matches!(cmd.action.as_str(), "acl.grant" | "acl.preview") {
+                        3600
+                    } else {
+                        300
+                    };
+                    let outcome = tokio::time::timeout(Duration::from_secs(seconds), async {
                         let _lock = a.lock.lock().await;
                         if let Ok(db) = db(&a) {
                             let _ = db.execute(
@@ -893,6 +902,19 @@ mod unified_tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn acl_capacity_is_deployment_owned_and_bounded() {
+        let fixture = Fixture::new();
+        let mut config = fixture.config(false);
+        assert_eq!(config.acl_max_entries, 10_000);
+        config.acl_max_entries = 100_000;
+        config.check().unwrap();
+        for invalid in [0, 100_001, usize::MAX] {
+            config.acl_max_entries = invalid;
+            assert!(config.check().is_err());
         }
     }
 

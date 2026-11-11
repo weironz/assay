@@ -5,8 +5,8 @@ export async function awaitOperation(operation: Operation, own = false) {
   let current = operation;
   const started = Date.now();
   while (['pending', 'queued', 'running'].includes(current.state)) {
-    if (Date.now() - started > 310_000) throw new Error('操作仍在执行，请查看操作记录；不要重复提交');
-    await new Promise(resolve => setTimeout(resolve, 500));
+    if (Date.now() - started > 3_610_000) throw new Error('操作仍在执行，请查看操作记录；不要重复提交');
+    await new Promise(resolve => setTimeout(resolve, Date.now() - started > 30_000 ? 2000 : 500));
     current = (await api.get(`/samba/${own ? 'me/' : ''}operations/${current.id}`)).data;
   }
   if (current.state !== 'succeeded') throw new OperationError(current.result?.error_code);

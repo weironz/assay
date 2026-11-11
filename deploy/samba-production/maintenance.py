@@ -125,7 +125,7 @@ class Company:
 
     def command(self, action, args):
         request_id=str(uuid.uuid4());value=self.agent('/v1/commands',{'request_id':request_id,'action':action,'args':args})
-        deadline=time.monotonic()+330
+        deadline=time.monotonic()+(3630 if action in ('acl.grant','acl.preview') else 330)
         while value['state'] in ('queued','running','pending'):
             if time.monotonic()>deadline:raise RuntimeError('Agent operation still pending: '+request_id)
             time.sleep(.3);value=self.agent('/v1/operations/'+request_id)
@@ -333,6 +333,10 @@ class Company:
             if row['name'] in names:row['groups']=list(dict.fromkeys(row['groups']+[group_name]))
         inventory['config_sha256']=hashlib.sha256(candidate).hexdigest()
         agent['acl_admin_sids']=list(dict.fromkeys(agent.get('acl_admin_sids',[])+[group['sid']]))
+        counts={name:1+sum(len(dirs)+len(files) for _,dirs,files in os.walk(self.ad_root/self.settings.get('shares_relative','shares')/(shares[name].get('path') or name))) for name in names}
+        limit=self.p['maxEntries']
+        assert all(value<=limit for value in counts.values()),'Department exceeds reviewed ACL entry limit'
+        agent['acl_max_entries']=limit
         blocked=maintenance_admission(candidate,names,agent['smb_username'])
         overlay_blocked=maintenance_admission(overlay_full,overlay_selected,agent['smb_username']) if overlay_full is not None else None
         validate(blocked,overlay_blocked)
@@ -369,7 +373,7 @@ class Company:
                 department=next(n for n in shares[name]['groups'] if n.startswith('dept_') and n in groups)
                 acl=self.agent('/v1/acl?'+urllib.parse.urlencode({'share':name,'path':''}))
                 args={'share':name,'path':'','principal_id':groups[department]['id'],'group':True,'mode':'write_no_delete','inherit':True,'normalize_delete_permissions':True,'revision':acl['revision']}
-                previews[name]=self.agent('/v1/acl-preview',args);assert previews[name]['ready'] and previews[name]['writes'] is False
+                previews[name]=self.command('acl.preview',args);assert previews[name]['ready'] and previews[name]['writes'] is False
                 arguments[name]=args
             private(self.operation/'previews.json',previews)
             for name in names:

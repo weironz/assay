@@ -36,6 +36,9 @@ pub struct Config {
     /// Deployment-owned exceptions which retain full access in protected trees.
     #[serde(default)]
     pub acl_admin_sids: Vec<String>,
+    /// Reviewed deployment limit; requests cannot override traversal bounds.
+    #[serde(default = "acl_max_entries")]
+    pub acl_max_entries: usize,
     // Present only for compatibility with deployments that still run a helper.
     #[serde(default)]
     pub helper_socket: Option<PathBuf>,
@@ -77,6 +80,9 @@ pub struct Recycle {
 fn recycle_retention_days() -> u32 {
     30
 }
+fn acl_max_entries() -> usize {
+    10_000
+}
 fn recycle_every_hours() -> u32 {
     24
 }
@@ -96,6 +102,10 @@ impl Config {
         Ok(c)
     }
     pub fn check(&self) -> Result<()> {
+        ensure!(
+            (1..=100_000).contains(&self.acl_max_entries),
+            "ACL entry limit must be between 1 and 100000"
+        );
         ensure!(
             self.acl_admin_sids.len() <= 100,
             "invalid ACL administrator list"

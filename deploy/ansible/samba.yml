@@ -38,7 +38,7 @@
       ansible.builtin.command:
         argv: [python3, "{{ assay_operation }}/maintenance.py", "{{ assay_operation }}/parameters.json"]
       register: assay_maintenance
-      async: 3600
+      async: 10800
       poll: 10
       failed_when: false
       changed_when: assay_maintenance.rc | default(1) == 0

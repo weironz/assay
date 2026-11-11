@@ -24,7 +24,7 @@ def published_runtime(ci, host, directory):
     identity={k:manifest[k] for k in ('commit','sourceSha256','version')}
     if identity['version']!=ci.version or any(any(v.get(k)!=value for k,value in identity.items()) for v in values.values()):
         raise RuntimeError('Installed release provenance does not match')
-    changed=subprocess.check_output(['git','diff','--name-only','--no-renames',manifest['commit'],'HEAD'],text=True).splitlines()
+    changed=subprocess.check_output(['git','diff','--name-only','-z','--no-renames',manifest['commit'],'HEAD'],text=True).strip('\0').split('\0')
     if any(not (n in ('Taskfile.yml','README.md') or n.startswith(('scripts/local-ci/','deploy/ansible/','deploy/samba-production/','docs/'))) for n in changed):
         raise RuntimeError('Application source changed; use the full release/deployment pipeline')
     release=values['release'];verified=values['verified'];upgrade=values['upgrade']
@@ -124,6 +124,9 @@ def run(action):
         if any(v in ('common','scan','test','sysvol','netlogon') for v in names):
             raise RuntimeError('Protected/public/test shares are excluded from bulk department policy')
         parameters.update(departments=names,leaders=leaders,leadershipGroup=group)
+        limit=int(os.getenv('SAMBA_POLICY_MAX_ENTRIES','10000'))
+        if not 1<=limit<=100000:raise RuntimeError('Reviewed ACL entry limit must be between 1 and 100000')
+        parameters['maxEntries']=limit
         if action == 'verify':
             applied=ci.receipt('company-policy')['proof']
             if any(applied[key]!=parameters[key] for key in ('departments','leaders','leadershipGroup')):

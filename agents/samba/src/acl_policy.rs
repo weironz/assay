@@ -298,7 +298,7 @@ pub async fn apply(
     )];
     // Include protected branches deliberately: otherwise existing independent
     // child ACLs could still grant DELETE even after the root looked safe.
-    for node in inheritance::prepare_all(client, target).await? {
+    for node in inheritance::prepare_all(client, target, c.acl_max_entries).await? {
         let resource = open(client, &inheritance::append(target, &node.path)).await?;
         let before = inheritance::handle(&resource)
             .query_security_info(inheritance::info())
@@ -380,7 +380,7 @@ pub async fn apply(
             .iter()
             .map(|(path, before, _)| (path.as_str(), before))
             .collect();
-        let current = inheritance::prepare_all(client, target).await?;
+        let current = inheritance::prepare_all(client, target, c.acl_max_entries).await?;
         let current_paths: std::collections::HashSet<_> =
             current.iter().map(|node| node.path.as_str()).collect();
         ensure!(
