@@ -64,11 +64,37 @@
         mode: '0600'
       delegate_to: localhost
       become: false
-    - name: Download private company upgrade rehearsal inputs
-      ansible.builtin.fetch:
-        src: "{{ (assay_proof.content | b64decode | from_json).backup }}/rehearsal/{{ item }}"
-        dest: "{{ assay_rehearsal_directory }}/{{ item }}"
-        flat: true
-      loop: [db.sql.gz, objects.tar.gz, objects-manifest.json, backup-info.txt, source.json, source-images.tar.gz, SHA256.json]
+    - name: Download private company upgrade rehearsal inputs without large slurp payloads
       when: assay_parameters.action == 'backup'
-      no_log: true
+      block:
+        - name: Create a restricted transfer directory for the SSH account
+          ansible.builtin.tempfile:
+            state: directory
+            prefix: assay-private-transfer-
+          register: assay_transfer
+          become: false
+        - name: Stage verified backup exports for private SFTP transfer
+          ansible.builtin.copy:
+            src: "{{ (assay_proof.content | b64decode | from_json).backup }}/rehearsal/{{ item }}"
+            dest: "{{ assay_transfer.path }}/{{ item }}"
+            remote_src: true
+            owner: "{{ ansible_user }}"
+            mode: '0600'
+          loop: [db.sql.gz, objects.tar.gz, objects-manifest.json, backup-info.txt, source.json, source-images.tar.gz, SHA256.json]
+          no_log: true
+        - name: Fetch exports as their owner and verify controller checksums
+          ansible.builtin.fetch:
+            src: "{{ assay_transfer.path }}/{{ item }}"
+            dest: "{{ assay_rehearsal_directory }}/{{ item }}"
+            flat: true
+          become: false
+          loop: [db.sql.gz, objects.tar.gz, objects-manifest.json, backup-info.txt, source.json, source-images.tar.gz, SHA256.json]
+          no_log: true
+      always:
+        - name: Remove the private SSH transfer copy
+          ansible.builtin.file:
+            path: "{{ assay_transfer.path }}"
+            state: absent
+          become: false
+          when: assay_transfer.path | default('') | length > 0
+          no_log: true
