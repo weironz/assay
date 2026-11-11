@@ -4,10 +4,15 @@
 
 ## 发布与参数
 
-`ci-cd.yml` 手动发布同时构建 API、Web、统一 Samba Agent，全部通过检查后分发到 Docker Hub 和 ACR。`skip_deploy=true` 只发布镜像；现有默认部署目标不会因此改变。候选发布默认不更新 `latest`，正式版本也须显式设置 `publish_latest=true` 才更新该标签。生产 Compose 使用三镜像的 digest，回退不依赖可变标签。
+现行构建与发布以 [Taskfile / Ansible 说明](../../scripts/local-ci/README.md) 为准。
+`local:ci` / `local:publish` 构建并发布 API、Web、统一 Agent；既有公司栈使用
+`samba:backup` / `local:deploy:samba`，部门策略另用 `samba:policy`。阶段分开执行，
+不使用旧的 skip_deploy / ACR 分支，不更新 Docker latest。禁删、领导访问与恢复见
+[权限说明](../../docs/samba/03-目录禁删权限.md)。
 
 ```bash
-gh workflow run ci-cd.yml --ref main -f skip_deploy=true -f image_tag=sha-COMMIT
+task local:ci
+task local:publish
 ```
 
 复制 `config.example.json` 到服务器上的私有配置文件后填写实际参数。域名、证书 DNS 名、OU、容器名、网络、端口、文件名、目录、镜像均从配置读取；密码引用本地私有文件。示例地址与路径仅为占位值。主配置文件须有明确的公司共享 include，复杂的动态 include、宏、复制模板或目录越界必须先人工核对，不能猜测后导入。

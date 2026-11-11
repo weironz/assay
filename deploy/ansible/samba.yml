@@ -1,0 +1,74 @@
+---
+- name: Maintain an existing Assay and Samba deployment
+  hosts: assay
+  gather_facts: false
+  become: "{{ lookup('env', 'DEPLOY_BECOME') | default('true', true) | bool }}"
+  vars:
+    ansible_password: "{{ lookup('env', 'DEPLOY_PASSWORD') | default(omit, true) }}"
+    ansible_become_password: "{{ lookup('env', 'DEPLOY_BECOME_PASSWORD') | default(omit, true) }}"
+  tasks:
+    - name: Create private operation directory
+      ansible.builtin.file:
+        path: "{{ assay_operation }}"
+        state: directory
+        mode: '0700'
+    - name: Transfer shared maintenance tools
+      ansible.builtin.copy:
+        src: "{{ assay_repository }}/{{ item }}"
+        dest: "{{ assay_operation }}/{{ item | basename }}"
+        mode: '0600'
+      loop:
+        - deploy/samba-production/maintenance.py
+        - deploy/samba-production/verify_acl.py
+        - deploy/samba-production/backup.py
+        - scripts/local-ci/db_fingerprint.py
+    - name: Save validated nonsecret operation parameters
+      ansible.builtin.copy:
+        content: "{{ assay_parameters | to_json }}"
+        dest: "{{ assay_operation }}/parameters.json"
+        mode: '0600'
+    - name: Transfer verified offline images
+      ansible.builtin.copy:
+        src: "{{ assay_bundle }}"
+        dest: "{{ assay_operation }}/images.tar.gz"
+        mode: '0600'
+      when: assay_bundle | length > 0
+    - name: Execute shared maintenance action
+      ansible.builtin.command:
+        argv: [python3, "{{ assay_operation }}/maintenance.py", "{{ assay_operation }}/parameters.json"]
+      register: assay_maintenance
+      async: 3600
+      poll: 10
+      failed_when: false
+      changed_when: assay_maintenance.rc | default(1) == 0
+      no_log: true
+    - name: Retain private maintenance diagnostics
+      ansible.builtin.copy:
+        content: "{{ assay_maintenance.stdout | default('') }}\n{{ assay_maintenance.stderr | default('') }}\n"
+        dest: "{{ assay_operation }}/maintenance.log"
+        mode: '0600'
+      no_log: true
+    - name: Require successful maintenance
+      ansible.builtin.assert:
+        that: assay_maintenance.rc | default(1) == 0
+        fail_msg: "Maintenance failed; inspect {{ assay_operation }}/maintenance.log before retrying."
+        quiet: true
+    - name: Read the remote completion proof
+      ansible.builtin.slurp:
+        src: "{{ assay_operation }}/result.json"
+      register: assay_proof
+    - name: Return completion proof
+      ansible.builtin.copy:
+        content: "{{ assay_proof.content | b64decode }}"
+        dest: "{{ assay_result }}"
+        mode: '0600'
+      delegate_to: localhost
+      become: false
+    - name: Download private company upgrade rehearsal inputs
+      ansible.builtin.fetch:
+        src: "{{ (assay_proof.content | b64decode | from_json).backup }}/rehearsal/{{ item }}"
+        dest: "{{ assay_rehearsal_directory }}/{{ item }}"
+        flat: true
+      loop: [db.sql.gz, objects.tar.gz, objects-manifest.json, backup-info.txt, source.json, source-images.tar.gz, SHA256.json]
+      when: assay_parameters.action == 'backup'
+      no_log: true

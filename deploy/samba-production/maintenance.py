@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""Existing-company maintenance invoked only by Task/Ansible, never by Web inputs."""
+import configparser
+import datetime
+import fcntl
+import gzip
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+import tarfile
+import urllib.parse
+import urllib.request
+import uuid
+
+import backup as snapshots
+from db_fingerprint import capture, assert_preserved
+
+
+def run(*args, data=None):
+    return subprocess.check_output([str(x) for x in args],input=data,stderr=subprocess.PIPE)
+
+
+def private(path, value):
+    path.write_text(json.dumps(value,indent=2)+'\n');path.chmod(0o600)
+
+
+def replace(path, value):
+    before=path.stat(); temporary=path.with_name(path.name+'.task-'+uuid.uuid4().hex)
+    with temporary.open('xb') as stream:
+        stream.write(value);stream.flush();os.fsync(stream.fileno())
+    os.chown(temporary,before.st_uid,before.st_gid);temporary.chmod(stat.S_IMODE(before.st_mode));temporary.replace(path)
+
+
+def policy_config(original, names, domain, group_name):
+    sections=re.split(r'(?m)(^\s*\[[^\]]+\]\s*$)',original.decode())
+    touched=set()
+    for i in range(1,len(sections),2):
+        name=sections[i].strip()[1:-1]
+        if name not in names:continue
+        block=sections[i+1]
+        assert len(re.findall(r'(?mi)^\s*valid users\s*=',block))==1
+        principal='"@'+domain+'\\'+group_name+'"'
+        block=re.sub(r'(?mi)^(\s*valid users\s*=.*)$',lambda m:m[1] if principal in m[1] else m[1]+' '+principal,block)
+        if re.search(r'(?mi)^\s*vfs objects\s*=',block):
+            block=re.sub(r'(?mi)^(\s*vfs objects\s*=)(.*)$',lambda m:m[1]+' '+' '.join(dict.fromkeys(['acl_xattr']+m[2].split())),block)
+        else:block+='\n    vfs objects = acl_xattr recycle\n'
+        if not re.search(r'(?mi)^\s*inherit acls\s*=',block):block+='    inherit acls = yes\n'
+        sections[i+1]=block;touched.add(name)
+    assert touched==set(names)
+    return ''.join(sections).encode()
+
+
+def maintenance_admission(candidate, names, service):
+    sections=re.split(r'(?m)(^\s*\[[^\]]+\]\s*$)',candidate.decode())
+    for i in range(1,len(sections),2):
+        if sections[i].strip()[1:-1] in names:
+            sections[i+1]=re.sub(r'(?mi)^\s*valid users\s*=.*$',lambda _: '\n    valid users = "'+service+'"',sections[i+1])
+    return ''.join(sections).encode()
+
+
+def content_identity(root):
+    rows={}
+    for path in sorted(root.rglob('*')):
+        info=path.lstat()
+        if stat.S_ISLNK(info.st_mode):raise RuntimeError('Department tree contains a symlink; review before policy changes')
+        if stat.S_ISREG(info.st_mode):
+            rows[path.relative_to(root).as_posix()]=[info.st_uid,info.st_gid,info.st_size,info.st_mtime_ns,hashlib.file_digest(path.open('rb'),'sha256').hexdigest()]
+    return rows
+
+
+class Company:
+    def __init__(self, parameters):
+        self.p=parameters
+        self.root=Path(parameters['directory']).resolve(strict=True)
+        self.operation=Path(parameters['operation']).resolve(strict=True)
+        assert self.operation.parent == self.root/'rollback'
+        assert os.geteuid()==0
+        self.compose=['docker','compose','--project-directory',str(self.root),'-f',str(self.root/'compose.yaml'),'--env-file',str(self.root/'.env')]
+        rendered=json.loads(run(*self.compose,'config','--format','json'))
+        assert {'api','web','agent','postgres','redis'} <= set(rendered['services'])
+        self.items={name:self.inspect(run(*self.compose,'ps','-q',name).decode().strip()) for name in ('api','web','agent','postgres','redis')}
+        pid=self.items['agent']['HostConfig']['PidMode'];assert pid.startswith('container:')
+        self.ad=self.inspect(pid[10:]);self.ad_name=self.ad['Name'].lstrip('/')
+        self.settings=json.loads((self.root/'deployment-input.json').read_text())
+        self.ad_root=Path(self.settings['ad_data_dir']).resolve(strict=True)
+        assert any(Path(m['Source']).is_relative_to(self.ad_root) and m['Destination']=='/etc/samba' for m in self.ad['Mounts'])
+        self.pg=dict(x.split('=',1) for x in self.items['postgres']['Config']['Env'] if '=' in x)
+
+    @staticmethod
+    def inspect(name):
+        assert name
+        return json.loads(run('docker','inspect',name))[0]
+
+    def image_ids(self):
+        return {('samba-agent' if k=='agent' else k):v['Image'] for k,v in self.items.items() if k in ('api','web','agent')}
+
+    def query(self, sql):
+        return json.loads(run('docker','exec',self.items['postgres']['Id'],'psql','-XAt','-v','ON_ERROR_STOP=1','-U',self.pg['POSTGRES_USER'],'-d',self.pg['POSTGRES_DB'],'-c',sql))
+
+    def agent(self, path, data=None):
+        config=json.loads((self.root/'agent.json').read_text())
+        token=(self.root/'secrets/agent-token').read_text().strip()
+        req=urllib.request.Request('http://'+config['listen']+path,data=None if data is None else json.dumps(data).encode(),headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
+        opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(req,timeout=60) as response:return json.load(response)
+
+    def command(self, action, args):
+        request_id=str(uuid.uuid4());value=self.agent('/v1/commands',{'request_id':request_id,'action':action,'args':args})
+        deadline=time.monotonic()+330
+        while value['state'] in ('queued','running','pending'):
+            if time.monotonic()>deadline:raise RuntimeError('Agent operation still pending: '+request_id)
+            time.sleep(.3);value=self.agent('/v1/operations/'+request_id)
+        private(self.operation/(request_id+'.json'),{'action':action,'args':args,'response':value})
+        if value['state']!='succeeded':raise RuntimeError('Agent operation failed; inspect private operation '+request_id)
+        return value['result']
+
+    def backup(self):
+        backup_root=self.root.parent/'assay-backups';backup_root.mkdir(mode=0o700,exist_ok=True);backup_root.chmod(0o700)
+        destination=backup_root.resolve()/self.operation.name
+        attachment=next(Path(m['Source']) for m in self.items['api']['Mounts'] if m['Destination']=='/data/attachments')
+        config={'containers':[v['Id'] for v in self.items.values()]+[self.ad['Id']],
+          'stop_for_backup':[self.items[k]['Id'] for k in ('web','api','agent')], 'pause_for_snapshot':[self.ad['Id']],
+          'postgres_container':self.items['postgres']['Id'],'postgres_user':self.pg['POSTGRES_USER'],'postgres_database':self.pg['POSTGRES_DB'],
+          'trees':{'ad':str(self.ad_root),'assay':str(self.root),'attachments':str(attachment)},
+          'content_verify_trees':['ad','assay','attachments'],'content_verify_mode':'reflink','ad_tree':'ad','ad_container':self.ad['Id'],
+          'ad_restore_mounts':{str(Path(m['Source']).relative_to(self.ad_root)):m['Destination'] for m in self.ad['Mounts'] if Path(m['Source']).is_relative_to(self.ad_root)},
+          'sqlite_files':[str(p.relative_to(self.root.parent)).replace(self.root.name+'/', 'assay/',1) for p in (self.root/'agent-state').glob('*.sqlite')]}
+        private(self.operation/'backup-config.json',config)
+        snapshots.backup(config,destination);snapshots.verify(config,destination)
+        rehearsal=destination/'rehearsal';rehearsal.mkdir(mode=0o700)
+        sql=run('docker','run','--rm','--network','none','--entrypoint','pg_restore','--mount',f'type=bind,src={destination / "assay.pgdump"},dst=/backup.pgdump,readonly',self.items['postgres']['Image'],'--file','-','/backup.pgdump')
+        with gzip.open(rehearsal/'db.sql.gz','wb') as stream:stream.write(sql)
+        manifest=[]
+        for path in sorted((destination/'attachments').rglob('*')):
+            if path.is_symlink():raise RuntimeError('Attachment backup contains a symlink')
+            if path.is_file():manifest.append({'key':path.relative_to(destination/'attachments').as_posix(),'sha256':hashlib.file_digest(path.open('rb'),'sha256').hexdigest(),'size':path.stat().st_size})
+        private(rehearsal/'objects-manifest.json',manifest)
+        with tarfile.open(rehearsal/'objects.tar.gz','w:gz') as archive:
+            for path in sorted((destination/'attachments').rglob('*')):
+                archive.add(path,arcname=path.relative_to(destination/'attachments').as_posix(),recursive=False)
+        source={'version':self.settings.get('version','existing-company'),'apiImageId':self.items['api']['Image'],'webImageId':self.items['web']['Image'],'agentImageId':self.items['agent']['Image'],
+            'adminEmail':self.settings['admin_email'],'fileSha256':{name:hashlib.file_digest((rehearsal/name).open('rb'),'sha256').hexdigest() for name in ('db.sql.gz','objects.tar.gz','objects-manifest.json')},
+            'rollbackImages':{k:self.items[k]['Image'] for k in ('api','web')}}
+        private(rehearsal/'source.json',source)
+        (rehearsal/'backup-info.txt').write_text('postgres_user='+self.pg['POSTGRES_USER']+'\n')
+        saved=subprocess.Popen(['docker','save',self.items['api']['Image'],self.items['web']['Image']],stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+        with gzip.open(rehearsal/'source-images.tar.gz','wb',compresslevel=1) as stream:shutil.copyfileobj(saved.stdout,stream)
+        saved.stdout.close()
+        if saved.wait():raise RuntimeError('Source runtime image export failed')
+        for path in rehearsal.iterdir():path.chmod(0o600)
+        private(rehearsal/'SHA256.json',{p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest() for p in rehearsal.iterdir() if p.is_file()})
+        return {'backup':str(destination),'imageIds':self.image_ids(),'restoreVerified':True,'sourceStorage':'local'}
+
+    def deploy(self):
+        backup=Path(self.p['backup']);assert (backup/'RESTORE_VERIFIED.json').is_file()
+        assert self.image_ids()==self.p['sourceImageIds'],'Runtime changed since backup'
+        for value in self.p['images'].values():
+            assert re.fullmatch(r'sha256:[a-f0-9]{64}',value['imageId'])
+        if self.p['offline']:
+            bundle=self.operation/'images.tar.gz'
+            assert hashlib.file_digest(bundle.open('rb'),'sha256').hexdigest()==self.p['bundleSha256']
+            run('docker','load','-i',bundle)
+        else:
+            for value in self.p['images'].values():run('docker','pull',value['reference'].split(':')[0]+'@'+value['digest'])
+        for value in self.p['images'].values():
+            actual=self.inspect_image(value['imageId'])
+            assert actual['Id']==value['imageId']
+            run('docker','tag',value['imageId'],value['reference'])
+        env_path=self.root/'.env';before_env=env_path.read_bytes()
+        api_env=self.root/'api.env';before_api=api_env.read_bytes()
+        private(self.operation/'before-images.json',self.image_ids())
+        (self.operation/'before.env').write_bytes(before_env);(self.operation/'before.env').chmod(0o600)
+        (self.operation/'before-api.env').write_bytes(before_api);(self.operation/'before-api.env').chmod(0o600)
+        data_ids={k:self.items[k]['Id'] for k in ('postgres','redis')}
+        stopped=False;activated=False
+        try:
+            run(*self.compose,'stop','web','api');stopped=True
+            # Final database + attachment snapshot while both writers are stopped.
+            with (self.operation/'final.pgdump').open('xb') as stream:
+                subprocess.run(['docker','exec',self.items['postgres']['Id'],'sh','-c','exec pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc'],check=True,stdout=stream,stderr=subprocess.PIPE)
+            (self.operation/'final.pgdump').chmod(0o600)
+            attachment=next(Path(m['Source']) for m in self.items['api']['Mounts'] if m['Destination']=='/data/attachments')
+            snapshots.clone(attachment,self.operation/'final-attachments')
+            attachment_before=snapshots.fingerprint(attachment,content=True)
+            before=capture(self.query);private(self.operation/'data-before.json',before)
+            content=before_env.decode()
+            for service,variable in [('api','ASSAY_API_IMAGE'),('web','ASSAY_WEB_IMAGE'),('samba-agent','ASSAY_AGENT_IMAGE')]:
+                assert len(re.findall(r'^'+variable+r'=',content,re.M))==1
+                content=re.sub(r'^'+variable+r'=.*$',variable+'='+self.p['images'][service]['reference'],content,flags=re.M)
+            replace(env_path,content.encode());activated=True
+            api_content=before_api.decode()
+            setting='ATTACHMENT_DRAFT_CLEANUP_ENABLED=false'
+            if re.search(r'^ATTACHMENT_DRAFT_CLEANUP_ENABLED=',api_content,re.M):
+                api_content=re.sub(r'^ATTACHMENT_DRAFT_CLEANUP_ENABLED=.*$',setting,api_content,flags=re.M)
+            else:api_content+='\n'+setting+'\n'
+            replace(api_env,api_content.encode())
+            run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','agent')
+            run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','--wait','--wait-timeout','180','api')
+            after=capture(self.query,before);report=assert_preserved(before,after);private(self.operation/'data-preservation.json',report)
+            assert snapshots.fingerprint(attachment,content=True)==attachment_before,'Existing local attachments changed'
+            snapshot=self.agent('/v1/snapshot');assert snapshot.get('users') is not None
+            run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','--wait','--wait-timeout','180','web')
+            for name,identifier in data_ids.items():assert run(*self.compose,'ps','-q',name).decode().strip()==identifier
+            assert self.inspect(self.ad['Id'])['State']['Running']
+            ids={('samba-agent' if s=='agent' else s):self.inspect(run(*self.compose,'ps','-q',s).decode().strip())['Image'] for s in ('api','web','agent')}
+            assert ids=={k:v['imageId'] for k,v in self.p['images'].items()}
+            return {'imageIds':ids,'dataPreserved':True,'localAttachmentsPreserved':True,'sambaUnchanged':True,'backup':str(backup)}
+        except Exception:
+            if activated:
+                replace(env_path,before_env)
+                replace(api_env,before_api)
+                run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','--wait','--wait-timeout','180','agent','api','web')
+            elif stopped:run(*self.compose,'start','api','web')
+            raise
+
+    @staticmethod
+    def inspect_image(name):return json.loads(run('docker','image','inspect',name))[0]
+
+    def policy(self):
+        assert self.image_ids()==self.p['deployedImageIds']
+        assert (Path(self.p['backup'])/'RESTORE_VERIFIED.json').is_file()
+        names=self.p['departments'];leaders=self.p['leaders'];group_name=self.p['leadershipGroup']
+        snapshot=self.agent('/v1/snapshot');users={u['name']:u for u in snapshot['users']};groups={g['name']:g for g in snapshot['groups']}
+        assert len(leaders)==2 and all(n in users and not users[n]['disabled'] for n in leaders)
+        shares={s['name']:s for s in snapshot['shares']}
+        assert all(n in shares and shares[n]['external'] and shares[n]['active'] for n in names)
+        # Never close active documents to activate a changed VFS chain.
+        status=json.loads(run('docker','exec',self.ad['Id'],'smbstatus','--json'))
+        assert not status.get('open_files'),'Open SMB files exist; schedule a maintenance window before applying policy'
+        wanted={users[n]['dn'].lower() for n in leaders}
+        if group_name in groups:
+            assert {n.lower() for n in groups[group_name]['members']}<=wanted,'Leadership group contains unapproved members'
+        else:self.command('group.create',{'name':group_name,'description':'Company department directory administrators'})
+        group=next(g for g in self.agent('/v1/snapshot')['groups'] if g['name']==group_name)
+        missing=[users[n]['id'] for n in leaders if users[n]['dn'].lower() not in {dn.lower() for dn in group['members']}]
+        if missing:self.command('group.members',{'group_id':group['id'],'user_ids':missing,'add':True})
+        group=next(g for g in self.agent('/v1/snapshot')['groups'] if g['name']==group_name)
+        assert {n.lower() for n in group['members']}==wanted
+        agent_path=self.root/'agent.json';agent=json.loads(agent_path.read_text())
+        external=self.root/'external-shares.json';inventory=json.loads(external.read_text())
+        relative=Path(agent['external_samba_config_file']).relative_to('/existing')
+        source=self.ad_root/self.settings.get('ad_etc_relative','etc')/relative
+        original=source.read_bytes();assert hashlib.sha256(original).hexdigest()==inventory['config_sha256']
+        files=[agent_path,external,source]
+        private(self.operation/'policy-files.json',[{'path':str(p),'uid':p.stat().st_uid,'gid':p.stat().st_gid,'mode':stat.S_IMODE(p.stat().st_mode),'bytes':list(p.read_bytes())} for p in files])
+        domain=agent['smb_username'].split('\\')[0]
+        candidate=policy_config(original,names,domain,group_name)
+        # Validate the full candidate with the real AD image, isolated from its
+        # live configuration and without networking or daemon startup.
+        copied=self.operation/'validation-etc';snapshots.clone(self.ad_root/self.settings.get('ad_etc_relative','etc'),copied)
+        (copied/relative).write_bytes(candidate)
+        run('docker','run','--rm','--network','none','--entrypoint','testparm','--mount',f'type=bind,src={copied},dst=/etc/samba,readonly',self.ad['Image'],'-s','--suppress-prompt')
+        for row in inventory['shares']:
+            if row['name'] in names:row['groups']=list(dict.fromkeys(row['groups']+[group_name]))
+        inventory['config_sha256']=hashlib.sha256(candidate).hexdigest()
+        agent['acl_admin_sids']=list(dict.fromkeys(agent.get('acl_admin_sids',[])+[group['sid']]))
+        blocked=maintenance_admission(candidate,names,agent['smb_username'])
+        (copied/relative).write_bytes(blocked)
+        run('docker','run','--rm','--network','none','--entrypoint','testparm','--mount',f'type=bind,src={copied},dst=/etc/samba,readonly',self.ad['Image'],'-s','--suppress-prompt')
+        run(*self.compose,'stop','web')
+        def activate(content):
+            inventory['config_sha256']=hashlib.sha256(content).hexdigest()
+            replace(source,content);replace(external,(json.dumps(inventory,indent=2)+'\n').encode());replace(agent_path,(json.dumps(agent,indent=2)+'\n').encode())
+            run('docker','exec',self.ad['Id'],'testparm','-s','--suppress-prompt')
+            run('docker','exec',self.ad['Id'],'smbcontrol','all','reload-config')
+            run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','agent')
+            for _ in range(100):
+                try:self.agent('/v1/snapshot');break
+                except Exception:time.sleep(.3)
+            else:raise RuntimeError('Agent did not become ready after policy configuration')
+        applied={}
+        try:
+            # Freeze only new employee connections to the selected shares while
+            # reviewing/applying ACLs. Common/scanning remain available. The
+            # service identity stays admitted for the actual SMB ACL writes.
+            activate(blocked)
+            status=json.loads(run('docker','exec',self.ad['Id'],'smbstatus','--json'));assert not status.get('open_files'),'A document opened during policy preparation; stop before closing any share'
+            for name in names:run('docker','exec',self.ad['Id'],'smbcontrol','smbd','close-share',name)
+            roots={name:self.ad_root/self.settings.get('shares_relative','shares')/(shares[name].get('path') or name) for name in names}
+            identities={name:content_identity(root) for name,root in roots.items()}
+            private(self.operation/'content-before.json',identities)
+            snapshot=self.agent('/v1/snapshot');groups={g['name']:g for g in snapshot['groups']}
+            registered={s['name']:s for s in snapshot['shares']}
+            assert all(group_name in registered[name]['groups'] for name in names),'Leadership admission was not reflected in the Agent inventory'
+            previews={};arguments={}
+            for name in names:
+                department=next(n for n in shares[name]['groups'] if n.startswith('dept_') and n in groups)
+                acl=self.agent('/v1/acl?'+urllib.parse.urlencode({'share':name,'path':''}))
+                args={'share':name,'path':'','principal_id':groups[department]['id'],'group':True,'mode':'write_no_delete','inherit':True,'normalize_delete_permissions':True,'revision':acl['revision']}
+                previews[name]=self.agent('/v1/acl-preview',args);assert previews[name]['ready'] and previews[name]['writes'] is False
+                arguments[name]=args
+            private(self.operation/'previews.json',previews)
+            for name in names:
+                applied[name]=self.command('acl.grant',arguments[name]);assert applied[name]['deleteProtection']
+                private(self.operation/'applied.json',applied)
+            after={name:content_identity(root) for name,root in roots.items()}
+            private(self.operation/'content-after.json',after)
+            assert after==identities,'Department contents or file ownership changed during policy application'
+        finally:
+            activate(candidate)
+            run(*self.compose,'start','web')
+        return {'departments':names,'leaders':leaders,'leadershipGroup':group_name,'aclBackups':{n:r['backupId'] for n,r in applied.items()},'allPreviewsPassed':True,'configurationValidated':True,'fileContentsAndOwnershipPreserved':True,'sambaRestarted':False,'excludedShares':['common','scan','test','sysvol','netlogon']}
+
+    def verify(self):
+        assert self.image_ids()==self.p['deployedImageIds']
+        snapshot=self.agent('/v1/snapshot')
+        shares={s['name']:s for s in snapshot['shares']}
+        groups={g['name']:g for g in snapshot['groups']}
+        parameters={k:self.p[k] for k in ('departments','leaders','leadershipGroup')}
+        parameters['departmentGroups']=list(dict.fromkeys(next(n for n in shares[name]['groups'] if n.startswith('dept_') and n in groups) for name in parameters['departments']))
+        script=(self.operation/'verify_acl.py').read_bytes()
+        payload='import json\nparameters=json.loads('+repr(json.dumps(parameters))+')\n'+script.decode().replace("if __name__=='__main__':\n    print(json.dumps(main(json.load(sys.stdin))))",'print(json.dumps(main(parameters)))')
+        result=json.loads(run('docker','exec','-i',self.ad['Id'],'python3','-',data=payload.encode()))
+        assert result['passed'] and result['temporaryIdentityRemoved'] and result['leadershipMembersUnchanged']
+        private(self.operation/'smb-acceptance.json',result)
+        return {'acceptance':result,'departments':parameters['departments']}
+
+
+def main():
+    parameters=json.loads(Path(sys.argv[1]).read_text())
+    lock=Path('/run/lock/assay-company-maintenance.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+    company=Company(parameters)
+    action=parameters['action'];assert action in ('backup','deploy','policy','verify')
+    result=getattr(company,action)()
+    result.update(action=action,directory=str(company.root),version=parameters['version'],completed=True)
+    private(company.operation/'result.json',result)
+    print(json.dumps({'completed':True,'action':action,'operation':str(company.operation)}))
+
+
+if __name__=='__main__':main()

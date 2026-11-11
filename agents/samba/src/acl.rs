@@ -12,7 +12,7 @@ use std::str::FromStr;
 pub(crate) fn revision(sd: &SecurityDescriptor) -> String {
     format!("{:x}", Sha256::digest(format!("{sd:?}").as_bytes()))
 }
-fn view(sd: &SecurityDescriptor) -> Value {
+pub(crate) fn view(sd: &SecurityDescriptor) -> Value {
     let entries=sd.dacl.as_ref().map(|acl|acl.ace.iter().map(|ace| {
         let simple=match &ace.value {AceValue::AccessAllowed(a)=>Some((a,"allow")),AceValue::AccessDenied(a)=>Some((a,"deny")),_=>None};
         if let Some((a,effect))=simple {json!({"sid":a.sid.to_string(),"effect":effect,"mask":u32::from_le_bytes(a.access_mask.into_bytes()),"inherited":ace.ace_flags.inherited(),"inherit":ace.ace_flags.object_inherit()||ace.ace_flags.container_inherit()})}
@@ -20,11 +20,21 @@ fn view(sd: &SecurityDescriptor) -> Value {
     }).collect::<Vec<_>>()).unwrap_or_default();
     json!({"revision":revision(sd),"owner":sd.owner_sid.as_ref().map(ToString::to_string),"group":sd.group_sid.as_ref().map(ToString::to_string),"protected":sd.control.dacl_protected(),"entries":entries})
 }
+pub struct Change<'a> {
+    pub sid: &'a str,
+    pub mode: &'a str,
+    pub inherit: bool,
+    pub revision: &'a str,
+    pub normalize_delete_permissions: bool,
+    pub service_sid: &'a str,
+    pub request_id: &'a str,
+    pub preview: bool,
+}
 pub async fn access(
     c: &Config,
     share: &str,
     path: &str,
-    change: Option<(&str, &str, bool, &str)>,
+    change: Option<Change<'_>>,
 ) -> Result<Value> {
     crate::ad::name(share)?;
     files::components(path)?;
@@ -67,11 +77,31 @@ pub async fn access(
         .with_dacl_security_information(true);
     let mut sd = handle.query_security_info(info).await?;
     let mut propagated = 0;
-    if let Some((sid, mode, inherit, expected)) = change {
+    if let Some(change) = change {
+        crate::acl_policy::ensure_no_pending(c)?;
+        let Change {
+            sid,
+            mode,
+            inherit,
+            revision: expected,
+            ..
+        } = change;
         ensure!(
             revision(&sd) == expected,
             "ACL changed; refresh and review before retrying"
         );
+        if mode == "write_no_delete" {
+            ensure!(
+                inherit,
+                "ACL scope must include existing subdirectories and files for no-delete mode"
+            );
+            ensure!(
+                target.path().is_none_or(|path| path.is_empty()),
+                "ACL scope no-delete policy must start at the share root; ancestor delete-child rights require separate review"
+            );
+            handle.close().await?;
+            return crate::acl_policy::apply(c, &client, &target, sd, &change).await;
+        }
         let descendants = crate::inheritance::prepare(&client, &target).await?;
         ensure!(
             revision(&handle.query_security_info(info).await?) == expected,

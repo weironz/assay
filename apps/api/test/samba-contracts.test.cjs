@@ -1,6 +1,13 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { actions, commandSchema, directoryPath, metadata, bindingSchema } = require('../src/samba/contracts');
+test('no-delete policy requires a complete root scope and cannot inject privileged SID exceptions', () => {
+  const base = { share: 'finance', path: '', principal_id: 'a'.repeat(32), group: true, mode: 'write_no_delete', inherit: true, normalize_delete_permissions: true, revision: 'b'.repeat(64) };
+  assert.equal(actions['acl.grant'].safeParse(base).success, true);
+  for (const change of [{inherit:false},{path:'nested'},{acl_admin_sids:['S-1-1-0']},{normalize_delete_permissions:'yes'},{mode:'custom_mask'}]) {
+    assert.equal(actions['acl.grant'].safeParse({...base,...change}).success,false);
+  }
+});
 test('Samba requests cannot expose arbitrary shell, credentials or paths', () => {
   assert.equal(commandSchema.safeParse({ requestId: crypto.randomUUID(), action: 'exec', args: { command: 'id' } }).success, false);
   assert.equal(actions['user.create'].safeParse({ name: 'alice', display_name: 'Alice', password: 'Secret123!', command: 'id' }).success, false);

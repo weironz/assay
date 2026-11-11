@@ -228,6 +228,9 @@ def main():
     modified_main = allow_directory_client(modified_main, c['api_directory_source_ip'])
     if 'samba_allowed_networks' in c:
         modified_main = configure_allowed_sources(modified_main, c['samba_allowed_networks'], c['api_directory_source_ip'])
+    api_gid = c.get('api_runtime_gid', 1000)
+    if not isinstance(api_gid, int) or isinstance(api_gid, bool) or not 1 <= api_gid <= 2**31-1:
+        raise ValueError('api_runtime_gid must identify the non-root API group')
     if not args.apply:
         print(json.dumps({'ready': True, 'domain': domain, 'shares': len(shares['shares']),
                           'destination': str(root), 'fresh_database': True}))
@@ -243,9 +246,14 @@ def main():
     for name, value in [('agent-token', secrets.token_urlsafe(48)), ('files-token', secrets.token_urlsafe(48)),
                         ('management-password', management_password), ('directory-password', directory_password)]:
         private(root / 'secrets' / name, value + '\n')
+        if name != 'management-password':
+            os.chown(root / 'secrets' / name, 0, api_gid)
+            (root / 'secrets' / name).chmod(0o640)
     for name, source_path in [('web.crt', c['web_cert_source']), ('web.key', c['web_key_source']),
                               ('directory-ca.crt', str(ad / c['directory_ca_relative']))]:
         private(root / 'tls' / name, Path(source_path).read_bytes())
+        if name.endswith('.crt'):
+            (root / 'tls' / name).chmod(0o644)
     password = Path(c['local_admin_password_file']).read_text().rstrip('\r\n')
     if any('\n' in value or '\r' in value for value in [password, c['admin_email'], c['admin_name']]):
         raise ValueError('Invalid local administrator configuration')

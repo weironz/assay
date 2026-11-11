@@ -11,6 +11,7 @@ import { SambaService } from './samba.service';
 export class SambaController {
   constructor(private readonly samba: SambaService, private readonly stepUp: StepUpService) {}
   @Get('snapshot') @RequirePermissions('samba:read') snapshot() { return this.samba.snapshot(); }
+  @Post('acl-preview') @HttpCode(200) @RequirePermissions('samba:manage') aclPreview(@Body() body: unknown) { return this.samba.aclPreview(body); }
   @Post('rename-preview') @HttpCode(200) @RequirePermissions('samba:manage') preview(@Body() body:unknown) { return this.samba.renamePreview(body); }
   @Get('directories') @RequirePermissions('samba:read') directories(@Query() q: unknown) { return this.samba.directories(q); }
   @Get('acl') @RequirePermissions('samba:read') acl(@Query() q: unknown) { return this.samba.directories(q, true); }

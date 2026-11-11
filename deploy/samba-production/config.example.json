@@ -22,6 +22,7 @@
   "management_account": "svc_assay_agent",
   "directory_account": "svc_assay_read",
   "primary_gid": 31000,
+  "api_runtime_gid": 1000,
   "managed_subdirectory": "assay",
   "managed_config_name": "shares.conf",
   "managed_include_name": "include.conf",

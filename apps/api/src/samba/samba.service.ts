@@ -100,6 +100,11 @@ export class SambaService implements OnModuleInit,OnModuleDestroy {
     ]);
     return { enabled: true, ...data, bindings: bindings.map(b => ({ ...b, directoryManaged: directoryIdentities.some(i => i.userId === b.userId) })), assayUsers };
   }
+  async aclPreview(input: unknown) {
+    const parsed = actions['acl.grant'].safeParse(input);
+    if (!parsed.success || parsed.data.mode !== 'write_no_delete') throw new BadRequestException('禁删预检查需指定共享根目录、主体及完整应用范围');
+    return this.agent('/v1/acl-preview', parsed.data);
+  }
   async directories(input: unknown, acl = false) {
     const parsed = directoryPath.safeParse(input);
     if (!parsed.success) throw new BadRequestException('目录参数无效');

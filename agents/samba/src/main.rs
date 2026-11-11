@@ -1,4 +1,5 @@
 mod acl;
+mod acl_policy;
 mod ad;
 mod config;
 mod dns;
@@ -129,6 +130,8 @@ struct Grant {
     mode: String,
     inherit: bool,
     revision: String,
+    #[serde(default)]
+    normalize_delete_permissions: bool,
 }
 fn parse<T: serde::de::DeserializeOwned>(v: Value) -> Result<T> {
     Ok(serde_json::from_value(v)?)
@@ -178,6 +181,33 @@ async fn directories(State(a): State<App>, Query(q): Query<DirectoryPath>) -> Re
 }
 async fn permissions(State(a): State<App>, Query(q): Query<DirectoryPath>) -> Response {
     reply(acl::access(&a.c, &q.share, &q.path, None).await)
+}
+async fn acl_preview(State(a): State<App>, Json(x): Json<Grant>) -> Response {
+    let _guard = a.lock.lock().await;
+    let result = async {
+        ensure!(x.mode == "write_no_delete", "invalid ACL preview mode");
+        let mut directory = ad::Directory::connect(&a.c).await?;
+        let sid = directory.principal_sid(&x.principal_id, x.group).await?;
+        let service = directory.service_sid().await?;
+        acl::access(
+            &a.c,
+            &x.share,
+            &x.path,
+            Some(acl::Change {
+                sid: &sid,
+                mode: &x.mode,
+                inherit: x.inherit,
+                revision: &x.revision,
+                normalize_delete_permissions: x.normalize_delete_permissions,
+                service_sid: &service,
+                request_id: "",
+                preview: true,
+            }),
+        )
+        .await
+    }
+    .await;
+    reply(result)
 }
 async fn rename_preview(State(a): State<App>, Json(input): Json<rename::Request>) -> Response {
     let _guard = a.lock.lock().await;
@@ -486,11 +516,21 @@ async fn execute(a: &App, cmd: &Command) -> Result<Value> {
         "acl.grant" => {
             let x: Grant = parse(cmd.args.clone())?;
             let sid = d.principal_sid(&x.principal_id, x.group).await?;
+            let service_sid = d.service_sid().await?;
             acl::access(
                 &a.c,
                 &x.share,
                 &x.path,
-                Some((&sid, &x.mode, x.inherit, &x.revision)),
+                Some(acl::Change {
+                    sid: &sid,
+                    mode: &x.mode,
+                    inherit: x.inherit,
+                    revision: &x.revision,
+                    normalize_delete_permissions: x.normalize_delete_permissions,
+                    service_sid: &service_sid,
+                    request_id: &cmd.request_id,
+                    preview: false,
+                }),
             )
             .await
         }
@@ -559,7 +599,9 @@ async fn command(State(a): State<App>, Json(cmd): Json<Command>) -> Response {
                             json!({"request_id":cmd.request_id,"state":"succeeded","result":v})
                         }
                         Ok(Err(e)) => {
-                            json!({"request_id":cmd.request_id,"state":if e.is::<inheritance::PartialAclUpdate>() || e.is::<rename::Pending>() || rename::pending(&a.c) {"uncertain"} else {"failed"},"error":safe_error(&e),"error_code":if rename::pending(&a.c){Some("RENAME_RECOVERY_REQUIRED")}else{error_code(&e)}})
+                            let acl_pending = cmd.action == "acl.grant"
+                                && acl_policy::ensure_no_pending(&a.c).is_err();
+                            json!({"request_id":cmd.request_id,"state":if acl_pending || e.is::<inheritance::PartialAclUpdate>() || e.is::<rename::Pending>() || rename::pending(&a.c) {"uncertain"} else {"failed"},"error":safe_error(&e),"error_code":if acl_pending {Some("ACL_RECOVERY_REQUIRED")}else if rename::pending(&a.c){Some("RENAME_RECOVERY_REQUIRED")}else{error_code(&e)}})
                         }
                         Err(_) => {
                             json!({"request_id":cmd.request_id,"state":"uncertain","error":"operation timed out; inspect resource before retrying"})
@@ -654,6 +696,20 @@ fn safe_error(e: &anyhow::Error) -> String {
     }
 }
 fn error_code(e: &anyhow::Error) -> Option<&'static str> {
+    if e.is::<inheritance::PartialAclUpdate>()
+        || e.to_string().starts_with("ACL propagation recovery")
+    {
+        return Some("ACL_RECOVERY_REQUIRED");
+    }
+    if e.to_string().starts_with("ACL scope has overlapping") {
+        return Some("ACL_DELETE_CONFLICT");
+    }
+    if e.to_string().starts_with("ACL scope") {
+        return Some("ACL_POLICY_UNVERIFIED");
+    }
+    if e.to_string().starts_with("protected ACL administrator") {
+        return Some("ACL_ADMIN_PROTECTED");
+    }
     if e.is::<rename::Pending>() {
         return Some("RENAME_RECOVERY_REQUIRED");
     }
@@ -766,6 +822,7 @@ fn router(c: Config) -> Result<Router> {
     )?;
     let private = Router::new()
         .route("/v1/snapshot", get(snapshot))
+        .route("/v1/acl-preview", post(acl_preview))
         .route("/v1/rename-preview", post(rename_preview))
         .route("/v1/sessions", get(sessions))
         .route("/v1/dns/zones", get(dns_zones))

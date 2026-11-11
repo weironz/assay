@@ -1,6 +1,10 @@
 // Only fixed application messages are displayed. Protocol diagnostics never
 // become dialog content, including errors returned by an older/unknown agent.
 const messages: Record<string, string> = {
+  ACL_DELETE_CONFLICT: '其他授权仍包含删除或权限管理能力，无法保证禁删。请核对后勾选“同步收紧其他非管理授权”，或先调整冲突授权。',
+  ACL_POLICY_UNVERIFIED: '禁删策略预检查或 Samba 权限回读未通过。请核对整个目录树、acl_xattr 配置和操作记录；不要将界面选项视为已经生效。',
+  ACL_ADMIN_PROTECTED: '该账号或组是部署配置中的目录管理员，保留完全控制，不能直接改为禁删。',
+  ACL_RECOVERY_REQUIRED: '权限变更未完整完成，已保留原 ACL 备份并暂停后续权限写入。请由管理员核对恢复记录，不要重复提交。',
   RENAME_INVALID_NAME:'名称参数无效，请使用 2–48 个字符，以小写字母开头，仅包含小写字母、数字、下划线或短横线。',
   RENAME_PROTECTED:'系统共享或打印机扫描入口受到保护，不能通过此操作改名。',
   RENAME_CONFLICT:'资源或配置已被其他操作修改，请刷新后重新预检查。',

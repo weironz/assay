@@ -34,14 +34,16 @@ def target():
     return host, user, directory
 
 
-def command():
+def command(profile='default'):
+    if profile not in ('default', 'samba'):
+        raise RuntimeError('Unknown Ansible deployment profile')
     executable = shutil.which('ansible-playbook')
     if not executable:
         executable = str(ROOT / '.local-ci/tools/ansible/bin/ansible-playbook')
     if not Path(executable).is_file():
         raise RuntimeError('Install the Ansible control environment with task tools:ansible')
     return [executable, '-i', str(ROOT / 'deploy/ansible/inventory.yml'),
-            str(ROOT / 'deploy/ansible/deploy.yml')]
+            str(ROOT / ('deploy/ansible/samba.yml' if profile == 'samba' else 'deploy/ansible/deploy.yml'))]
 
 
 def environment(syntax=False):
@@ -67,7 +69,7 @@ def environment(syntax=False):
     return env
 
 
-def execute(values):
+def execute(values, profile='default'):
     target()  # Validate before even starting Ansible or making remote changes.
     with tempfile.TemporaryDirectory(prefix='assay-ansible-') as name:
         private = Path(name)
@@ -75,7 +77,8 @@ def execute(values):
         parameters = private / 'operation.json'
         parameters.write_text(json.dumps({**values, 'assay_repository': str(ROOT), 'assay_result': str(result)}))
         parameters.chmod(0o600)
-        subprocess.run([*command(), '--extra-vars', '@' + str(parameters)], cwd=ROOT,
+        invocation = command() if profile == 'default' else command(profile)
+        subprocess.run([*invocation, '--extra-vars', '@' + str(parameters)], cwd=ROOT,
                        env=environment(), check=True)
         try:
             return json.loads(result.read_text())
@@ -86,5 +89,6 @@ def execute(values):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--syntax-check', action='store_true', required=True)
-    parser.parse_args()
-    subprocess.run([*command(), '--syntax-check'], cwd=ROOT, env=environment(syntax=True), check=True)
+    parser.add_argument('--profile', choices=['default', 'samba'], default='default')
+    args = parser.parse_args()
+    subprocess.run([*command(args.profile), '--syntax-check'], cwd=ROOT, env=environment(syntax=True), check=True)

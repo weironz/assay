@@ -46,6 +46,9 @@ tasks:
   test:agent:
     desc: Check Rust formatting, clippy and Samba Agent tests
     cmds: ['python3 scripts/local-ci/run.py test-agent']
+  test:samba-acl:
+    desc: Verify no-delete and administrator exceptions on an explicitly isolated Samba test domain
+    cmds: ['{{.SAMBA_TEST_PYTHON | default "python3"}} deploy/samba-test/tests/no-delete-e2e.py']
   build:
     desc: Build the three Docker images and Linux/Windows release binaries
     cmds:
@@ -98,7 +101,9 @@ tasks:
       - .local-ci/tools/ansible/bin/python -m pip install -r deploy/ansible/requirements.txt
   deploy:check:
     desc: Check Ansible syntax without connecting to production
-    cmds: ['python3 scripts/local-ci/deployment.py --syntax-check']
+    cmds:
+      - python3 scripts/local-ci/deployment.py --syntax-check
+      - python3 scripts/local-ci/deployment.py --syntax-check --profile samba
   local:ci:
     desc: Run tests and builds on this machine
     cmds: [{task: ci}]
@@ -108,6 +113,18 @@ tasks:
   local:deploy:
     desc: Deploy locally verified and rehearsed release through Ansible
     cmds: [{task: deploy:production}]
+  samba:backup:
+    desc: Back up and verify the explicitly selected existing company file-server deployment through Ansible
+    cmds: ['python3 scripts/local-ci/company.py backup']
+  local:deploy:samba:
+    desc: Deploy verified API/Web/Agent images to an existing company stack through Ansible
+    cmds: ['python3 scripts/local-ci/company.py deploy']
+  samba:policy:
+    desc: Apply an explicit department no-delete policy and leadership access after backup and deployment
+    cmds: ['python3 scripts/local-ci/company.py policy']
+  samba:verify:
+    desc: Verify department and leadership rights with a temporary SMB identity, without employee passwords
+    cmds: ['python3 scripts/local-ci/company.py verify']
   github:ci:
     desc: Dispatch the GitHub CI route on the dedicated self-hosted runner
     env: {ASSAY_ACTION: ci}

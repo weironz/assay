@@ -129,7 +129,7 @@ Cloudflare Tunnel 接入使用独立目录 [deploy/aliyun-Cloudflare-Tunnel](dep
 
 ### GitHub 路线
 
-推送和 PR **只跑测试**。手动发版通过 `task github:publish`，在专用 `assay-release`
+当前 GitHub 工作流仅手动触发，推送和 PR 不自动执行 CI。手动发版通过 `task github:publish`，在专用 `assay-release`
 自托管 runner 上完成测试、镜像与二进制构建，推送 Docker Hub 明确版本标签并创建 GitHub Release。
 不再提供另一套直接 SSH/ACR 部署流程，也不推送 `latest`。
 

@@ -158,6 +158,10 @@ task local:publish
 
 ## 生产 Ansible 配置
 
+既有 Samba 文件服务器使用独立的 `samba:backup`、`local:deploy:samba`、`samba:policy` 入口，
+同样通过 Ansible，详见 [部门禁删与领导访问](../../docs/samba/03-目录禁删权限.md)。
+不要把阿里云 S3 工单站点的部署任务直接指向本地附件存储的公司栈。
+
 所有连接参数从环境变量读取，inventory 没有硬编码主机、账号或部署目录。
 与 Cormex 可共用主机、端口、密钥和 verified known_hosts；**`DEPLOY_DIR` 必须重新指向 Assay**，
 不能沿用 Cormex 的目录。现有 `.env`、Compose 和生产卷是部署依据，不用模板覆盖。
@@ -203,8 +207,8 @@ Ansible 在目标创建独立 `0700` 操作目录，传送脚本后按 argv 执�
 
 ## GitHub Actions 路线
 
-自动 push/PR 执行 `task check`（测试、应用镜像及整栈冒烟，不构建 CLI 发布包或发布），
-使用 GitHub 托管 runner，会消耗托管额度。
+当前工作流仅允许手动 `workflow_dispatch`，push/PR 不自动消耗 Actions 额度。
+本地可随时执行 `task check`（测试、应用镜像及整栈冒烟，不构建 CLI 发布包或发布）。
 手动 `github:*` 路线使用专用自托管 Linux x86_64 runner，标签为 **`assay-release`**，
 可在托管额度不足时继续使用，并在本地保留构建产物及敏感演练副本。
 本改动只提供工作流，不自动注册 runner，也没有在生产机器安装 runner。

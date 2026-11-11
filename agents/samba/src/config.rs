@@ -33,6 +33,9 @@ pub struct Config {
     pub external_samba_config_file: Option<PathBuf>,
     pub state_dir: PathBuf,
     pub primary_gid: u32,
+    /// Deployment-owned exceptions which retain full access in protected trees.
+    #[serde(default)]
+    pub acl_admin_sids: Vec<String>,
     // Present only for compatibility with deployments that still run a helper.
     #[serde(default)]
     pub helper_socket: Option<PathBuf>,
@@ -93,6 +96,21 @@ impl Config {
         Ok(c)
     }
     pub fn check(&self) -> Result<()> {
+        ensure!(
+            self.acl_admin_sids.len() <= 100,
+            "invalid ACL administrator list"
+        );
+        for sid in &self.acl_admin_sids {
+            use std::str::FromStr;
+            smb::security::SID::from_str(sid).map_err(anyhow::Error::msg)?;
+            ensure!(
+                sid.starts_with("S-1-5-21-")
+                    && !sid.ends_with("-513")
+                    && !sid.ends_with("-514")
+                    && !sid.ends_with("-515"),
+                "invalid ACL administrator identity"
+            );
+        }
         for name in [&self.shares_file_name, &self.samba_config_file_name] {
             ensure!(
                 !name.is_empty()

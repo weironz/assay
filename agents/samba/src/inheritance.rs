@@ -18,25 +18,25 @@ impl std::fmt::Display for PartialAclUpdate {
 }
 impl std::error::Error for PartialAclUpdate {}
 pub struct Node {
-    path: String,
+    pub(crate) path: String,
     parent: String,
-    directory: bool,
-    revision: String,
+    pub(crate) directory: bool,
+    pub(crate) revision: String,
 }
-fn info() -> AdditionalInfo {
+pub(crate) fn info() -> AdditionalInfo {
     AdditionalInfo::new()
         .with_owner_security_information(true)
         .with_group_security_information(true)
         .with_dacl_security_information(true)
 }
-fn handle(r: &Resource) -> &smb::ResourceHandle {
+pub(crate) fn handle(r: &Resource) -> &smb::ResourceHandle {
     match r {
         Resource::Directory(d) => d.handle(),
         Resource::File(f) => f.handle(),
         _ => unreachable!("no pipe paths in managed shares"),
     }
 }
-fn append(base: &UncPath, relative: &str) -> UncPath {
+pub(crate) fn append(base: &UncPath, relative: &str) -> UncPath {
     if relative.is_empty() {
         base.clone()
     } else {
@@ -44,6 +44,16 @@ fn append(base: &UncPath, relative: &str) -> UncPath {
     }
 }
 pub async fn prepare(client: &Client, base: &UncPath) -> Result<Vec<Node>> {
+    prepare_scope(client, base, false).await
+}
+pub async fn prepare_all(client: &Client, base: &UncPath) -> Result<Vec<Node>> {
+    prepare_scope(client, base, true).await
+}
+async fn prepare_scope(
+    client: &Client,
+    base: &UncPath,
+    include_protected: bool,
+) -> Result<Vec<Node>> {
     let mut stack = vec![String::new()];
     let mut nodes = vec![];
     while let Some(parent) = stack.pop() {
@@ -92,7 +102,7 @@ pub async fn prepare(client: &Client, base: &UncPath) -> Result<Vec<Node>> {
             let sd = handle(&child).query_security_info(info()).await?;
             handle(&child).close().await?;
             ensure!(sd.dacl.is_some(), "null ACL requires manual review");
-            if sd.control.dacl_protected() {
+            if sd.control.dacl_protected() && !include_protected {
                 continue;
             }
             let directory = entry.file_attributes.directory();

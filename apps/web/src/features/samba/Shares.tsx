@@ -12,13 +12,7 @@ import {
   primary,
 } from './components';
 import { employeeLabel, type Acl, type Share, type Workspace } from './types';
-
-const permissions = [
-  { value: 'read', label: '读取' },
-  { value: 'modify', label: '修改（读写删除）' },
-  { value: 'full', label: '完全控制（含权限管理）' },
-  { value: 'remove', label: '移除直接授权' },
-];
+import { aclPermissionLabel, aclPermissionOptions } from './acl-permissions';
 
 /** Settings changes use the same authorization, command queue and audit as other writes. */
 function RecycleSettings({ canWrite, confirm }: { canWrite: boolean; confirm: Workspace['confirm'] }) {
@@ -280,6 +274,7 @@ export function Shares({
     .filter((u) => u.manageable !== false)
     .map((u) => ({ value: u.id, label: employeeLabel(u) }));
   const principalName = (sid?: string) =>
+    ({ 'S-1-1-0': '所有人（Everyone）', 'S-1-3-4': '文件所有者权限保护', 'S-1-5-18': 'SYSTEM', 'S-1-5-32-544': 'Administrators' } as Record<string, string>)[sid || ''] ||
     snapshot.groups.find((g) => g.sid === sid)?.name ||
     snapshot.users.find((u) => u.sid === sid)?.displayName ||
     sid ||
@@ -373,11 +368,10 @@ export function Shares({
           name: 'mode',
           label: '访问权限',
           type: 'select',
-          options: isGroup
-            ? permissions
-            : permissions.filter((p) => p.value !== 'full'),
+          options: aclPermissionOptions(isGroup, path),
         },
         { name: 'inherit', label: '应用到子目录与文件', type: 'checkbox' },
+        { name: 'normalize_delete_permissions', label: '禁删模式：同时收紧其他非管理授权，防止权限叠加（含独立权限的子目录）', type: 'checkbox' },
       ],
       values: {
         share: share?.name,
@@ -386,6 +380,7 @@ export function Shares({
         group: isGroup,
         mode: 'read',
         inherit: true,
+        normalize_delete_permissions: true,
         revision: acl.revision,
       },
     });
@@ -656,6 +651,9 @@ export function Shares({
                 <p className="mt-2 text-sm text-gray-500">
                   继承权限来自上级目录。移除直接授权后，其他组或继承权限仍可能生效。
                 </p>
+                <p className="mt-2 text-sm text-gray-500">
+                  “读写（禁止删除）”从共享根目录校验整个目录树，并保护所有者权限。勾选同步收紧后，其他非管理授权也会失去删除和权限管理能力；Agent 配置的目录管理员保留完全控制。可能影响重命名、移动和部分 Office 保存；不阻止覆盖或清空文件内容。
+                </p>
                 {acl && (
                   <div className="mt-3 flex flex-wrap gap-3">
                     <Badge muted>
@@ -715,16 +713,7 @@ export function Shares({
                     },
                     {
                       label: '权限',
-                      render: (a) =>
-                        a.mask === 0x1f01ff
-                          ? '完全控制'
-                          : a.mask === 0x1301bf
-                            ? '修改'
-                            : a.mask === 0x1200a9
-                              ? '读取'
-                              : a.mask !== undefined
-                                ? `0x${a.mask.toString(16)}`
-                                : a.details,
+                      render: (a) => aclPermissionLabel(a.mask) || a.details,
                     },
                     {
                       label: '应用范围',

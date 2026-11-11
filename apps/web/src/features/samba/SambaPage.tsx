@@ -174,6 +174,10 @@ export default function SambaPage() {
     event.preventDefault();
     if (!editor) return;
     const args = { ...editor.values };
+    if (editor.action === 'acl.grant' && args.mode === 'write_no_delete' && (!args.inherit || args.path !== '')) {
+      setEditor({ ...editor, error: '禁删模式需从共享根目录应用到全部现有子目录与文件。' });
+      return;
+    }
     if (editor.action === 'group.create') {
       const prefix = snapshot?.groupPrefix || '';
       const value = typeof args.name === 'string' ? args.name : '';
