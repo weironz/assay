@@ -24,7 +24,7 @@ def published_runtime(ci, host, directory):
     identity={k:manifest[k] for k in ('commit','sourceSha256','version')}
     if identity['version']!=ci.version or any(any(v.get(k)!=value for k,value in identity.items()) for v in values.values()):
         raise RuntimeError('Installed release provenance does not match')
-    changed=subprocess.check_output(['git','diff','--name-only','-z','--no-renames',manifest['commit'],'HEAD'],text=True).strip('\0').split('\0')
+    changed=[n for n in subprocess.check_output(['git','diff','--name-only','-z','--no-renames',manifest['commit'],'HEAD'],text=True).split('\0') if n]
     if any(not (n in ('Taskfile.yml','README.md') or n.startswith(('scripts/local-ci/','deploy/ansible/','deploy/samba-production/','docs/'))) for n in changed):
         raise RuntimeError('Application source changed; use the full release/deployment pipeline')
     release=values['release'];verified=values['verified'];upgrade=values['upgrade']

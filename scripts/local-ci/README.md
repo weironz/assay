@@ -142,6 +142,12 @@ GitHub 令牌仅传给相应 GitHub CLI 子进程；SSH 密码、GitHub 和 Dock
 Docker 登录使用临时 `0700` 目录和 `--password-stdin`，保留客户端代理设置，成功或失败退出均清理，
 不覆盖机器上原来的 Docker 登录。
 
+云端 Docker 若使用 VFS，构建阶段和测试容器会复制较大的文件树，`docker system df` 的
+缓存计数可能低于实际磁盘占用。先检查 `df -h`、`docker system df`，开发机预留至少
+12GB；阶段间磁盘紧张时，可在无镜像构建运行时执行 `docker builder prune -a --force`
+清理未使用的 BuildKit 缓存，保留已生成镜像和校验记录。旧测试容器及生成的依赖缓存可
+按明确名称清理；不要对生产卷、私有备份、NetBird 状态或全部 Docker 卷做无差别清理。
+
 ```bash
 export DOCKERHUB_USERNAME=willdockerhub
 export LOCAL_CI_STATE_DIR=/private/assay-ci

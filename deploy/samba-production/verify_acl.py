@@ -52,6 +52,13 @@ def main(parameters):
     try:
         db.newuser(name,password,description='Assay temporary SMB permission acceptance; remove after test')
         guid=bytes(find(name)['objectGUID'][0])
+        for share in departments:
+            try:connect(share)
+            except NTSTATUSError as error:
+                # A hidden share may conceal admission denial as BAD_NETWORK_NAME.
+                # Later successful department probes prove these shares exist.
+                assert error.args[0]&0xffffffff in (0xc0000022,0xc00000cc)
+            else:raise AssertionError('Unassigned employee was admitted to a department share')
         for group_name in parameters['departmentGroups']:db.add_remove_group_members(group_name,[name],add_members_operation=True)
         for share in departments:
             c=connect(share);c.mkdir(prefix);created.append(share)
@@ -93,7 +100,7 @@ def main(parameters):
             assert not db.search(base=base,expression='(sAMAccountName='+name+')',attrs=['objectGUID'])
             assert {str(n).lower() for n in find(leadership).get('member',[])}==expected
     assert not created,'Probe file cleanup incomplete'
-    return {'passed':True,'shares':report,'temporaryIdentityRemoved':True,'leadershipMembersUnchanged':True,'existingEmployeePasswordsUsed':False}
+    return {'passed':True,'shares':report,'unauthorizedSharesDenied':True,'temporaryIdentityRemoved':True,'leadershipMembersUnchanged':True,'existingEmployeePasswordsUsed':False}
 
 
 if __name__=='__main__':

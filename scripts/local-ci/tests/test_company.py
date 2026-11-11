@@ -47,6 +47,8 @@ class CompanySafety(unittest.TestCase):
             manifest={**identity,'images':images,'assets':{},'verification':verified}
             (state/'dist/release-manifest.json').write_text(json.dumps(manifest))
             ci=SimpleNamespace(state=state,version='1.0.0',receipt=lambda _:None)
+            with patch.object(company.subprocess,'check_output',return_value=''):
+                self.assertEqual(company.published_runtime(ci,'host','/data/assay')['artifactSourceCommit'],'original')
             with patch.object(company.subprocess,'check_output',return_value='docs/runbook.md\0'):
                 self.assertEqual(company.published_runtime(ci,'host','/data/assay')['releaseImageIds'],ids)
                 with self.assertRaisesRegex(RuntimeError,'another target'):company.published_runtime(ci,'wrong','/data/assay')
