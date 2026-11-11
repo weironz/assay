@@ -175,6 +175,15 @@ task local:publish
 执行 `task test:deployment` 和 `task samba:resume`，核对真实运行状态后恢复当前运行证明。
 该入口不重放原部署，也不手动修改历史校验记录；具体校验边界见上述 Samba 文档。
 
+若升级后 Agent 报 `managed config changed outside Agent`，不要跳过漂移保护或直接覆盖生成文件。
+先执行当前运维源码的 `test:deployment`、`samba:runtime`，再设置
+`SAMBA_RECONCILE_PREVIEW_GROUP` 为现有自定义组名并运行 `task samba:reconcile`。
+该入口仅处理已验证备份中相同的旧生成模板缺少 `recycle:touch_mtime = yes` 的情形，
+由已安装 Agent 的完整改名预检确认候选与 Rust 渲染一致后热加载；不执行改名或文件 ACL 写入。
+这会让今后进入该共享回收站的文件使用回收时间作为 mtime，不改现有文件内容、所有权或权限。
+Web 会短暂维护，AD 不重启。其他漂移拒绝处理，验证失败恢复原文件；结果登记在
+`company-reconciled.json`，原 CI、发布和部署凭证保持原来源提交。
+
 备份与编译需要并行时，备份须使用独立 `LOCAL_CI_STATE_DIR`，避免共用状态锁；
 升级演练必须等待两者完成。设置 `SAMBA_BACKUP_RECEIPT` 指向该备份状态目录中的
 `VERSION/company-backup.json` 后运行 `samba:backup:verify`，会在服务器重新验证完整备份、

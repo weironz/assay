@@ -131,6 +131,9 @@ tasks:
   samba:resume:
     desc: Recover a completed remote deployment after controller disconnect and revalidate its runtime without redeploying
     cmds: ['python3 scripts/local-ci/company.py resume']
+  samba:reconcile:
+    desc: Migrate a verified legacy generated share template and validate it with the installed Agent without file ACL or AD writes
+    cmds: ['python3 scripts/local-ci/company.py reconcile']
   samba:verify:
     desc: Verify department and leadership rights with a temporary SMB identity, without employee passwords
     cmds: ['python3 scripts/local-ci/company.py verify']

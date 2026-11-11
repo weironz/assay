@@ -86,12 +86,16 @@ def run(action):
             if prior.parent!=Path(directory)/'rollback' or not re.fullmatch(r'task-deploy-\d{8}T\d{6}Z-[a-f0-9]{6}',prior.name):
                 raise RuntimeError('Select the exact original deployment operation under this target rollback directory')
             parameters['resumeOperation']=str(prior)
-    elif action in ('policy','verify'):
+    elif action in ('policy','verify','reconcile'):
         runtime=ci.receipt('company-runtime')
         if runtime['host']!=host or runtime['directory']!=directory or not runtime['proof'].get('runtimeHealthy'):
             raise RuntimeError('Recheck the selected installed release before policy maintenance')
         proof=runtime['proof']
         parameters.update(backup=proof['backup'],sourceImageIds=proof['sourceImageIds'],deployedImageIds=proof['runtimeImageIds'])
+        if action=='reconcile':
+            group=os.environ['SAMBA_RECONCILE_PREVIEW_GROUP']
+            if not re.fullmatch(r'[a-z][a-z0-9_-]{1,47}',group):raise RuntimeError('Select an existing custom group for read-only rename validation')
+            parameters['previewGroup']=group
     elif action != 'backup':
         # A recheck explicitly revalidates an existing data backup after tooling
         # changes. It never reuses stale test/build/publish/deployment receipts.
@@ -176,12 +180,12 @@ def run(action):
                 raise RuntimeError('Private company rehearsal download checksum mismatch')
             (folder/name).chmod(0o600)
         subprocess.run(['docker','load','-i',str(folder/'source-images.tar.gz')],check=True,env=ci.env)
-    ci.mark({'backup':'company-backup','recheck':'company-backup','deploy':'company-deployed','runtime':'company-runtime','resume':'company-runtime','policy':'company-policy','verify':'company-verified'}[action],host=host,directory=directory,proof=proof)
+    ci.mark({'backup':'company-backup','recheck':'company-backup','deploy':'company-deployed','runtime':'company-runtime','resume':'company-runtime','policy':'company-policy','verify':'company-verified','reconcile':'company-reconciled'}[action],host=host,directory=directory,proof=proof)
     print(json.dumps(proof,ensure_ascii=False))
 
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['backup','recheck','deploy','runtime','resume','policy','verify'])
+    parser.add_argument('action',choices=['backup','recheck','deploy','runtime','resume','policy','verify','reconcile'])
     args=parser.parse_args()
     run(args.action)
