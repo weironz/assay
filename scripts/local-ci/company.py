@@ -64,7 +64,7 @@ def run(action):
                     raise RuntimeError('Offline image differs from the verified release')
             bundle = str(ci.state / 'company-images.tar.gz')
             saved = subprocess.Popen(['docker','save',*references],stdout=subprocess.PIPE,env=ci.env)
-            with gzip.open(bundle,'wb',compresslevel=1) as stream:
+            with gzip.open(bundle,'wb',compresslevel=6) as stream:
                 shutil.copyfileobj(saved.stdout,stream)
             saved.stdout.close()
             if saved.wait(): raise RuntimeError('Company image export failed')

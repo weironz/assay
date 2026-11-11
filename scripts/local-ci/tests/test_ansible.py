@@ -22,7 +22,10 @@ class DeploymentSafety(unittest.TestCase):
         self.known = self.root / 'known hosts'
         self.known.touch()
         self.env = {'DEPLOY_HOST': 'example.invalid', 'DEPLOY_USER': 'deploy',
-                    'DEPLOY_DIR': '/srv/assay', 'DEPLOY_KNOWN_HOSTS': str(self.known)}
+                    'DEPLOY_DIR': '/srv/assay', 'DEPLOY_KNOWN_HOSTS': str(self.known),
+                    'DEPLOY_BECOME': 'false', 'DEPLOY_OFFLINE': 'false', 'DEPLOY_PORT': '22',
+                    'DEPLOY_SSH_KEY': '', 'DEPLOY_SSH_CONFIG': '', 'DEPLOY_PASSWORD': '',
+                    'DEPLOY_BECOME_PASSWORD': ''}
 
     def test_missing_or_unsafe_target_fails_before_any_connection(self):
         for change in ({'DEPLOY_HOST': ''}, {'DEPLOY_DIR': '/'}, {'DEPLOY_DIR': '/srv/../cormex'},
