@@ -158,8 +158,11 @@ task local:publish
 
 ## 生产 Ansible 配置
 
-既有 Samba 文件服务器使用独立的 `samba:backup`、`local:deploy:samba`、`samba:policy` 入口，
+既有 Samba 文件服务器使用独立的 `samba:backup`、`local:deploy:samba`、`samba:runtime`、`samba:policy` 入口，
 同样通过 Ansible，详见 [部门禁删与领导访问](../../docs/samba/03-目录禁删权限.md)。
+部署后先用 `samba:runtime` 核对已发布程序和备份，再做策略维护。仅变更运维工具时，
+提交并执行 `test:deployment` 后可重新登记运行证明；应用源码变化必须走完整新发布。
+新运维源码与原发布源码分别记录，原 CI/发布/部署记录保持不变。
 不要把阿里云 S3 工单站点的部署任务直接指向本地附件存储的公司栈。
 
 所有连接参数从环境变量读取，inventory 没有硬编码主机、账号或部署目录。

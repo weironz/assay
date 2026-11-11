@@ -125,6 +125,9 @@ tasks:
   samba:policy:
     desc: Apply an explicit department no-delete policy and leadership access after backup and deployment
     cmds: ['python3 scripts/local-ci/company.py policy']
+  samba:runtime:
+    desc: Revalidate installed published images and backup before post-release permissions maintenance
+    cmds: ['python3 scripts/local-ci/company.py runtime']
   samba:verify:
     desc: Verify department and leadership rights with a temporary SMB identity, without employee passwords
     cmds: ['python3 scripts/local-ci/company.py verify']

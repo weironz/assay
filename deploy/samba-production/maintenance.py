@@ -66,6 +66,17 @@ def maintenance_admission(candidate, names, service):
     return ''.join(sections).encode()
 
 
+def overlay_policy(config, overlay, names, domain, group):
+    """Preserve stable share IDs/aliases while updating the effective override."""
+    extra=json.loads(config)
+    for row in extra.get('external',[]):
+        if row['name'] in names:row['groups']=list(dict.fromkeys(row['groups']+[group]))
+    sections={s.strip() for s in re.findall(r'(?m)^\s*\[([^\]]+)\]\s*$',overlay.decode())}
+    selected=[n for n in names if n in sections]
+    candidate=policy_config(overlay,selected,domain,group) if selected else overlay
+    return extra,candidate,selected
+
+
 def content_identity(root):
     rows={}
     for path in sorted(root.rglob('*')):
@@ -229,6 +240,25 @@ class Company:
     @staticmethod
     def inspect_image(name):return json.loads(run('docker','image','inspect',name))[0]
 
+    def runtime(self):
+        assert self.image_ids()==self.p['deployedImageIds'],'Published runtime changed before maintenance'
+        for name in ('api','web'):
+            assert self.items[name]['State']['Health']['Status']=='healthy'
+        assert self.items['agent']['State']['Running'] and self.ad['State']['Running']
+        backup=Path(self.p['backup']).resolve(strict=True)
+        assert backup.parent==(self.root.parent/'assay-backups').resolve()
+        restored=json.loads((backup/'RESTORE_VERIFIED.json').read_text())
+        assert restored['ad_dbcheck'] and restored['database_tables']>0
+        complete=json.loads((backup/'BACKUP_COMPLETE.json').read_text())
+        for label,expected in complete['trees'].items():assert snapshots.fingerprint(backup/label)==expected
+        checks=json.loads((backup/'rehearsal/SHA256.json').read_text())
+        for name,digest in checks.items():
+            assert name in ('db.sql.gz','objects.tar.gz','objects-manifest.json','backup-info.txt','source.json','source-images.tar.gz')
+            assert hashlib.file_digest((backup/'rehearsal'/name).open('rb'),'sha256').hexdigest()==digest
+        self.agent('/v1/snapshot')
+        return {'runtimeImageIds':self.image_ids(),'imageIds':self.p['releaseImageIds'],'artifactSourceCommit':self.p['artifactSourceCommit'],
+            'backup':str(backup),'sourceImageIds':self.p['sourceImageIds'],'restoreVerified':True,'rehearsalChecksums':checks,'runtimeHealthy':True}
+
     def recheck(self):
         backup=Path(self.p['backup']).resolve(strict=True)
         assert backup.parent==(self.root.parent/'assay-backups').resolve()
@@ -272,25 +302,47 @@ class Company:
         source=self.ad_root/self.settings.get('ad_etc_relative','etc')/relative
         original=source.read_bytes();assert hashlib.sha256(original).hexdigest()==inventory['config_sha256']
         files=[agent_path,external,source]
-        private(self.operation/'policy-files.json',[{'path':str(p),'uid':p.stat().st_uid,'gid':p.stat().st_gid,'mode':stat.S_IMODE(p.stat().st_mode),'bytes':list(p.read_bytes())} for p in files])
+        config_dir=Path(agent['config_dir'])
+        mount=next(m for m in sorted(self.items['agent']['Mounts'],key=lambda m:len(m['Destination']),reverse=True) if config_dir.is_relative_to(m['Destination']))
+        managed=Path(mount['Source'])/config_dir.relative_to(mount['Destination'])
+        state_dir=Path(agent['state_dir'])
+        state_mount=next(m for m in sorted(self.items['agent']['Mounts'],key=lambda m:len(m['Destination']),reverse=True) if state_dir.is_relative_to(m['Destination']))
+        state=Path(state_mount['Source'])/state_dir.relative_to(state_mount['Destination'])
+        assert not (state/'rename-pending.json').exists(),'Resolve pending rename before ACL maintenance'
+        extra_path=managed/'rename-catalog.json';overlay_path=managed/'external-renamed.conf'
+        extra_value=None;overlay_full=None;overlay_selected=[]
         domain=agent['smb_username'].split('\\')[0]
+        if extra_path.exists():
+            assert overlay_path.is_file(),'Existing rename catalog has no effective configuration'
+            extra_value,overlay_full,overlay_selected=overlay_policy(extra_path.read_bytes(),overlay_path.read_bytes(),names,domain,group_name)
+            files.extend([extra_path,overlay_path])
+        private(self.operation/'policy-files.json',[{'path':str(p),'uid':p.stat().st_uid,'gid':p.stat().st_gid,'mode':stat.S_IMODE(p.stat().st_mode),'bytes':list(p.read_bytes())} for p in files])
         candidate=policy_config(original,names,domain,group_name)
         # Validate the full candidate with the real AD image, isolated from its
         # live configuration and without networking or daemon startup.
         copied=self.operation/'validation-etc';snapshots.clone(self.ad_root/self.settings.get('ad_etc_relative','etc'),copied)
-        (copied/relative).write_bytes(candidate)
-        run('docker','run','--rm','--network','none','--entrypoint','testparm','--mount',f'type=bind,src={copied},dst=/etc/samba,readonly',self.ad['Image'],'-s','--suppress-prompt')
+        copied_managed=self.operation/'validation-managed';snapshots.clone(managed,copied_managed)
+        managed_target=agent.get('rename',{}).get('samba_managed_dir','/managed')
+        def validate(content, overlay):
+            (copied/relative).write_bytes(content)
+            if overlay is not None:(copied_managed/'external-renamed.conf').write_bytes(overlay)
+            run('docker','run','--rm','--network','none','--entrypoint','testparm','--mount',f'type=bind,src={copied},dst=/etc/samba,readonly',
+                '--mount',f'type=bind,src={copied_managed},dst={managed_target},readonly',self.ad['Image'],'-s','--suppress-prompt')
+        validate(candidate,overlay_full)
         for row in inventory['shares']:
             if row['name'] in names:row['groups']=list(dict.fromkeys(row['groups']+[group_name]))
         inventory['config_sha256']=hashlib.sha256(candidate).hexdigest()
         agent['acl_admin_sids']=list(dict.fromkeys(agent.get('acl_admin_sids',[])+[group['sid']]))
         blocked=maintenance_admission(candidate,names,agent['smb_username'])
-        (copied/relative).write_bytes(blocked)
-        run('docker','run','--rm','--network','none','--entrypoint','testparm','--mount',f'type=bind,src={copied},dst=/etc/samba,readonly',self.ad['Image'],'-s','--suppress-prompt')
+        overlay_blocked=maintenance_admission(overlay_full,overlay_selected,agent['smb_username']) if overlay_full is not None else None
+        validate(blocked,overlay_blocked)
         run(*self.compose,'stop','web')
-        def activate(content):
+        def activate(content,overlay):
             inventory['config_sha256']=hashlib.sha256(content).hexdigest()
             replace(source,content);replace(external,(json.dumps(inventory,indent=2)+'\n').encode());replace(agent_path,(json.dumps(agent,indent=2)+'\n').encode())
+            if extra_value is not None:
+                replace(extra_path,(json.dumps(extra_value,indent=2)+'\n').encode())
+                replace(overlay_path,overlay)
             run('docker','exec',self.ad['Id'],'testparm','-s','--suppress-prompt')
             run('docker','exec',self.ad['Id'],'smbcontrol','all','reload-config')
             run(*self.compose,'up','-d','--no-deps','--force-recreate','--pull','never','agent')
@@ -303,7 +355,7 @@ class Company:
             # Freeze only new employee connections to the selected shares while
             # reviewing/applying ACLs. Common/scanning remain available. The
             # service identity stays admitted for the actual SMB ACL writes.
-            activate(blocked)
+            activate(blocked,overlay_blocked)
             status=json.loads(run('docker','exec',self.ad['Id'],'smbstatus','--json'));assert not status.get('open_files'),'A document opened during policy preparation; stop before closing any share'
             for name in names:run('docker','exec',self.ad['Id'],'smbcontrol','smbd','close-share',name)
             roots={name:self.ad_root/self.settings.get('shares_relative','shares')/(shares[name].get('path') or name) for name in names}
@@ -327,8 +379,8 @@ class Company:
             private(self.operation/'content-after.json',after)
             assert after==identities,'Department contents or file ownership changed during policy application'
         finally:
-            activate(candidate)
-            run(*self.compose,'start','web')
+            try:activate(candidate,overlay_full)
+            finally:run(*self.compose,'start','web')
         return {'departments':names,'leaders':leaders,'leadershipGroup':group_name,'aclBackups':{n:r['backupId'] for n,r in applied.items()},'allPreviewsPassed':True,'configurationValidated':True,'fileContentsAndOwnershipPreserved':True,'sambaRestarted':False,'excludedShares':['common','scan','test','sysvol','netlogon']}
 
     def verify(self):
@@ -350,7 +402,7 @@ def main():
     parameters=json.loads(Path(sys.argv[1]).read_text())
     lock=Path('/run/lock/assay-company-maintenance.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     company=Company(parameters)
-    action=parameters['action'];assert action in ('backup','recheck','deploy','policy','verify')
+    action=parameters['action'];assert action in ('backup','recheck','deploy','runtime','policy','verify')
     result=getattr(company,action)()
     result.update(action=action,directory=str(company.root),version=parameters['version'],completed=True)
     private(company.operation/'result.json',result)
