@@ -259,6 +259,25 @@ class Company:
         return {'runtimeImageIds':self.image_ids(),'imageIds':self.p['releaseImageIds'],'artifactSourceCommit':self.p['artifactSourceCommit'],
             'backup':str(backup),'sourceImageIds':self.p['sourceImageIds'],'restoreVerified':True,'rehearsalChecksums':checks,'runtimeHealthy':True}
 
+    def resume(self):
+        """Collect a completed remote deployment; never replay its mutations."""
+        prior=Path(self.p['resumeOperation']).resolve(strict=True)
+        assert prior.parent==self.root/'rollback' and re.fullmatch(r'task-deploy-\d{8}T\d{6}Z-[a-f0-9]{6}',prior.name)
+        old=json.loads((prior/'parameters.json').read_text())
+        assert old['action']=='deploy' and old['directory']==str(self.root) and old['version']==self.p['version']
+        for key in ('backup','sourceImageIds','images'):assert old[key]==self.p[key],'Original deployment parameters differ'
+        assert (prior/'result.json').is_file(),'Original deployment has not completed successfully; inspect its asynchronous job before retrying'
+        proof=json.loads((prior/'result.json').read_text())
+        assert proof['completed'] and proof['action']=='deploy' and proof['directory']==str(self.root) and proof['version']==self.p['version']
+        assert proof['backup']==self.p['backup'] and proof['imageIds']==self.p['releaseImageIds']
+        assert proof['dataPreserved'] and proof['localAttachmentsPreserved'] and proof['sambaUnchanged'],'Original deployment lacks preservation proof'
+        ids=proof['runtimeImageIds']
+        assert set(ids)==set(self.p['images']) and all(ids[k] in (v['imageId'],v['digest']) for k,v in self.p['images'].items())
+        self.p['deployedImageIds']=ids
+        result=self.runtime()
+        result.update(recoveredDeploymentOperation=str(prior),deploymentDataPreserved=True)
+        return result
+
     def recheck(self):
         backup=Path(self.p['backup']).resolve(strict=True)
         assert backup.parent==(self.root.parent/'assay-backups').resolve()
@@ -406,7 +425,7 @@ def main():
     parameters=json.loads(Path(sys.argv[1]).read_text())
     lock=Path('/run/lock/assay-company-maintenance.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     company=Company(parameters)
-    action=parameters['action'];assert action in ('backup','recheck','deploy','runtime','policy','verify')
+    action=parameters['action'];assert action in ('backup','recheck','deploy','runtime','resume','policy','verify')
     result=getattr(company,action)()
     result.update(action=action,directory=str(company.root),version=parameters['version'],completed=True)
     private(company.operation/'result.json',result)

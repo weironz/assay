@@ -51,12 +51,42 @@ class CompanySafety(unittest.TestCase):
                 self.assertEqual(company.published_runtime(ci,'host','/data/assay')['artifactSourceCommit'],'original')
             with patch.object(company.subprocess,'check_output',return_value='docs/runbook.md\0'):
                 self.assertEqual(company.published_runtime(ci,'host','/data/assay')['releaseImageIds'],ids)
+                (state/'company-deployed.json').unlink()
+                recovered=company.published_runtime(ci,'host','/data/assay',recovering=True)
+                self.assertEqual(recovered['images'],images)
+                self.assertNotIn('deployedImageIds',recovered)
+                (state/'company-deployed.json').write_text(json.dumps(deployed))
                 with self.assertRaisesRegex(RuntimeError,'another target'):company.published_runtime(ci,'wrong','/data/assay')
                 deployed['proof']['imageIds']={'api':'wrong'}
                 (state/'company-deployed.json').write_text(json.dumps(deployed))
                 with self.assertRaisesRegex(RuntimeError,'preservation proof'):company.published_runtime(ci,'host','/data/assay')
             with patch.object(company.subprocess,'check_output',return_value='agents/samba/src/main.rs\0'):
                 with self.assertRaisesRegex(RuntimeError,'Application source changed'):company.published_runtime(ci,'host','/data/assay')
+
+    def test_controller_recovery_requires_matching_completed_remote_proof(self):
+        with tempfile.TemporaryDirectory() as directory:
+            c=object.__new__(maintenance.Company);c.root=Path(directory)
+            prior=c.root/'rollback/task-deploy-20261111T100401Z-abcdef';prior.mkdir(parents=True)
+            images={k:{'imageId':'config-'+k,'digest':'manifest-'+k} for k in ('api','web','samba-agent')}
+            ids={k:v['imageId'] for k,v in images.items()};live={k:v['digest'] for k,v in images.items()}
+            old=dict(action='deploy',directory=str(c.root),version='1.0.0',backup='/backup',sourceImageIds={'api':'old'},images=images)
+            proof=dict(action='deploy',directory=str(c.root),version='1.0.0',backup='/backup',imageIds=ids,runtimeImageIds=live,completed=True,dataPreserved=True,localAttachmentsPreserved=True,sambaUnchanged=True)
+            (prior/'parameters.json').write_text(json.dumps(old))
+            c.p={**old,'resumeOperation':str(prior),'releaseImageIds':ids}
+            with patch.object(c,'runtime',return_value={'runtimeHealthy':True}) as checked:
+                with self.assertRaisesRegex(AssertionError,'not completed'):c.resume()
+                checked.assert_not_called()
+                for change in ({'dataPreserved':False},{'runtimeImageIds':{'api':'wrong'}},{'version':'wrong'},{'backup':'/wrong'},{'completed':False}):
+                    (prior/'result.json').write_text(json.dumps({**proof,**change}))
+                    with self.assertRaises(AssertionError):c.resume()
+                    checked.assert_not_called()
+                (prior/'result.json').write_text(json.dumps(proof))
+                result=c.resume()
+                self.assertTrue(result['deploymentDataPreserved'])
+                self.assertEqual(c.p['deployedImageIds'],live)
+                checked.assert_called_once()
+                c.p['images']={**images,'unapproved':{}}
+                with self.assertRaisesRegex(AssertionError,'parameters differ'):c.resume()
 
     def test_candidate_only_changes_selected_share_and_reapplication_is_idempotent(self):
         original=b'[common]\n valid users = @EXAMPLE\\common\n vfs objects = recycle\n[finance]\n valid users = @EXAMPLE\\finance\n path = /shares/finance\n vfs objects = recycle\n[scan]\n valid users = @EXAMPLE\\scan\n path = /shares/common/scans\n'

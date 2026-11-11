@@ -128,6 +128,9 @@ tasks:
   samba:runtime:
     desc: Revalidate installed published images and backup before post-release permissions maintenance
     cmds: ['python3 scripts/local-ci/company.py runtime']
+  samba:resume:
+    desc: Recover a completed remote deployment after controller disconnect and revalidate its runtime without redeploying
+    cmds: ['python3 scripts/local-ci/company.py resume']
   samba:verify:
     desc: Verify department and leadership rights with a temporary SMB identity, without employee passwords
     cmds: ['python3 scripts/local-ci/company.py verify']

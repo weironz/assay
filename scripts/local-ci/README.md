@@ -169,6 +169,10 @@ task local:publish
 部署后先用 `samba:runtime` 核对已发布程序和备份，再做策略维护。仅变更运维工具时，
 提交并执行 `test:deployment` 后可重新登记运行证明；应用源码变化必须走完整新发布。
 新运维源码与原发布源码分别记录，原 CI/发布/部署记录保持不变。
+控制端断线时，远端异步任务可能继续运行；先核对原操作，不直接重新部署。
+原任务成功后，通过 `SAMBA_RESUME_OPERATION` 指定原 rollback/task-deploy 目录，
+执行 `task test:deployment` 和 `task samba:resume`，核对真实运行状态后恢复当前运行证明。
+该入口不重放原部署，也不手动修改历史校验记录；具体校验边界见上述 Samba 文档。
 不要把阿里云 S3 工单站点的部署任务直接指向本地附件存储的公司栈。
 
 所有连接参数从环境变量读取，inventory 没有硬编码主机、账号或部署目录。

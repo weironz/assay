@@ -16,10 +16,11 @@ import deployment
 from run import Pipeline, clean_source, sha256
 
 
-def published_runtime(ci, host, directory):
+def published_runtime(ci, host, directory, recovering=False):
     """Qualify the immutable installed release separately from current ops code."""
     ci.receipt('test-deployment')
-    values={name:json.loads((ci.state/(name+'.json')).read_text()) for name in ('release','verified','upgrade','company-backup','company-deployed')}
+    required=('release','verified','upgrade','company-backup')+(() if recovering else ('company-deployed',))
+    values={name:json.loads((ci.state/(name+'.json')).read_text()) for name in required}
     manifest=json.loads((ci.state/'dist/release-manifest.json').read_text())
     identity={k:manifest[k] for k in ('commit','sourceSha256','version')}
     if identity['version']!=ci.version or any(any(v.get(k)!=value for k,value in identity.items()) for v in values.values()):
@@ -35,16 +36,22 @@ def published_runtime(ci, host, directory):
         raise RuntimeError('Published release lacks matching upgrade verification')
     if manifest['assets']!=verified['assets'] or any(sha256(ci.state/'dist'/n)!=v for n,v in manifest['assets'].items()):
         raise RuntimeError('Published binary checksums differ')
-    for key in ('company-backup','company-deployed'):
+    for key in ('company-backup',)+(() if recovering else ('company-deployed',)):
         row=values[key]
         if row['host']!=host or row['directory']!=directory or not row['proof'].get('completed'):
             raise RuntimeError('Installed release proof belongs to another target')
-    backup=values['company-backup']['proof'];deployed=values['company-deployed']['proof']
-    if not backup.get('restoreVerified') or not deployed.get('dataPreserved') or not deployed.get('localAttachmentsPreserved') or deployed['backup']!=backup['backup'] or deployed['imageIds']!=images:
+    backup=values['company-backup']['proof']
+    if not backup.get('restoreVerified'):
+        raise RuntimeError('Installed release lacks a verified backup')
+    deployed={} if recovering else values['company-deployed']['proof']
+    if not recovering and (not deployed.get('dataPreserved') or not deployed.get('localAttachmentsPreserved') or deployed['backup']!=backup['backup'] or deployed['imageIds']!=images):
         raise RuntimeError('Installed release lacks preservation proof')
     if upgrade['sourceImages']!={k:backup['imageIds'][k] for k in ('api','web')}:
         raise RuntimeError('Upgrade rehearsal belongs to another backup')
-    return dict(backup=backup['backup'],sourceImageIds=backup['imageIds'],deployedImageIds=deployed.get('runtimeImageIds',images),releaseImageIds=images,artifactSourceCommit=manifest['commit'])
+    result=dict(backup=backup['backup'],sourceImageIds=backup['imageIds'],releaseImageIds=images,artifactSourceCommit=manifest['commit'])
+    if recovering:result['images']=manifest['images']
+    else:result['deployedImageIds']=deployed.get('runtimeImageIds',images)
+    return result
 
 
 def check_rehearsal(folder, checks):
@@ -72,8 +79,13 @@ def run(action):
             raise RuntimeError('Keep private company rehearsal data outside the repository')
         folder.mkdir(parents=True,mode=0o700,exist_ok=True);folder.chmod(0o700)
         if any(folder.iterdir()):raise RuntimeError('Use an empty private company rehearsal directory')
-    if action == 'runtime':
-        parameters.update(published_runtime(ci,host,directory))
+    if action in ('runtime','resume'):
+        parameters.update(published_runtime(ci,host,directory,recovering=action=='resume'))
+        if action=='resume':
+            prior=Path(os.environ['SAMBA_RESUME_OPERATION'])
+            if prior.parent!=Path(directory)/'rollback' or not re.fullmatch(r'task-deploy-\d{8}T\d{6}Z-[a-f0-9]{6}',prior.name):
+                raise RuntimeError('Select the exact original deployment operation under this target rollback directory')
+            parameters['resumeOperation']=str(prior)
     elif action in ('policy','verify'):
         runtime=ci.receipt('company-runtime')
         if runtime['host']!=host or runtime['directory']!=directory or not runtime['proof'].get('runtimeHealthy'):
@@ -138,9 +150,15 @@ def run(action):
         raise RuntimeError('Company runtime image IDs differ from the release')
     if action == 'policy' and set(proof.get('departments',[])) != set(parameters['departments']):
         raise RuntimeError('Department policy completion scope does not match')
-    if action == 'runtime':
-        for key,expected in [('runtimeImageIds',parameters['deployedImageIds']),('imageIds',parameters['releaseImageIds']),('artifactSourceCommit',parameters['artifactSourceCommit'])]:
+    if action in ('runtime','resume'):
+        for key,expected in [('imageIds',parameters['releaseImageIds']),('artifactSourceCommit',parameters['artifactSourceCommit'])]:
             if proof.get(key)!=expected:raise RuntimeError('Installed runtime attestation differs from release')
+        if action=='runtime' and proof.get('runtimeImageIds')!=parameters['deployedImageIds']:raise RuntimeError('Installed image IDs changed')
+        if action=='resume':
+            if proof.get('recoveredDeploymentOperation')!=parameters['resumeOperation'] or not proof.get('deploymentDataPreserved'):
+                raise RuntimeError('Original deployment completion could not be recovered')
+            if set(proof.get('runtimeImageIds',{}))!=set(parameters['images']) or any(proof['runtimeImageIds'][k] not in (v['imageId'],v['digest']) for k,v in parameters['images'].items()):
+                raise RuntimeError('Recovered runtime differs from published images')
         folder=Path(os.environ['LOCAL_CI_UPGRADE_BACKUP_DIR'])
         checks=json.loads((folder/'SHA256.json').read_text())
         if proof.get('rehearsalChecksums')!=checks:raise RuntimeError('Host and controller rehearsal differ')
@@ -158,12 +176,12 @@ def run(action):
                 raise RuntimeError('Private company rehearsal download checksum mismatch')
             (folder/name).chmod(0o600)
         subprocess.run(['docker','load','-i',str(folder/'source-images.tar.gz')],check=True,env=ci.env)
-    ci.mark({'backup':'company-backup','recheck':'company-backup','deploy':'company-deployed','runtime':'company-runtime','policy':'company-policy','verify':'company-verified'}[action],host=host,directory=directory,proof=proof)
+    ci.mark({'backup':'company-backup','recheck':'company-backup','deploy':'company-deployed','runtime':'company-runtime','resume':'company-runtime','policy':'company-policy','verify':'company-verified'}[action],host=host,directory=directory,proof=proof)
     print(json.dumps(proof,ensure_ascii=False))
 
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['backup','recheck','deploy','runtime','policy','verify'])
+    parser.add_argument('action',choices=['backup','recheck','deploy','runtime','resume','policy','verify'])
     args=parser.parse_args()
     run(args.action)
