@@ -34,7 +34,7 @@ class ImageIdentity(unittest.TestCase):
             values=metadata(path)
             self.assertEqual(config_digest(values,index),config)
             self.assertEqual(config_digest(values,manifest),config)
-            self.assertEqual(allowed_ids(values,config),{config,index})
+            self.assertEqual(allowed_ids(values,config),{config,manifest,index})
             self.assertEqual(allowed_ids(values,'sha256:'+'e'*64),{'sha256:'+'e'*64})
 
     def test_tampered_config_or_missing_descriptor_cannot_be_accepted(self):

@@ -187,7 +187,14 @@ class Company:
             reference=value['reference'] if self.p['offline'] else value['reference'].split(':')[0]+'@'+value['digest']
             actual=self.inspect_image(reference)
             expected=allowed_ids(archived,value['imageId']) if self.p['offline'] else {value['imageId'],value['digest']}
-            assert actual['Id'] in expected,'Runtime identity does not match the verified image descriptor'
+            if actual['Id'] not in expected:
+                # Legacy archive imports may receive a new OCI descriptor.
+                # Hash the daemon's exported chain to the exact release config.
+                normalized=self.operation/('loaded-'+key+'.tar')
+                with normalized.open('xb') as stream:
+                    subprocess.run(['docker','save',actual['Id']],stdout=stream,stderr=subprocess.PIPE,check=True)
+                assert actual['Id'] in allowed_ids(metadata(normalized),value['imageId']),'Loaded image does not contain the verified release config'
+                normalized.unlink()
             runtime_ids[key]=actual['Id']
             run('docker','tag',actual['Id'],value['reference'])
         env_path=self.root/'.env';before_env=env_path.read_bytes()

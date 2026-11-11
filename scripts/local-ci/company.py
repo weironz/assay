@@ -95,7 +95,7 @@ def run(action):
     elif action != 'backup':
         # A recheck explicitly revalidates an existing data backup after tooling
         # changes. It never reuses stale test/build/publish/deployment receipts.
-        backup = json.loads((ci.state/'company-backup.json').read_text()) if action=='recheck' else ci.receipt('company-backup')
+        backup = json.loads(Path(os.getenv('SAMBA_BACKUP_RECEIPT',str(ci.state/'company-backup.json'))).read_text()) if action=='recheck' else ci.receipt('company-backup')
         if backup['version']!=ci.version or not backup['proof'].get('restoreVerified'):
             raise RuntimeError('Select a verified backup for this release')
         if backup['host'] != host or backup['directory'] != directory:

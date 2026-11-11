@@ -235,6 +235,10 @@ class Pipeline:
             self.agent_build_sha256 = sha256(artifact)
             args += ['--build-arg', 'BUILD_FROM=prebuilt-artifact', '--build-context', 'release-artifacts=' + str(context)]
         call([*args, str(ROOT / SERVICES[service])], env=self.env)
+        if os.getenv('LOCAL_CI_PRUNE_BUILD_CACHE') == 'true':
+            self.local_docker()
+            output=call(['docker','builder','prune','--all','--force'],env=self.env,capture=True)
+            print('Dedicated local builder cache cleaned: '+output.splitlines()[-1],flush=True)
         return self.image(service, test)
 
     def rust_release(self, directory, binary):
@@ -354,6 +358,7 @@ class Pipeline:
         env['CARGO_TARGET_DIR'] = str(self.state.parent / 'cache/target-agent')
         call([self.cargo, 'clippy', '--locked', '--manifest-path', str(ROOT / 'agents/samba/Cargo.toml'), '--all-targets', '--', '-D', 'warnings'], env=env)
         self.rust('agents/samba', ['test', '--locked'])
+        self.rust('agents/samba', ['test', '--locked', '-p', 'smb-transport', '--features', 'async'])
         self.mark('test-agent')
 
     def build_images(self):

@@ -40,6 +40,15 @@ class LocalCiSafety(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, 'Source changed'):
                 self.pipeline.receipt('verified')
 
+    def test_dedicated_builder_cleanup_is_opt_in_and_retains_images(self):
+        with patch.object(self.pipeline,'local_docker') as local,patch.object(self.pipeline,'version_check'),patch.object(self.pipeline,'build_flags',return_value=[]),patch.object(ci,'call',return_value='Total: 1GB') as commands:
+            with patch.dict(os.environ,{'LOCAL_CI_PRUNE_BUILD_CACHE':'false'}):self.pipeline.docker_build('web')
+            self.assertEqual(commands.call_count,1)
+            commands.reset_mock();local.reset_mock()
+            with patch.dict(os.environ,{'LOCAL_CI_PRUNE_BUILD_CACHE':'true'}):self.pipeline.docker_build('web')
+            self.assertEqual(local.call_count,2)
+            self.assertEqual(commands.call_args.args[0],['docker','builder','prune','--all','--force'])
+
     def test_asset_tampering_is_detected_before_any_registry_operation(self):
         for name in ci.ASSETS:
             (self.pipeline.dist / name).write_bytes(b'fixture')

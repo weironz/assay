@@ -4,6 +4,7 @@ ARG BUILD_FROM=source-artifact
 FROM ${BUILDER_IMAGE} AS builder
 WORKDIR /source
 COPY Cargo.toml Cargo.lock ./
+COPY vendor ./vendor
 COPY src ./src
 RUN --mount=type=secret,id=proxy_ca \
     --mount=type=cache,id=assay-rust-registry,target=/usr/local/cargo/registry,sharing=locked \

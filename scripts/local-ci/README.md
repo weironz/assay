@@ -135,6 +135,7 @@ Taskfile **不再自动加载 `.env.local-ci`**，也不读取保存的 `gh auth
 | `DOCKERHUB_NAMESPACE` | 默认 `willdockerhub` |
 | `GITHUB_REPOSITORY` | 默认 `weironz/assay` |
 | `LOCAL_CI_STATE_DIR` | 构建输出、缓存与校验记录目录；默认 `.local-ci`，runner 必须显式设置到 checkout 外 |
+| `LOCAL_CI_PRUNE_BUILD_CACHE` | 专用开发 Docker 可设 `true`，每次镜像构建结束后清理未使用 BuildKit 缓存；不删除镜像、卷或备份，默认关闭 |
 | `CARGO`、`CARGO_HOME`、`RUSTUP_HOME` | 按需选择编译器和缓存位置 |
 
 请从系统机密管理器注入令牌，或通过终端隐藏输入设置变量，不把值写在命令历史、Git 或聊天中。
@@ -173,6 +174,11 @@ task local:publish
 原任务成功后，通过 `SAMBA_RESUME_OPERATION` 指定原 rollback/task-deploy 目录，
 执行 `task test:deployment` 和 `task samba:resume`，核对真实运行状态后恢复当前运行证明。
 该入口不重放原部署，也不手动修改历史校验记录；具体校验边界见上述 Samba 文档。
+
+备份与编译需要并行时，备份须使用独立 `LOCAL_CI_STATE_DIR`，避免共用状态锁；
+升级演练必须等待两者完成。设置 `SAMBA_BACKUP_RECEIPT` 指向该备份状态目录中的
+`VERSION/company-backup.json` 后运行 `samba:backup:verify`，会在服务器重新验证完整备份、
+当前源镜像及两端 SHA256，再登记当前 CI 状态中的备份记录。不直接复制或修改 JSON。
 不要把阿里云 S3 工单站点的部署任务直接指向本地附件存储的公司栈。
 
 所有连接参数从环境变量读取，inventory 没有硬编码主机、账号或部署目录。

@@ -38,8 +38,9 @@ def config_digest(values, digest, depth=0):
 
 def allowed_ids(values, expected_config):
     result={expected_config}
-    for descriptor in values.get('index.json',{}).get('manifests',[]):
-        digest=descriptor['digest']
+    descriptors={v['digest'] for v in values.get('index.json',{}).get('manifests',[])}
+    descriptors.update('sha256:'+name.rsplit('/',1)[1] for name,value in values.items() if name.startswith('blobs/sha256/') and isinstance(value,dict) and ('config' in value or 'manifests' in value))
+    for digest in descriptors:
         try:actual=config_digest(values,digest)
         except RuntimeError:continue
         if actual==expected_config:result.add(digest)
