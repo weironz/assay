@@ -22,6 +22,7 @@
         - deploy/samba-production/verify_acl.py
         - deploy/samba-production/backup.py
         - scripts/local-ci/db_fingerprint.py
+        - scripts/local-ci/image_archive.py
     - name: Save validated nonsecret operation parameters
       ansible.builtin.copy:
         content: "{{ assay_parameters | to_json }}"

@@ -21,6 +21,7 @@ import uuid
 
 import backup as snapshots
 from db_fingerprint import capture, assert_preserved
+from image_archive import metadata, allowed_ids
 
 
 def run(*args, data=None):
@@ -167,12 +168,17 @@ class Company:
             bundle=self.operation/'images.tar.gz'
             assert hashlib.file_digest(bundle.open('rb'),'sha256').hexdigest()==self.p['bundleSha256']
             run('docker','load','-i',bundle)
+            archived=metadata(bundle)
         else:
             for value in self.p['images'].values():run('docker','pull',value['reference'].split(':')[0]+'@'+value['digest'])
-        for value in self.p['images'].values():
-            actual=self.inspect_image(value['imageId'])
-            assert actual['Id']==value['imageId']
-            run('docker','tag',value['imageId'],value['reference'])
+        runtime_ids={}
+        for key,value in self.p['images'].items():
+            reference=value['reference'] if self.p['offline'] else value['reference'].split(':')[0]+'@'+value['digest']
+            actual=self.inspect_image(reference)
+            expected=allowed_ids(archived,value['imageId']) if self.p['offline'] else {value['imageId'],value['digest']}
+            assert actual['Id'] in expected,'Runtime identity does not match the verified image descriptor'
+            runtime_ids[key]=actual['Id']
+            run('docker','tag',actual['Id'],value['reference'])
         env_path=self.root/'.env';before_env=env_path.read_bytes()
         api_env=self.root/'api.env';before_api=api_env.read_bytes()
         private(self.operation/'before-images.json',self.image_ids())
@@ -210,8 +216,8 @@ class Company:
             for name,identifier in data_ids.items():assert run(*self.compose,'ps','-q',name).decode().strip()==identifier
             assert self.inspect(self.ad['Id'])['State']['Running']
             ids={('samba-agent' if s=='agent' else s):self.inspect(run(*self.compose,'ps','-q',s).decode().strip())['Image'] for s in ('api','web','agent')}
-            assert ids=={k:v['imageId'] for k,v in self.p['images'].items()}
-            return {'imageIds':ids,'dataPreserved':True,'localAttachmentsPreserved':True,'sambaUnchanged':True,'backup':str(backup)}
+            assert ids==runtime_ids
+            return {'imageIds':{k:v['imageId'] for k,v in self.p['images'].items()},'runtimeImageIds':ids,'dataPreserved':True,'localAttachmentsPreserved':True,'sambaUnchanged':True,'backup':str(backup)}
         except Exception:
             if activated:
                 replace(env_path,before_env)
@@ -222,6 +228,23 @@ class Company:
 
     @staticmethod
     def inspect_image(name):return json.loads(run('docker','image','inspect',name))[0]
+
+    def recheck(self):
+        backup=Path(self.p['backup']).resolve(strict=True)
+        assert backup.parent==(self.root.parent/'assay-backups').resolve()
+        assert self.image_ids()==self.p['sourceImageIds'],'Runtime changed since the selected backup'
+        assert (backup/'RESTORE_VERIFIED.json').is_file()
+        config=json.loads((backup/'backup-config.json').read_text())
+        # dbcheck may touch its disposable databases. Preserve that evidence and
+        # validate a new reflink recovery copy rather than trusting old markers.
+        old=backup/'restore-validation'
+        if old.exists():old.rename(backup/('restore-validation-prior-'+self.operation.name))
+        snapshots.verify(config,backup)
+        checks=json.loads((backup/'rehearsal/SHA256.json').read_text())
+        for name,digest in checks.items():
+            assert name in ('db.sql.gz','objects.tar.gz','objects-manifest.json','backup-info.txt','source.json','source-images.tar.gz')
+            assert hashlib.file_digest((backup/'rehearsal'/name).open('rb'),'sha256').hexdigest()==digest
+        return {'backup':str(backup),'imageIds':self.image_ids(),'restoreVerified':True,'sourceStorage':'local','rehearsalChecksums':checks}
 
     def policy(self):
         assert self.image_ids()==self.p['deployedImageIds']
@@ -327,7 +350,7 @@ def main():
     parameters=json.loads(Path(sys.argv[1]).read_text())
     lock=Path('/run/lock/assay-company-maintenance.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     company=Company(parameters)
-    action=parameters['action'];assert action in ('backup','deploy','policy','verify')
+    action=parameters['action'];assert action in ('backup','recheck','deploy','policy','verify')
     result=getattr(company,action)()
     result.update(action=action,directory=str(company.root),version=parameters['version'],completed=True)
     private(company.operation/'result.json',result)

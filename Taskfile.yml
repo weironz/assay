@@ -116,6 +116,9 @@ tasks:
   samba:backup:
     desc: Back up and verify the explicitly selected existing company file-server deployment through Ansible
     cmds: ['python3 scripts/local-ci/company.py backup']
+  samba:backup:verify:
+    desc: Revalidate an existing full company backup after tooling changes, without downloading images again
+    cmds: ['python3 scripts/local-ci/company.py recheck']
   local:deploy:samba:
     desc: Deploy verified API/Web/Agent images to an existing company stack through Ansible
     cmds: ['python3 scripts/local-ci/company.py deploy']

@@ -36,7 +36,11 @@ def run(action):
         folder.mkdir(parents=True,mode=0o700,exist_ok=True);folder.chmod(0o700)
         if any(folder.iterdir()):raise RuntimeError('Use an empty private company rehearsal directory')
     if action != 'backup':
-        backup = ci.receipt('company-backup')
+        # A recheck explicitly revalidates an existing data backup after tooling
+        # changes. It never reuses stale test/build/publish/deployment receipts.
+        backup = json.loads((ci.state/'company-backup.json').read_text()) if action=='recheck' else ci.receipt('company-backup')
+        if backup['version']!=ci.version or not backup['proof'].get('restoreVerified'):
+            raise RuntimeError('Select a verified backup for this release')
         if backup['host'] != host or backup['directory'] != directory:
             raise RuntimeError('Company backup belongs to another target')
         parameters['backup'] = backup['proof']['backup']
@@ -66,7 +70,8 @@ def run(action):
             if saved.wait(): raise RuntimeError('Company image export failed')
             parameters['bundleSha256'] = sha256(bundle)
     if action in ('policy','verify'):
-        parameters['deployedImageIds'] = ci.receipt('company-deployed')['proof']['imageIds']
+        deployed=ci.receipt('company-deployed')['proof']
+        parameters['deployedImageIds'] = deployed.get('runtimeImageIds',deployed['imageIds'])
         names = json.loads(os.environ['SAMBA_POLICY_DEPARTMENTS'])
         leaders = json.loads(os.environ['SAMBA_POLICY_LEADERS'])
         group = os.environ['SAMBA_POLICY_LEADERSHIP_GROUP']
@@ -87,9 +92,12 @@ def run(action):
         raise RuntimeError('Company runtime image IDs differ from the release')
     if action == 'policy' and set(proof.get('departments',[])) != set(parameters['departments']):
         raise RuntimeError('Department policy completion scope does not match')
-    if action == 'backup':
+    if action in ('backup','recheck'):
+        if action=='recheck':rehearsal=os.environ['LOCAL_CI_UPGRADE_BACKUP_DIR']
         folder=Path(rehearsal)
         checks=json.loads((folder/'SHA256.json').read_text())
+        if action=='recheck' and proof.get('rehearsalChecksums')!=checks:
+            raise RuntimeError('Local rehearsal export differs from the reverified host backup')
         expected={'db.sql.gz','objects.tar.gz','objects-manifest.json','backup-info.txt','source.json','source-images.tar.gz'}
         if set(checks)!=expected:raise RuntimeError('Private company rehearsal download is incomplete')
         for name,digest in checks.items():
@@ -97,12 +105,12 @@ def run(action):
                 raise RuntimeError('Private company rehearsal download checksum mismatch')
             (folder/name).chmod(0o600)
         subprocess.run(['docker','load','-i',str(folder/'source-images.tar.gz')],check=True,env=ci.env)
-    ci.mark({'backup':'company-backup','deploy':'company-deployed','policy':'company-policy','verify':'company-verified'}[action],host=host,directory=directory,proof=proof)
+    ci.mark({'backup':'company-backup','recheck':'company-backup','deploy':'company-deployed','policy':'company-policy','verify':'company-verified'}[action],host=host,directory=directory,proof=proof)
     print(json.dumps(proof,ensure_ascii=False))
 
 
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('action',choices=['backup','deploy','policy','verify'])
+    parser.add_argument('action',choices=['backup','recheck','deploy','policy','verify'])
     args=parser.parse_args()
     run(args.action)

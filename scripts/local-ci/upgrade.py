@@ -12,6 +12,7 @@ import re
 import secrets
 
 from db_fingerprint import capture, assert_preserved
+from image_archive import metadata, config_digest
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -38,14 +39,24 @@ def rehearse(ci):
     info = dict(line.split('=', 1) for line in (backup / 'backup-info.txt').read_text().splitlines() if '=' in line)
     image_info = ci.receipt('build-images')
     ci.local_docker()
-    rollback = source.get('rollbackImages', {})
+    rollback = dict(source.get('rollbackImages', {}))
+    archive_metadata = None
     for service in ('api', 'web'):
         reference = rollback.get(service)
         if not reference:
             raise RuntimeError('Supply both original runtime images for the rollback rehearsal')
-        item = json.loads(subprocess.check_output(['docker', 'image', 'inspect', reference], text=True))[0]
+        inspected=subprocess.run(['docker','image','inspect',reference],text=True,capture_output=True)
+        if inspected.returncode and (backup/'source-images.tar.gz').is_file():
+            if archive_metadata is None:archive_metadata=metadata(backup/'source-images.tar.gz')
+            reference=config_digest(archive_metadata,source[service+'ImageId'])
+            rollback[service]=reference
+            inspected=subprocess.run(['docker','image','inspect',reference],text=True,capture_output=True)
+        if inspected.returncode:raise RuntimeError('Original runtime image is unavailable')
+        item=json.loads(inspected.stdout)[0]
         labels = item['Config'].get('Labels') or {}
         if item['Id'] != source[service + 'ImageId']:
+            if archive_metadata is not None and item['Id']==config_digest(archive_metadata,source[service+'ImageId']):
+                continue  # Cryptographically verified OCI index -> manifest -> config.
             archive = backup / ('rollback-' + service + '.tar.gz')
             expected = source.get('rollbackArchiveSha256', {}).get(service)
             if (not expected or labels.get('assay.upgrade.source-image-id') != source[service + 'ImageId'] or
