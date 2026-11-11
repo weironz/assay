@@ -213,7 +213,9 @@ def verify(config, destination):
                 '--mount', f'type=bind,src={destination / "assay.pgdump"},dst=/backup/assay.pgdump,readonly', image)
             created = True
             for _ in range(60):
-                ready = subprocess.run(['docker', 'exec', name, 'pg_isready', '-U', username, '-d', database],
+                # The entrypoint's temporary initialization server accepts Unix
+                # sockets before shutting down. Only the final server listens on TCP.
+                ready = subprocess.run(['docker', 'exec', name, 'pg_isready', '-h', '127.0.0.1', '-U', username, '-d', database],
                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 if ready.returncode == 0:
                     break

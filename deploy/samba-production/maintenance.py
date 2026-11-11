@@ -433,7 +433,13 @@ def main():
     lock=Path('/run/lock/assay-company-maintenance.lock').open('a');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
     company=Company(parameters)
     action=parameters['action'];assert action in ('backup','recheck','deploy','runtime','resume','policy','verify')
-    result=getattr(company,action)()
+    try:
+        result=getattr(company,action)()
+    except subprocess.CalledProcessError as exc:
+        # Preserve private subprocess diagnostics without sending them to CI logs.
+        private(company.operation/'command-error.json',{'exitCode':exc.returncode,
+            'stdout':(exc.stdout or b'').decode(errors='replace'),'stderr':(exc.stderr or b'').decode(errors='replace')})
+        raise
     result.update(action=action,directory=str(company.root),version=parameters['version'],completed=True)
     private(company.operation/'result.json',result)
     print(json.dumps({'completed':True,'action':action,'operation':str(company.operation)}))
