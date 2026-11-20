@@ -1,10 +1,12 @@
-import type { Prisma, PrismaClient } from '@prisma/client';
+import { ConflictException } from '@nestjs/common';
+import { Prisma, type PrismaClient } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
 import {
   canOperateTicket,
   isInternalParticipant,
   isTicketCollaborator,
   TicketRoleAccess,
+  ticketVisibilityWhere,
 } from '../tickets/visibility';
 
 /**
@@ -41,6 +43,58 @@ export function matchAttachmentUrl(body: string): string[] {
 
 export function referencedAttachmentIds(body: string): Set<string> {
   return new Set(matchAttachmentUrl(body));
+}
+
+/** Reference writers and attachment deletion take the same locks in ID order.
+ * A reply cannot add a reference while an editor is deciding it was the last one. */
+export async function lockAttachments(db: Prisma.TransactionClient, ids: Iterable<string>) {
+  const uniqueIds = [...new Set(ids)];
+  if (!uniqueIds.length) return;
+  await db.$queryRaw`
+    SELECT id FROM ticket_attachments WHERE id IN (${Prisma.join(uniqueIds)})
+    ORDER BY id FOR UPDATE
+  `;
+}
+
+export async function assertAttachmentReferencesAvailable(
+  db: Prisma.TransactionClient,
+  user: AuthUser,
+  ids: Iterable<string>,
+) {
+  const referenced = [...ids];
+  if (!referenced.length) return;
+  const rows = await db.ticketAttachment.findMany({
+    where: { id: { in: referenced }, OR: [
+      { ticketId: null, uploaderId: user.id },
+      { ticket: { is: ticketVisibilityWhere(user) } },
+    ] },
+    select: {
+      messageId: true, uploaderId: true,
+      ticket: { select: { requesterId: true, assigneeId: true, participants: { select: { userId: true, role: true } } } },
+      message: { select: { isInternal: true } },
+    },
+  });
+  if (rows.length !== referenced.length || rows.some(row => row.ticket && !attachmentRowVisible(user, row.ticket, row))) {
+    throw new ConflictException('正文引用的附件不可用，请移除该引用或重新上传后重试');
+  }
+}
+
+/** Include links and references in other tickets, and conservatively keep URLs in text. */
+export function findAttachmentReference(db: MessageReader, attachmentId: string) {
+  return db.ticketMessage.findFirst({
+    where: { body: { contains: `/attachments/${attachmentId}/download` } },
+    select: { id: true },
+  });
+}
+
+/** Legacy uploads did not record their purpose. Only infer from an actual <img>
+ * in the message the attachment was bound to, not a link or the MIME alone. */
+export function inlineImageIds(body: string): Set<string> {
+  const ids = new Set<string>();
+  for (const match of body.matchAll(/<img\b[^>]*?\ssrc\s*=\s*(?:"([^"]+)"|'([^']+)')/gi)) {
+    for (const id of referencedAttachmentIds(match[1] ?? match[2])) ids.add(id);
+  }
+  return ids;
 }
 
 /** 把正文里的每个附件下载地址交给 mapper 改写（mapper 收附件 ID、返回新地址） */

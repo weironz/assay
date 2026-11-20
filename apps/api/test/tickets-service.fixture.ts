@@ -27,7 +27,7 @@ export function createTicketsService(
     new TicketQueries(prisma, workflow),
     new TicketEditor(prisma, sla),
     new TicketLifecycle(prisma, workflow, notifications, sla),
-    new TicketMessaging(prisma, notifications, sla),
+    new TicketMessaging(prisma, notifications, sla, attachments as AttachmentsService),
     new TicketParticipants(prisma, notifications),
     new TicketDeletion(prisma, sla, attachments as AttachmentsService),
   );

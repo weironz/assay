@@ -547,8 +547,8 @@ test('message edit scopes authorization into the query and does not read an inte
     authorId: 'requester',
     isInternal: false,
   });
-  // 授权查询只取 id，不把正文读出来再判断。
-  assert.deepEqual(queries[0].select, { id: true });
+  // 仅满足作者与可见性条件才读取旧正文，用于比较附件引用。
+  assert.deepEqual(queries[0].select, { id: true, body: true });
 });
 
 test('message author can edit their own public message inside the transaction', async () => {
@@ -566,7 +566,7 @@ test('message author can edit their own public message inside the transaction', 
     ticketMessage: {
       findFirst: async (args: any) => {
         authorization = args;
-        return { id: 'message-1' };
+        return { id: 'message-1', body: '<p>original</p>' };
       },
       update: async (args: any) => {
         events.push(`update:${args.where.id}`);
@@ -636,13 +636,16 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
     tags: [],
   };
   const tx = {
+    $queryRaw: async () => [{ id: 'att-body' }, { id: 'att-file' }],
+    ticket: { create: async () => ticket },
     ticketAttachment: {
+      findMany: async () => [{ ticket: null, uploaderId: 'requester', messageId: null }],
       updateMany: async (args: any) => {
         updates.push(args);
         return { count: 1 };
       },
     },
-    ticketMessage: { findFirst: async () => firstMessage },
+    ticketMessage: { findFirstOrThrow: async () => firstMessage },
   };
   const prisma: any = {
     ticket: {
@@ -677,22 +680,20 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
     attachmentIds: ['att-file'],
   } as any);
 
-  // 1) attachmentIds 先挂工单；2) 再绑定到首条消息；3) 正文引用补挂工单；
-  // 4) linkReferencedAttachments 把正文内联图绑定到首条消息。
+  // 独立附件一次绑定工单和首条消息，其余正文图片由引用解析绑定。
   assert.deepEqual(updates[0].where.id, { in: ['att-file'] });
-  assert.deepEqual(updates[0].data, { ticketId: 'ticket-1' });
-  assert.deepEqual(updates[1].where.id, { in: ['att-file'] });
-  assert.deepEqual(updates[1].data, { messageId: 'message-1' });
+  assert.deepEqual(updates[0].data, { ticketId: 'ticket-1', messageId: 'message-1' });
+  assert.deepEqual(updates[1].where.id, { in: ['att-body'] });
+  assert.deepEqual(updates[1].data, { ticketId: 'ticket-1' });
   assert.deepEqual(updates[2].where.id, { in: ['att-body'] });
-  assert.deepEqual(updates[2].data, { ticketId: 'ticket-1' });
-  assert.deepEqual(updates[3].where.id, { in: ['att-body'] });
-  assert.deepEqual(updates[3].data, { messageId: 'message-1' });
+  assert.deepEqual(updates[2].data, { messageId: 'message-1' });
 });
 
 test('posting a message binds referenced attachments inside the same transaction', async () => {
   const events: string[] = [];
   let inTransaction = false;
   const tx = {
+    $queryRaw: async () => [{ id: 'att-1' }],
     ticketMessage: {
       create: async () => ({
         id: 'message-1',
@@ -702,6 +703,7 @@ test('posting a message binds referenced attachments inside the same transaction
       }),
     },
     ticketAttachment: {
+      findMany: async () => [{ ticket: null, uploaderId: 'requester', messageId: null }],
       updateMany: async (args: any) => {
         if (args.data.ticketId) {
           assert.equal(inTransaction, true);

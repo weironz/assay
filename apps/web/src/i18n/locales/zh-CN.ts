@@ -400,6 +400,7 @@ const zhCN: Resource = {
   },
 
   ticketDetail: {
+    messageSaveFailed: '消息保存失败。请确认引用的附件仍存在，或复制未保存的内容后刷新工单再重试。',
     actionPending: '{{action}}中…',
     actionFailed: '状态更新失败。请刷新工单核对当前状态后重试；如仍失败，请联系管理员。',
     actionForbidden: '你已无权执行此操作，请刷新工单核对权限。',

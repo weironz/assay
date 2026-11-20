@@ -411,6 +411,7 @@ const en = {
   },
 
   ticketDetail: {
+    messageSaveFailed: 'Could not save the message. Check that its attachments still exist, or copy your draft before refreshing the ticket and trying again.',
     actionPending: '{{action}}…',
     actionFailed: 'Could not update the status. Refresh the ticket and check its current status before retrying. Contact an administrator if it still fails.',
     actionForbidden: 'You no longer have permission for this action. Refresh the ticket to check your access.',

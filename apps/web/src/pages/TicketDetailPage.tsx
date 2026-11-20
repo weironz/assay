@@ -125,7 +125,7 @@ export default function TicketDetailPage() {
     );
   };
   const saveMsg = () => {
-    if (!editingMsgId || !msgDraft.replace(/<[^>]*>/g, '').trim()) return;
+    if (!editingMsgId || !msgDraft.trim()) return;
     updateMessage.mutate(
       { id, arg: { messageId: editingMsgId, body: msgDraft } },
       { onSuccess: () => setEditingMsgId(null) },
@@ -314,6 +314,7 @@ export default function TicketDetailPage() {
                       {canEditMsg && !editing && (
                         <button
                           onClick={() => {
+                            updateMessage.reset();
                             setMsgDraft(m.body);
                             setEditingMsgId(m.id);
                           }}
@@ -331,6 +332,9 @@ export default function TicketDetailPage() {
                           onChange={setMsgDraft}
                           onUploadImage={uploadImg}
                         />
+                        {updateMessage.isError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">
+                          {t('ticketDetail.messageSaveFailed')}
+                        </p>}
                         <div className="flex justify-end gap-2">
                           <button
                             onClick={() => setEditingMsgId(null)}

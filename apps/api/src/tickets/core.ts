@@ -1,5 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { HistoryAction, Prisma, TicketStatus } from '@prisma/client';
+import { HistoryAction, Prisma, type Ticket, TicketStatus } from '@prisma/client';
 import { NotificationsService } from '../notifications/notifications.service';
 import { TicketContactDto } from './contact';
 
@@ -121,11 +121,11 @@ export async function resolveCategoryId(
  */
 export async function createWithTicketNo(
   prisma: Pick<Prisma.TransactionClient, 'ticket'>,
-  build: (ticketNo: string) => Prisma.TicketCreateArgs,
+  create: (ticketNo: string) => Promise<Ticket>,
 ) {
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
-      return await prisma.ticket.create(build(await genTicketNo(prisma)));
+      return await create(await genTicketNo(prisma));
     } catch (e) {
       const dup =
         e instanceof Prisma.PrismaClientKnownRequestError &&

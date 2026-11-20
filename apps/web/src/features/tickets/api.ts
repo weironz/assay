@@ -297,7 +297,7 @@ export const useUpdateTicket = () =>
 /** 编辑某条消息正文 */
 export const useUpdateMessage = () =>
   useTicketMutation<{ messageId: string; body: string }>((id, arg) =>
-    api.patch(`/tickets/${id}/messages/${arg.messageId}`, { body: arg.body }),
+    api.patch(`/tickets/${id}/messages/${arg.messageId}`, { body: arg.body }), ['attachments'],
   );
 
 export const useAssign = () =>

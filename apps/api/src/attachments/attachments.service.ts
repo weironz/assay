@@ -24,6 +24,7 @@ import {
   assertAttachmentSize,
   detectRasterImageMime,
   extOf,
+  isRasterImageMime,
 } from './limits';
 import type { DeletionDrainResult } from './deletion-queue';
 import {
@@ -39,9 +40,13 @@ import {
   attachmentListWhere,
   attachmentRowVisible,
   canUploadToTicket,
+  findAttachmentReference,
+  inlineImageIds,
   isAttachmentDownloadable,
   isUnboundVisible,
+  lockAttachments,
   messageBindingIssue,
+  referencedAttachmentIds,
 } from './rules';
 
 /**
@@ -236,7 +241,7 @@ export class AttachmentsService {
         await this.assertMessageWritable(user, ticket, ticketId, messageId);
       }
       const mime = await this.resolveMime(file, kind);
-      return await this.store(user, file, ticketId, messageId, mime);
+      return await this.store(user, file, ticketId, messageId, mime, kind === 'inline');
     } finally {
       await this.discardTemp(file);
     }
@@ -248,7 +253,7 @@ export class AttachmentsService {
       this.assertFileName(file, kind);
       this.assertSize(file);
       const mime = await this.resolveMime(file, kind);
-      return await this.store(user, file, null, undefined, mime);
+      return await this.store(user, file, null, undefined, mime, kind === 'inline');
     } finally {
       await this.discardTemp(file);
     }
@@ -260,6 +265,7 @@ export class AttachmentsService {
     ticketId: string | null,
     messageId: string | undefined,
     mime: string,
+    isInline: boolean,
   ) {
     await this.assertQuota(user, ticketId, file.size);
     const objectKey = this.buildKey(ticketId ?? 'draft', file.originalname);
@@ -290,6 +296,7 @@ export class AttachmentsService {
             objectKey,
             fileSize: file.size,
             mime,
+            isInline,
             uploaderId: user.id,
           },
         });
@@ -399,13 +406,12 @@ export class AttachmentsService {
         });
         if (!ticket) throw new NotFoundException('工单不存在');
         if (!canUploadToTicket(user, ticket)) throw new ForbiddenException('无权操作该工单');
-        const reference = await tx.ticketMessage.findFirst({
-          where: { ticketId: rec.ticketId, body: { contains: `/attachments/${id}/download` } },
-          select: { id: true },
-        });
-        if (reference) throw new BadRequestException('附件仍被工单正文引用，请先移除引用');
       } else if (!user.permissions.includes('ticket:create')) {
         throw new ForbiddenException('缺少创建工单权限');
+      }
+      await lockAttachments(tx, [id]);
+      if (await findAttachmentReference(tx, id)) {
+        throw new BadRequestException('附件仍被工单正文引用，请先移除引用');
       }
       const deleted = await tx.ticketAttachment.deleteMany({
         where: { id, uploaderId: user.id, ticketId: rec.ticketId, messageId: rec.messageId },
@@ -417,9 +423,49 @@ export class AttachmentsService {
         oldValue: rec.fileName, newValue: '删除附件',
       } });
       return { ok: true };
-    }, { isolationLevel: 'Serializable' });
+    }, { isolationLevel: 'ReadCommitted' });
     void this.processPendingDeletions().catch(() => undefined);
     return result;
+  }
+
+  /** Called while holding the referenced attachment rows. Delete only images
+   * whose removal was part of this edit, and retain explicitly uploaded files. */
+  async queueRemovedInlineImages(
+    tx: Prisma.TransactionClient,
+    ticketId: string,
+    messageId: string,
+    authorId: string,
+    before: string,
+    after: string,
+  ): Promise<number> {
+    const remaining = referencedAttachmentIds(after);
+    const remainingImages = inlineImageIds(after);
+    const removed = [...referencedAttachmentIds(before)].filter(id => !remaining.has(id));
+    const removedImages = [...inlineImageIds(before)].filter(id => !remainingImages.has(id));
+    if (!removed.length && !removedImages.length) return 0;
+
+    const legacyImages = await tx.ticketAttachment.findMany({
+      where: { ticketId, messageId, uploaderId: authorId, isInline: null, id: { in: removedImages } },
+      select: { id: true, mime: true },
+    });
+    const legacyIds = legacyImages.filter(row => isRasterImageMime(row.mime)).map(row => row.id);
+    if (legacyIds.length) {
+      // Persist attribution even if a second message or a plain link still uses the image.
+      await tx.ticketAttachment.updateMany({ where: { id: { in: legacyIds } }, data: { isInline: true } });
+    }
+    if (!removed.length) return 0;
+
+    const objects: string[] = [];
+    const candidates = await tx.ticketAttachment.findMany({
+      where: { isInline: true, messageId: { not: null }, id: { in: removed } },
+      select: { id: true, objectKey: true },
+    });
+    for (const candidate of candidates) {
+      if (await findAttachmentReference(tx, candidate.id)) continue;
+      await tx.ticketAttachment.delete({ where: { id: candidate.id } });
+      objects.push(candidate.objectKey);
+    }
+    return enqueueObjectDeletions(tx, objects, 'INLINE_IMAGE_REMOVED');
   }
 
   async getForDownload(user: AuthUser, id: string) {

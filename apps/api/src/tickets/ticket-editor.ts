@@ -9,7 +9,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { cleanHtml } from '../common/sanitize';
 import {
+  assertAttachmentReferencesAvailable,
   linkReferencedAttachments,
+  lockAttachments,
   referencedAttachmentIds,
 } from '../attachments/rules';
 import { SlaService } from '../sla/sla.service';
@@ -42,8 +44,12 @@ export class TicketEditor {
       dto.categoryId,
       dto.categoryName,
     );
-    const ticket = await createWithTicketNo(this.prisma, (ticketNo) => ({
-      data: {
+    const body = cleanHtml(dto.body);
+    const references = referencedAttachmentIds(body);
+    const ticket = await createWithTicketNo(this.prisma, (ticketNo) => this.prisma.$transaction(async (tx) => {
+      await lockAttachments(tx, [...references, ...(dto.attachmentIds ?? [])]);
+      await assertAttachmentReferencesAvailable(tx, user, references);
+      const created = await tx.ticket.create({ data: {
         ticketNo,
         title: dto.title,
         requesterId: user.id,
@@ -62,11 +68,26 @@ export class TicketEditor {
             type: 'REPLY',
             isInternal: false,
             contentType: 'text/html',
-            body: cleanHtml(dto.body),
+            body,
           },
         },
-      },
-    }));
+      } });
+
+      if (!references.size && !dto.attachmentIds?.length) return created;
+      const firstMessage = await tx.ticketMessage.findFirstOrThrow({
+        where: { ticketId: created.id },
+        orderBy: { createdAt: 'asc' },
+        select: { id: true },
+      });
+      if (dto.attachmentIds?.length) {
+        await tx.ticketAttachment.updateMany({
+          where: { id: { in: dto.attachmentIds }, uploaderId: user.id, ticketId: null },
+          data: { ticketId: created.id, messageId: firstMessage.id },
+        });
+      }
+      await linkReferencedAttachments(tx, created.id, firstMessage.id, body, user.id);
+      return created;
+    }, { isolationLevel: 'ReadCommitted' }));
     // SLA 从建单起算：一直没人接手才是最该告警的情况，
     // 从「开始处理」起算的话这种单永远不会超时
     const sla = await slaOf(this.prisma, dto.typeId ?? null);
@@ -88,53 +109,6 @@ export class TicketEditor {
         data: { defaultContact: normalizeContact(dto.contact) },
       });
     }
-    // 关联建单前上传的草稿附件（仅本人、仍未挂单的）。未绑定附件已收紧为
-    // 「仅上传者/内部可见」，所以这里要一次性把归属确定下来：
-    // - attachmentIds 是用户在附件区显式选择的文件，绑定到建单首条公开消息；
-    // - 正文里实际引用的内联图即使没出现在 attachmentIds 里，也一并挂到工单并
-    //   绑定到首条消息，避免正文图片对协作成员和分享页 404。
-    await this.prisma.$transaction(async (tx) => {
-      if (dto.attachmentIds?.length) {
-        await tx.ticketAttachment.updateMany({
-          where: {
-            id: { in: dto.attachmentIds },
-            uploaderId: user.id,
-            ticketId: null,
-          },
-          data: { ticketId: ticket.id },
-        });
-      }
-      const firstMessage = await tx.ticketMessage.findFirst({
-        where: { ticketId: ticket.id },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true, body: true },
-      });
-      if (!firstMessage) return;
-
-      if (dto.attachmentIds?.length) {
-        await tx.ticketAttachment.updateMany({
-          where: {
-            id: { in: dto.attachmentIds },
-            ticketId: ticket.id,
-            uploaderId: user.id,
-            messageId: null,
-          },
-          data: { messageId: firstMessage.id },
-        });
-      }
-      const referenced = [...referencedAttachmentIds(firstMessage.body)];
-      if (referenced.length) {
-        // linkReferencedAttachments 会先把不在 attachmentIds 里的草稿图补挂到
-        // 工单，再按正文引用绑定 messageId。
-        await linkReferencedAttachments(
-          tx,
-          ticket.id,
-          firstMessage.id,
-          firstMessage.body,
-          user.id,
-        );
-      }
-    });
     return ticket.id;
   }
 

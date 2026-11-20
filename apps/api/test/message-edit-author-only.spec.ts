@@ -93,6 +93,7 @@ function harness(ticketRow: any, message: MessageMeta | null) {
     historyCreate: [] as any[],
   };
   const prisma: any = {
+    $queryRaw: async () => [{ id: 'att-1' }],
     ticket: { findUnique: async () => ticketRow },
     ticketMessage: {
       findFirst: async (args: any) => {
@@ -105,7 +106,7 @@ function harness(ticketRow: any, message: MessageMeta | null) {
           if (where.id !== message.id || where.ticketId !== message.ticketId) return null;
           if (message.authorId !== where.authorId) return null;
           if (where.isInternal === false && message.isInternal) return null;
-          return { id: message.id };
+          return { id: message.id, body: '<p>original</p>' };
         }
         if (!message) return null;
         return { authorId: message.authorId, isInternal: message.isInternal };
@@ -116,6 +117,7 @@ function harness(ticketRow: any, message: MessageMeta | null) {
       },
     },
     ticketAttachment: {
+      findMany: async () => [{ ticket: null, uploaderId: AUTHOR_ID, messageId: null }],
       updateMany: async (args: any) => {
         calls.attachmentUpdateMany.push(args);
         return { count: 0 };
@@ -181,7 +183,7 @@ test('普通作者编辑自己公开消息成功', async () => {
     ticketId: TICKET_ID,
     authorId: AUTHOR_ID,
   });
-  assert.deepEqual(calls.findFirst[0].select, { id: true });
+  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
   assertSuccessfulEdit(calls, AUTHOR_ID);
 });
 
@@ -236,7 +238,7 @@ for (const { name, user: actor, internal } of unauthorizedEditors) {
     if (!internal) expectedWhere.isInternal = false;
     assert.equal(calls.findFirst.length, 2, '授权查询 + 元数据查询各一次');
     assert.deepEqual(calls.findFirst[0].where, expectedWhere);
-    assert.deepEqual(calls.findFirst[0].select, { id: true });
+    assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
     assert.deepEqual(calls.findFirst[1].where, { id: MESSAGE_ID, ticketId: TICKET_ID });
     assert.deepEqual(calls.findFirst[1].select, {
       authorId: true,
@@ -262,15 +264,14 @@ test('非内部参与者不能编辑或探测内部备注', async () => {
     authorId: 'requester',
     isInternal: false,
   });
-  assert.deepEqual(calls.findFirst[0].select, { id: true });
+  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
   assert.deepEqual(calls.findFirst[1].select, {
     authorId: true,
     isInternal: true,
   });
-  // 授权查询与元数据查询都只取 id / 元数据，任何一步都不把内部备注正文读出来。
-  for (const query of calls.findFirst) {
-    assert.equal(query.select.body, undefined);
-  }
+  // 读取正文的查询必须满足作者和可见性条件，拒绝访问时的回退查询仍仅取元数据。
+  assert.equal(calls.findFirst[1].select.body, undefined);
+  assertNoWrites(calls);
   assertNoWrites(calls);
 });
 

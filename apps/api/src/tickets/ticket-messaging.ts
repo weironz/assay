@@ -1,15 +1,23 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { cleanHtml } from '../common/sanitize';
 import { NotificationsService } from '../notifications/notifications.service';
 import { SlaService } from '../sla/sla.service';
-import { linkReferencedAttachments } from '../attachments/rules';
+import { AttachmentsService } from '../attachments/attachments.service';
+import {
+  assertAttachmentReferencesAvailable,
+  linkReferencedAttachments,
+  lockAttachments,
+  referencedAttachmentIds,
+} from '../attachments/rules';
 import {
   canOperateTicket,
   canViewTicket,
@@ -34,6 +42,7 @@ export class TicketMessaging {
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
     private readonly sla: SlaService,
+    private readonly attachments: AttachmentsService,
   ) {}
 
   async addMessage(user: AuthUser, id: string, dto: CreateMessageDto) {
@@ -59,7 +68,11 @@ export class TicketMessaging {
     }
 
     // 消息与附件绑定同一事务提交：内部/公开的可见性从落库那一刻起就是确定的。
+    const body = cleanHtml(dto.body);
+    const references = referencedAttachmentIds(body);
     const message = await this.prisma.$transaction(async (tx) => {
+      await lockAttachments(tx, references);
+      await assertAttachmentReferencesAvailable(tx, user, references);
       const created = await tx.ticketMessage.create({
         data: {
           ticketId: id,
@@ -67,7 +80,7 @@ export class TicketMessaging {
           type: isInternal ? 'NOTE' : 'REPLY',
           isInternal,
           contentType: dto.contentType ?? 'text/html',
-          body: cleanHtml(dto.body),
+          body,
           mentions: mentionUserIds.length
             ? { createMany: { data: mentionUserIds.map((userId) => ({ userId })) } }
             : undefined,
@@ -79,7 +92,7 @@ export class TicketMessaging {
       });
       await linkReferencedAttachments(tx, id, created.id, created.body, user.id);
       return created;
-    });
+    }, { isolationLevel: 'ReadCommitted' });
     await writeHistory(this.prisma, id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
     // 首次由非提单人发出的公开回复 → 记 first_response，并撤掉响应超时任务
@@ -153,8 +166,10 @@ export class TicketMessaging {
       throw new ForbiddenException('无权查看该工单');
     }
 
-    // 编辑同样可能引入新的附件引用，更新正文与绑定必须原子提交。
-    const updated = await this.prisma.$transaction(async (tx) => {
+    const body = cleanHtml(dto.body);
+    const after = referencedAttachmentIds(body);
+    // 正文、附件绑定、删除队列和审计一起提交，存储操作在提交之后执行。
+    const result = await this.prisma.$transaction(async (tx) => {
       const current = await tx.ticket.findUnique({
         where: { id: ticketId },
         include: { participants: true },
@@ -175,7 +190,7 @@ export class TicketMessaging {
           authorId: user.id,
           ...(canSeeInternal ? {} : { isInternal: false }),
         },
-        select: { id: true },
+        select: { id: true, body: true },
       });
       if (!authorized) {
         // 只在确认存在后返回 403，不把无权访问的消息正文带出来。
@@ -193,15 +208,27 @@ export class TicketMessaging {
         throw new ForbiddenException('无权编辑该消息');
       }
 
+      const before = referencedAttachmentIds(authorized.body);
+      await lockAttachments(tx, [...before, ...after]);
+      await assertAttachmentReferencesAvailable(tx, user, [...after].filter(id => !before.has(id)));
       const next = await tx.ticketMessage.update({
-        where: { id: authorized.id },
-        data: { body: cleanHtml(dto.body) },
+        where: { id: authorized.id, body: authorized.body },
+        data: { body },
         include: { author: { select: AUTHOR_SELECT } },
+      }).catch(error => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+          throw new ConflictException('消息已变更，请刷新后重试');
+        }
+        throw error;
       });
       await linkReferencedAttachments(tx, ticketId, messageId, next.body, user.id);
-      return next;
-    });
-    await writeHistory(this.prisma, ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
-    return updated;
+      const queued = before.size ? await this.attachments.queueRemovedInlineImages(
+        tx, ticketId, messageId, user.id, authorized.body, next.body,
+      ) : 0;
+      await writeHistory(tx, ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
+      return { next, queued };
+    }, { isolationLevel: 'ReadCommitted' });
+    if (result.queued) void this.attachments.processPendingDeletions().catch(() => undefined);
+    return result.next;
   }
 }

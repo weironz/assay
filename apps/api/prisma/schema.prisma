@@ -466,6 +466,7 @@ model TicketAttachment {
   objectKey  String   @map("object_key")
   fileSize   Int      @map("file_size")
   mime       String
+  isInline   Boolean? @map("is_inline") // null：旧上传记录未保存用途
   uploaderId String   @map("uploader_id")
   createdAt  DateTime @default(now()) @map("created_at")
 

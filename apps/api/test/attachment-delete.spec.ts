@@ -6,6 +6,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
   const events: string[] = [];
   const rec = { id: 'att1', uploaderId: 'u1', ticketId: 't1', messageId: 'm1', objectKey: 'key1', fileName: 'file.docx', ...overrides };
   const tx: any = {
+    $queryRaw: async () => [{ id: 'att1' }],
     ticketAttachment: {
       findUnique: async () => rec,
       deleteMany: async () => { events.push('delete'); return { count: 1 }; },
@@ -16,7 +17,7 @@ function fixture(overrides: Record<string, unknown> = {}) {
     ticketHistory: { create: async () => { events.push('history'); return {}; } },
   };
   const db: any = { $transaction: async (fn: any, options: any) => {
-    assert.equal(options.isolationLevel, 'Serializable');
+    assert.equal(options.isolationLevel, 'ReadCommitted');
     const result = await fn(tx); events.push('commit'); return result;
   } };
   const service = new AttachmentsService(db, {} as any);
