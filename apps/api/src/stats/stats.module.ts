@@ -1,64 +1,51 @@
-import { Module } from '@nestjs/common';
-import { Controller, Get } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Controller, Get, Module } from '@nestjs/common';
+import { TicketStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CurrentUser, RequirePermissions } from '../auth/decorators';
 import { AuthUser } from '../auth/auth.types';
 import { ticketVisibilityWhere } from '../tickets/visibility';
+import { TERMINAL_STATUSES } from '../tickets/core';
 
-const DONE = ['RESOLVED', 'CLOSED', 'CANCELLED'];
-const STATUSES = [
-  'NEW', 'ASSIGNED', 'IN_PROGRESS', 'PENDING',
-  'RESOLVED', 'CLOSED', 'REOPENED', 'CANCELLED',
-];
+const STATUSES = Object.values(TicketStatus);
 
 @Controller('stats')
 class StatsController {
   constructor(private readonly prisma: PrismaService) {}
 
-  // 可见性口径统一来自 tickets/visibility.ts（本人关联或被邀请协作的工单）。
-  private scope(user: AuthUser): Prisma.TicketWhereInput {
-    return ticketVisibilityWhere(user);
-  }
-
   @Get('overview')
   @RequirePermissions('ticket:read')
   async overview(@CurrentUser() user: AuthUser) {
-    const base = this.scope(user);
+    const base = ticketVisibilityWhere(user);
 
-    const grouped = await this.prisma.ticket.groupBy({
-      by: ['status'],
-      where: base,
-      _count: { _all: true },
-    });
-    const byStatus: Record<string, number> = {};
-    for (const s of STATUSES) byStatus[s] = 0;
-    for (const g of grouped) byStatus[g.status] = g._count._all;
-
-    const [total, myTodo, overdue, unassigned, unread] = await Promise.all([
-      this.prisma.ticket.count({ where: base }),
+    const [grouped, myTodo, overdue, unassigned, unread] = await Promise.all([
+      this.prisma.ticket.groupBy({ by: ['status'], where: base, _count: { _all: true } }),
       this.prisma.ticket.count({
         where: {
+          ...base,
           assigneeId: user.id,
-          status: { notIn: DONE as any },
+          status: { notIn: TERMINAL_STATUSES },
         },
       }),
       this.prisma.ticket.count({
         where: {
           ...base,
           slaDueAt: { lt: new Date() },
-          status: { notIn: [...DONE, 'PENDING'] as any },
+          status: { notIn: [...TERMINAL_STATUSES, 'PENDING'] },
         },
       }),
       this.prisma.ticket.count({
-        where: { ...base, assigneeId: null, status: { notIn: DONE as any } },
+        where: { ...base, assigneeId: null, status: { notIn: TERMINAL_STATUSES } },
       }),
       this.prisma.notification.count({
         where: { userId: user.id, isRead: false },
       }),
     ]);
 
-    const open = STATUSES.filter((s) => !DONE.includes(s)).reduce(
+    const byStatus: Record<string, number> = {};
+    for (const s of STATUSES) byStatus[s] = 0;
+    for (const g of grouped) byStatus[g.status] = g._count._all;
+    const total = grouped.reduce((sum, row) => sum + row._count._all, 0);
+    const open = STATUSES.filter((s) => !TERMINAL_STATUSES.includes(s)).reduce(
       (sum, s) => sum + byStatus[s],
       0,
     );

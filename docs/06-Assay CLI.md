@@ -53,8 +53,8 @@ assay --version
 
 ## 2. 认证与配置
 
-CLI 支持两种认证方式：可撤销 Cookie 会话，或从 Web「设置 → API Token」创建的个人
-Bearer Token。登录成功后只保存会话 Cookie，不保存密码：
+CLI 支持本地账号的 Cookie 会话，以及从 Web「设置 → API Token」创建的个人 Bearer Token。
+AD、OIDC 或启用两步验证的账号使用 Web 登录后创建 Token。通过 CLI 完成本地登录后，客户端保存会话 Cookie。
 
 ```bash
 assay auth login --email you@greenstor.ai

@@ -4,7 +4,9 @@ use reqwest::blocking::Client;
 use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
-use std::{fs, process::Command, time::Duration};
+#[cfg(windows)]
+use std::process::Command;
+use std::{fs, time::Duration};
 
 const REPO: &str = "weironz/assay";
 

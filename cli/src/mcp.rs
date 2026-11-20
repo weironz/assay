@@ -5,6 +5,7 @@ use serde_json::{Value, json};
 use std::io::{self, BufRead, Write};
 
 pub fn serve(config: Config) -> Result<()> {
+    const PROTOCOLS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
     let stdin = io::stdin();
     let mut stdout = io::stdout().lock();
     for line in stdin.lock().lines() {
@@ -22,12 +23,14 @@ pub fn serve(config: Config) -> Result<()> {
             "initialize" => ok(
                 id,
                 json!({
-                    "protocolVersion": message.pointer("/params/protocolVersion").and_then(Value::as_str).unwrap_or("2025-11-25"),
+                    "protocolVersion": message.pointer("/params/protocolVersion").and_then(Value::as_str)
+                        .filter(|version| PROTOCOLS.contains(version)).unwrap_or(PROTOCOLS[0]),
                     "capabilities": { "tools": { "listChanged": false } },
                     "serverInfo": { "name": "assay", "version": VERSION },
                     "instructions": "Assay 工单助手。先读取工单，再生成建议；用户授权提单后可创建工单，评论须经用户授权。创建前可用 dryRun 预览；写入结果未知时先搜索确认，避免重复提交。"
                 }),
             ),
+            "ping" => ok(id, json!({})),
             "tools/list" => ok(id, json!({ "tools": tools() })),
             "tools/call" => {
                 match call_tool(&config, message.get("params").cloned().unwrap_or_default()) {
@@ -126,8 +129,8 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
     let value = match name {
         "assay_attachment_upload" => {
             let path = std::path::Path::new(required_string(&args, "path")?);
-            match args.get("ticket").and_then(Value::as_str) {
-                Some(ticket) => client.upload_to_ticket(path, ticket)?,
+            match args.get("ticket") {
+                Some(_) => client.upload_to_ticket(path, required_string(&args, "ticket")?)?,
                 None => client.upload_draft(path)?,
             }
         }
@@ -189,8 +192,8 @@ fn call_tool(config: &Config, params: Value) -> Result<Value> {
             }
             client.get_with_query("/tickets", &query)?
         }
-        "assay_ticket_add_comment" => client.post(
-            &format!("/tickets/{}/messages", required_string(&args, "id")?),
+        "assay_ticket_add_comment" => client.comment(
+            required_string(&args, "id")?,
             json!({
                 "body": required_string(&args, "body")?,
                 "isInternal": args.get("internal").and_then(Value::as_bool).unwrap_or(false),

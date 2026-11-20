@@ -54,9 +54,7 @@ fn fake_api(status: &str, response: Value) -> (String, thread::JoinHandle<(Strin
                 let length = headers
                     .lines()
                     .find_map(|v| v.strip_prefix("content-length: "))
-                    .unwrap()
-                    .parse::<usize>()
-                    .unwrap();
+                    .map_or(0, |length| length.parse::<usize>().unwrap());
                 break (position + 4, length);
             }
         };
@@ -67,12 +65,67 @@ fn fake_api(status: &str, response: Value) -> (String, thread::JoinHandle<(Strin
             data.extend_from_slice(&buffer[..count]);
         }
         let headers = String::from_utf8_lossy(&data[..header_end]).to_lowercase();
-        let body = serde_json::from_slice(&data[header_end..header_end + length]).unwrap();
+        let body = if length == 0 {
+            Value::Null
+        } else {
+            serde_json::from_slice(&data[header_end..header_end + length]).unwrap()
+        };
         let response = response.to_string();
         write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}", response.len()).unwrap();
         (headers, body)
     });
     (base, handle)
+}
+
+#[test]
+fn ticket_number_lookup_searches_only_the_number_column() {
+    let (base, request) = fake_api("200 OK", json!({"items":[],"total":0}));
+    let output = invoke(&base, &["ticket", "get", "WO-20261120-0001"], "");
+    assert!(!output.status.success());
+    let (headers, _) = request.join().unwrap();
+    assert!(headers.starts_with("get /api/tickets?ticketno=wo-20261120-0001&page=1&pagesize=100 "));
+}
+
+#[test]
+fn cli_does_not_save_an_incomplete_two_factor_session() {
+    let (base, request) = fake_api("200 OK", json!({"twoFactorRedirect":true}));
+    let output = invoke(
+        &base,
+        &[
+            "auth",
+            "login",
+            "--email",
+            "test@example.test",
+            "--password-stdin",
+        ],
+        "fixture-password",
+    );
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("API Token"));
+    let (headers, _) = request.join().unwrap();
+    assert!(headers.starts_with("post /api/auth/sign-in/email "));
+}
+
+#[test]
+fn mcp_negotiates_unsupported_versions_and_answers_ping() {
+    let output = invoke(
+        "http://127.0.0.1:1",
+        &["mcp", "serve"],
+        concat!(
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"future\"}}\n",
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n"
+        ),
+    );
+    assert!(output.status.success());
+    let responses: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(responses.len(), 2);
+    assert_eq!(responses[0]["result"]["protocolVersion"], "2025-11-25");
+    assert_eq!(responses[1], json!({"jsonrpc":"2.0","id":2,"result":{}}));
 }
 
 #[test]

@@ -1,9 +1,29 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, relative } from 'node:path';
 import { NestFactory } from '@nestjs/core';
 import { S3Storage } from '../src/storage/s3.storage';
+import { LocalFsStorage } from '../src/storage/local-fs.storage';
 import { STORAGE_DRIVER } from '../src/storage/storage.interface';
 import { ensureBucketWithRetry, StorageModule } from '../src/storage/storage.module';
+
+test('local storage keeps objects inside the configured directory', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'assay-storage-test-'));
+  const root = join(directory, 'objects');
+  const storage = new LocalFsStorage(root);
+  const body = Buffer.from('fixture');
+  try {
+    await storage.put({ key: 'documents/test.txt', body, contentType: 'text/plain' });
+    assert.deepEqual(await storage.get('documents/test.txt'), body);
+    await assert.rejects(storage.put({
+      key: relative(root, join(directory, 'objects-other', 'test.txt')), body, contentType: 'text/plain',
+    }), /Invalid object key/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test('bucket initialization recovers when storage becomes available within the retry budget', async () => {
   let attempts = 0;

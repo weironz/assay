@@ -1,13 +1,7 @@
-import SambaPage from './features/samba/SambaPage';
+import { lazy } from 'react';
 import AdministrationPage from './pages/AdministrationPage';
-import FilesPage from './features/files/FilesPage';
 import DirectorySettingsPage from './pages/DirectorySettingsPage';
 import { PLATFORM_PERMISSIONS } from './lib/business-navigation';
-import AssetsPage, { AssetDetailPage } from './features/cop/AssetsPage';
-import PartsPage, { PartDetailPage } from './features/cop/PartsPage';
-import InventoryPage from './features/cop/InventoryPage';
-import OrganizationPage from './features/cop/OrganizationPage';
-import AssetImportPage from './features/cop/AssetImportPage';
 import { createBrowserRouter, Navigate } from 'react-router-dom';
 import LoginPage from './pages/LoginPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
@@ -18,11 +12,21 @@ import ProtectedRoute from './components/ProtectedRoute';
 import DashboardPage from './pages/DashboardPage';
 import PlatformOverviewPage from './pages/PlatformOverviewPage';
 import TicketsPage from './pages/TicketsPage';
-import NewTicketPage from './pages/NewTicketPage';
-import TicketDetailPage from './pages/TicketDetailPage';
 import UsersPage from './pages/UsersPage';
 import SlaPage from './pages/SlaPage';
 import PublicTicketSharePage from './pages/PublicTicketSharePage';
+
+const NewTicketPage = lazy(() => import('./pages/NewTicketPage'));
+const TicketDetailPage = lazy(() => import('./pages/TicketDetailPage'));
+const FilesPage = lazy(() => import('./features/files/FilesPage'));
+const SambaPage = lazy(() => import('./features/samba/SambaPage'));
+const AssetsPage = lazy(() => import('./features/cop/AssetsPage'));
+const AssetDetailPage = lazy(() => import('./features/cop/AssetsPage').then(module => ({ default: module.AssetDetailPage })));
+const PartsPage = lazy(() => import('./features/cop/PartsPage'));
+const PartDetailPage = lazy(() => import('./features/cop/PartsPage').then(module => ({ default: module.PartDetailPage })));
+const InventoryPage = lazy(() => import('./features/cop/InventoryPage'));
+const OrganizationPage = lazy(() => import('./features/cop/OrganizationPage'));
+const AssetImportPage = lazy(() => import('./features/cop/AssetImportPage'));
 
 export const router = createBrowserRouter([
   { path: '/login', element: <LoginPage key="login" /> },

@@ -29,7 +29,8 @@ GreenStor Company Operations Platform（公司运营服务平台）。在现有 
 apps/api   NestJS 后端（Prisma / 存储抽象 / 健康检查）
 apps/web   React 前端（Vite / Tailwind v4 / TanStack Query）
 docker-compose.dev.yml     开发环境：pg + redis + rustfs + adminer + mailpit + api + web（热更新）
-docker-compose.yaml        独立部署模板：直接暴露端口，CI 冒烟测试也用这份
+docker-compose.yaml        独立部署模板，直接暴露 Web 端口
+deploy/local-ci/           CI 隔离环境与冒烟检查
 deploy/aliyun/docker-compose.yaml 阿里云环境应用栈（Traefik 路由，保留生产卷名）
 deploy/aliyun/traefik.compose.yaml 公共代理的可选初始化模板（已有代理不覆盖）
 deploy/aliyun-Cloudflare-Tunnel/ 阿里云 Tunnel 应用栈、独立连接器与安装说明
@@ -50,14 +51,14 @@ docker compose -f docker-compose.dev.yml up -d --build
 |------|------|
 | 前端 Web | http://localhost:5173 |
 | 后端 API 健康检查 | http://localhost:3000/health |
-| Adminer（数据库） | http://localhost:8090 |
+| Adminer（数据库） | http://localhost:8080 |
 | RustFS 控制台 | http://localhost:9101 |
 
-> 端口在 `.env` 里可改。默认已避开常见占用：postgres 主机端口 5433、adminer 8090、
-> RustFS 9100/9101（容器间仍走内部 `rustfs:9000`，不受主机端口影响）。
+> 主机端口可在 `.env` 中修改。示例配置使用 PostgreSQL 5432、Adminer 8080 和 RustFS 9100/9101。
+> 改 `API_PORT` 或 `WEB_PORT` 后，开发 Compose 会推导浏览器 API 地址、认证来源和邮件链接。
 
 API 容器启动时执行 `prisma migrate deploy` 并灌入种子数据；COP 的编号 sequence 和库存约束必须通过迁移安装。历史仅使用 `db push` 的数据库升级前须备份、校验并建立迁移基线，见 [COP 运维说明](docs/cop/02-开发验证与运维.md)。
-`/health` 返回 `{"status":"ok","db":"up","storage":"s3"}` 即表示全链路就绪。
+`/health` 返回 HTTP 200 且 `status` 为 `ok`，表示 PostgreSQL、Redis 和存储均可用。
 
 ### 初始化数据（seed）
 
@@ -65,7 +66,7 @@ API 容器启动时执行 `prisma migrate deploy` 并灌入种子数据；COP �
 如需手动重跑：
 
 ```bash
-docker compose -f docker-compose.dev.yml exec api pnpm db:seed
+docker compose -f docker-compose.dev.yml exec api pnpm db:seed:dev
 ```
 
 ## 常用命令（开发）
@@ -97,7 +98,7 @@ admin@example.com / 你在 .env 中设置的 ADMIN_PASSWORD
 ## 生产部署
 
 单域名部署：Nginx 托管前端静态资源，并把 `/api/` 反代到后端；前端 SPA 路由与 API 通过 `/api` 前缀隔离。
-生产 `docker-compose.yaml` **直接拉取 Docker Hub 预构建镜像**，无需在服务器上构建：
+独立部署模板直接拉取预构建镜像。模板默认镜像仓库为阿里云 ACR，使用 Taskfile 发布到 Docker Hub 的版本时，在 `.env` 中设置 `REGISTRY=willdockerhub` 和对应的 `IMAGE_TAG`。
 
 - `willdockerhub/assay-api`（后端）
 - `willdockerhub/assay-web`（前端 + Nginx）

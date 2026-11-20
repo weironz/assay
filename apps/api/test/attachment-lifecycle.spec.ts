@@ -282,6 +282,7 @@ test('a successful upload clears the pending deletion registration', async () =>
       return { count: 1 };
     },
     deleteMany: async (args: any) => {
+      assert.equal(args.where.attempts, 0);
       events.push(`clear:${args.where.reason}`);
       return { count: 1 };
     },

@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -10,6 +11,7 @@ import { unlink } from 'fs/promises';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
 import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
+import { abandonPendingUpload, finalizePendingUpload, recordPendingUpload } from '../attachments/deletion-queue';
 import {
   ALLOWED_EXTS,
   assertAttachmentSize,
@@ -20,6 +22,8 @@ import { BusinessKind, serializable, writeActivity } from './business';
 
 @Injectable()
 export class BusinessFilesService {
+  private readonly logger = new Logger(BusinessFilesService.name);
+
   constructor(
     private readonly db: PrismaService,
     private readonly platform: PlatformService,
@@ -47,20 +51,20 @@ export class BusinessFilesService {
     file: Express.Multer.File,
   ) {
     if (!file) throw new BadRequestException('未收到文件');
-    let stored = false,
-      committed = false;
-    const key = 'business/' + kind + '/' + id + '/' + randomUUID();
+    let pendingKey: string | undefined;
     try {
       await this.platform.subject(user, kind, id, true);
       assertAttachmentSize(file);
       if (!ALLOWED_EXTS.includes(extOf(file.originalname)))
         throw new BadRequestException('不支持的文件格式');
+      const key = 'business/' + kind + '/' + id + '/' + randomUUID();
+      await recordPendingUpload(this.db, key);
+      pendingKey = key;
       await this.storage.putStream({
         key,
         body: createReadStream(file.path),
         contentType: file.mimetype,
       });
-      stored = true;
       const record = await serializable(this.db, async (tx) => {
         const row = await tx.businessAttachment.create({
           data: {
@@ -83,14 +87,16 @@ export class BusinessFilesService {
           undefined,
           { attachmentId: row.id, fileName: row.fileName },
         );
+        await finalizePendingUpload(tx, key);
         return row;
       });
-      committed = true;
+      pendingKey = undefined;
       return this.serialize(record);
+    } catch (error) {
+      if (pendingKey) await abandonPendingUpload(this.db, this.storage, this.logger, pendingKey);
+      throw error;
     } finally {
       await unlink(file.path).catch(() => undefined);
-      if (stored && !committed)
-        await this.storage.delete(key).catch(() => undefined);
     }
   }
   async download(user: AuthUser, id: string) {

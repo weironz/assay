@@ -434,17 +434,27 @@ if (!isolated) {
     const directory = await mkdtemp(join(tmpdir(), 'cop-files-'));
     const objects = new Map();
     let reads = 0;
+    let failedKey;
+    let failUpload = false;
+    let failDelete = false;
     const storage = {
       putStream: async ({ key, body }) => {
         const chunks = [];
         for await (const c of body) chunks.push(c);
         objects.set(key, Buffer.concat(chunks));
+        if (failUpload) {
+          failedKey = key;
+          throw new Error('fixture upload disconnected');
+        }
       },
       getStream: async (key) => {
         reads++;
         return require('node:stream').Readable.from(objects.get(key));
       },
-      delete: async (key) => objects.delete(key),
+      delete: async (key) => {
+        if (failDelete) throw new Error('fixture storage unavailable');
+        objects.delete(key);
+      },
     };
     const files = new BusinessFilesService(db, platform, storage);
     const file = async (name) => {
@@ -478,6 +488,19 @@ if (!isolated) {
     );
     await assert.rejects(access(denied.path));
     assert.equal(objects.size, 1);
+    failUpload = true;
+    failDelete = true;
+    const interrupted = await file('interrupted.txt');
+    try {
+      await assert.rejects(files.upload(auth(actor), 'asset', assetIds[0], interrupted), /fixture upload disconnected/);
+      await assert.rejects(access(interrupted.path));
+      assert.equal(await db.businessAttachment.count({ where: { objectKey: failedKey } }), 0);
+      const pending = await db.attachmentDeletionTask.findFirstOrThrow({ where: { objectKey: failedKey } });
+      assert.equal(pending.reason, 'UPLOAD_PENDING');
+      assert.ok(pending.nextAttemptAt <= new Date());
+    } finally {
+      if (failedKey) await db.attachmentDeletionTask.deleteMany({ where: { objectKey: failedKey } });
+    }
     await rm(directory, { recursive: true, force: true });
   });
   test('import preview does not allocate numbers, preserves known tags and commit is idempotent', async () => {

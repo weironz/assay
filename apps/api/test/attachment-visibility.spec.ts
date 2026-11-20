@@ -701,6 +701,10 @@ test('posting a message binds referenced attachments inside the same transaction
   let inTransaction = false;
   const tx = {
     $queryRaw: async () => [{ id: 'att-1' }],
+    ticketHistory: { create: async () => {
+      assert.equal(inTransaction, true);
+      events.push('audit');
+    } },
     ticketMessage: {
       create: async () => ({
         id: 'message-1',
@@ -737,7 +741,6 @@ test('posting a message binds referenced attachments inside the same transaction
           firstResponseAt: new Date(),
         }),
       },
-      ticketHistory: { create: async () => ({}) },
       // 如果绑定跑到事务外，这个 mock 会直接报错。
       ticketAttachment: {
         updateMany: async () => {
@@ -768,5 +771,5 @@ test('posting a message binds referenced attachments inside the same transaction
     body: '<p>see <img src="/api/attachments/att-1/download"></p>',
   } as any);
   assert.equal((message as any).id, 'message-1');
-  assert.deepEqual(events, ['begin', 'claim-draft', 'bind', 'commit']);
+  assert.deepEqual(events, ['begin', 'claim-draft', 'bind', 'audit', 'commit']);
 });

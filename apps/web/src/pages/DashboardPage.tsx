@@ -100,7 +100,7 @@ export default function DashboardPage() {
   const { t } = useTranslation();
   const user = useAuth((s) => s.user);
   const canReadTickets=!!user?.permissions.includes('ticket:read');
-  const { data, isLoading } = useOverview(canReadTickets);
+  const { data, isLoading, isError, refetch } = useOverview(canReadTickets);
 
   const byStatus = data?.byStatus ?? {};
   const sum = (list: string[]) =>
@@ -120,7 +120,13 @@ export default function DashboardPage() {
         </p>
       </div>
 
-      {!canReadTickets ? null : isLoading || !data ? (
+      {canReadTickets && isError && (
+        <div className="flex items-center gap-3 text-sm">
+          <p role="alert" className="text-red-600 dark:text-red-400">{t('common.loadFailed')}</p>
+          <button type="button" className="underline" onClick={() => void refetch()}>{t('common.retry')}</button>
+        </div>
+      )}
+      {!canReadTickets || (!data && isError) ? null : isLoading || !data ? (
         <div className="text-gray-400">{t('common.loading')}</div>
       ) : (
         <>

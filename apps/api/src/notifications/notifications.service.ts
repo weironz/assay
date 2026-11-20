@@ -1,5 +1,5 @@
 import { adapter, BusinessRef } from '../operations/business';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MailService } from '../mail/mail.service';
 import { getConfig } from '../config';
@@ -19,6 +19,8 @@ const esc = (s = '') =>
 
 @Injectable()
 export class NotificationsService {
+  private readonly logger = new Logger(NotificationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly mail: MailService,
@@ -55,7 +57,7 @@ export class NotificationsService {
           <p><a href="${link}">查看详情</a></p>
           <hr><p style="color:#888;font-size:12px">来自 GreenStor COP 的自动通知</p>`;
         await this.mail.send(user.email, input.title, html);
-      })();
+      })().catch(error => this.logger.warn('Notification email failed', error));
     }
     return rec;
   }

@@ -55,8 +55,8 @@ export class TicketQueries {
     // 所有筛选都必须与可见范围相交。用 AND 组合可避免关键字/快捷范围覆盖
     // visibilityFilter 里的 OR，从而意外扩大普通用户能看到的工单。
     const filters: Prisma.TicketWhereInput[] = [ticketVisibilityWhere(user)];
-    if (q.status) filters.push({ status: q.status as TicketStatus });
-    if (q.priority) filters.push({ priority: q.priority as any });
+    if (q.status) filters.push({ status: q.status });
+    if (q.priority) filters.push({ priority: q.priority });
     if (q.queueId) filters.push({ queueId: q.queueId });
     if (q.assigneeId) filters.push({ assigneeId: q.assigneeId === '__none__' ? null : q.assigneeId });
     if (q.datacenterId) filters.push({ datacenterId: q.datacenterId === '__none__' ? null : q.datacenterId });
@@ -141,7 +141,7 @@ export class TicketQueries {
           category: { select: { id: true, name: true } },
           datacenter: { select: { id: true, name: true } },
         },
-        orderBy: { [q.sort ?? 'createdAt']: q.order ?? 'desc' },
+        orderBy: [{ [q.sort ?? 'createdAt']: q.order ?? 'desc' }, { id: 'asc' }],
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),

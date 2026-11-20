@@ -69,6 +69,12 @@ impl ApiClient {
             .filter(|v| v.contains('='))
             .map(str::to_owned)
             .collect::<Vec<_>>();
+        let result: Value = response.json().context("解析登录响应失败")?;
+        if result["twoFactorRedirect"].as_bool() == Some(true) {
+            bail!(
+                "该账号需要两步验证。请在 Web 端登录并创建 API Token，再运行 assay auth token --token-stdin"
+            );
+        }
         if cookies.is_empty() {
             bail!("登录成功但服务器没有返回会话 Cookie");
         }
@@ -83,25 +89,14 @@ impl ApiClient {
             .context("解析 API 响应失败")
     }
 
-    /// The REST detail endpoint is keyed by database ID. Resolve human-facing WO-… numbers
-    /// through the list endpoint first so both identifiers work consistently in CLI and MCP.
     pub fn get_ticket(&self, reference: &str) -> Result<Value> {
-        if !reference.starts_with("WO-") {
-            return self.get(&format!("/tickets/{reference}"));
-        }
-        let listing = self.get_with_query("/tickets", &[("keyword", reference.to_owned())])?;
-        let ticket_id = listing
-            .get("items")
-            .and_then(Value::as_array)
-            .and_then(|items| {
-                items.iter().find_map(|item| {
-                    (item.get("ticketNo").and_then(Value::as_str) == Some(reference))
-                        .then(|| item.get("id").and_then(Value::as_str))
-                        .flatten()
-                })
-            })
-            .context("未找到指定工单号")?;
-        self.get(&format!("/tickets/{ticket_id}"))
+        let id = self.resolve_ticket_id(reference)?;
+        self.get(&format!("/tickets/{id}"))
+    }
+
+    pub fn comment(&self, reference: &str, payload: Value) -> Result<Value> {
+        let id = self.resolve_ticket_id(reference)?;
+        self.post(&format!("/tickets/{id}/messages"), payload)
     }
 
     pub fn get_with_query(&self, path: &str, query: &[(&str, String)]) -> Result<Value> {
@@ -158,20 +153,51 @@ impl ApiClient {
         self.get(&format!("/tickets/{id}/attachments"))
     }
 
-    fn resolve_ticket_id(&self, ticket: &str) -> Result<String> {
-        let value = self.get_ticket(ticket)?;
-        let id = value
-            .get("id")
-            .and_then(Value::as_str)
-            .context("工单详情缺少 ID")?;
-        if id.is_empty()
-            || !id
+    fn resolve_ticket_id(&self, reference: &str) -> Result<String> {
+        if reference.is_empty()
+            || !reference
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
         {
-            bail!("工单 ID 无效");
+            bail!("工单号或 ID 无效");
         }
-        Ok(id.to_owned())
+        if !reference.starts_with("WO-") {
+            return Ok(reference.to_owned());
+        }
+
+        // Filter by number only. General keyword matches in other ticket bodies can hide
+        // the exact ticket on the default first page.
+        let mut page = 1;
+        loop {
+            let listing = self.get_with_query(
+                "/tickets",
+                &[
+                    ("ticketNo", reference.to_owned()),
+                    ("page", page.to_string()),
+                    ("pageSize", "100".to_owned()),
+                ],
+            )?;
+            let items = listing["items"].as_array().context("解析工单列表失败")?;
+            if let Some(item) = items
+                .iter()
+                .find(|item| item["ticketNo"].as_str() == Some(reference))
+            {
+                let id = item["id"].as_str().context("工单列表缺少 ID")?;
+                if id.is_empty()
+                    || !id
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                {
+                    bail!("工单 ID 无效");
+                }
+                return Ok(id.to_owned());
+            }
+            let total = listing["total"].as_u64().unwrap_or_default();
+            if items.is_empty() || page * 100 >= total {
+                bail!("未找到指定工单号");
+            }
+            page += 1;
+        }
     }
 
     pub fn download_attachment(&self, id: &str, destination: &std::path::Path) -> Result<Value> {

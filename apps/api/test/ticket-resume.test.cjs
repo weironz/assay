@@ -36,6 +36,7 @@ function fixture({ days = 53, accumulated = 0n, firstResponseAt = null, conflict
     ticketHistory: { create: async ({ data }) => history.push(data) },
     ticketParticipant: { findMany: async () => [] },
   };
+  prisma.$transaction = async work => work(prisma);
   const lifecycle = new TicketLifecycle(prisma, new WorkflowService(), {}, {
     schedule: async (...args) => scheduled.push(args),
   });

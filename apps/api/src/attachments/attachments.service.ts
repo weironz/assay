@@ -28,8 +28,11 @@ import {
 } from './limits';
 import type { DeletionDrainResult } from './deletion-queue';
 import {
+  abandonPendingUpload,
   enqueueObjectDeletions,
+  finalizePendingUpload,
   processObjectDeletions,
+  recordPendingUpload,
 } from './deletion-queue';
 
 import {
@@ -48,12 +51,6 @@ import {
   messageBindingIssue,
   referencedAttachmentIds,
 } from './rules';
-
-/**
- * 上传中的对象先登记为「待删除」，正常落库后在同一事务里撤销登记。
- * 给正在上传的对象留 1 小时窗口，避免后台清理任务把还没传完的对象删掉。
- */
-const UPLOAD_PENDING_GRACE_MS = 60 * 60 * 1000;
 
 @Injectable()
 export class AttachmentsService {
@@ -270,15 +267,7 @@ export class AttachmentsService {
     await this.assertQuota(user, ticketId, file.size);
     const objectKey = this.buildKey(ticketId ?? 'draft', file.originalname);
 
-    // 先登记待删除，再写对象。这样即使后面的落库失败、数据库暂时不可用，
-    // 对象 key 也已经在 outbox 里，不会变成再也定位不到的孤儿。
-    // 正常上传成功后，这个登记会和附件记录在同一事务里撤销。
-    await enqueueObjectDeletions(
-      this.prisma,
-      [objectKey],
-      'UPLOAD_PENDING',
-      new Date(Date.now() + UPLOAD_PENDING_GRACE_MS),
-    );
+    await recordPendingUpload(this.prisma, objectKey);
 
     // 调用方（upload/uploadDraft）在 finally 里统一清理临时文件，这里只负责持久化。
     try {
@@ -300,51 +289,12 @@ export class AttachmentsService {
             uploaderId: user.id,
           },
         });
-        // 附件记录与「撤销待删除」必须原子提交：只删登记不建记录会丢对象，
-        // 只建记录不删登记则后台会误删仍在使用的对象。登记已不存在说明后台
-        // 已经把对象清掉（例如上传耗时超过保护窗口），此时不能落一条坏记录。
-        const cleared = await tx.attachmentDeletionTask.deleteMany({
-          where: { objectKey, reason: 'UPLOAD_PENDING' },
-        });
-        if (!cleared.count) {
-          throw new Error('上传待删除登记已失效，拒绝创建附件记录');
-        }
+        await finalizePendingUpload(tx, objectKey);
         return created;
       });
       return this.serialize(rec);
     } catch (error) {
-      // 上传中途失败会留下写了一半的对象，DB 落库失败时对象也已经写进桶了：
-      // 两种情况都必须回删。待删除登记已经存在，回删成功后撤销它；回删失败
-      // 则把登记提前到当前时间，让后台 worker 立刻重试。
-      try {
-        await this.storage.delete(objectKey);
-      } catch (cleanupError) {
-        this.logger.error(
-          `附件对象回滚失败（key=${objectKey}）：${(cleanupError as Error).message}`,
-        );
-        await this.prisma.attachmentDeletionTask
-          .updateMany({
-            where: { objectKey, reason: 'UPLOAD_PENDING' },
-            data: {
-              nextAttemptAt: new Date(),
-              lastError: (cleanupError as Error).message.slice(0, 2000),
-            },
-          })
-          .catch((queueError) => {
-            this.logger.error(
-              `附件对象回滚失败且无法更新删除队列（key=${objectKey}）：${(queueError as Error).message}`,
-            );
-          });
-        throw error;
-      }
-      // 对象已回删；清掉待删除登记。即使这一步失败，worker 重删一次对象也是幂等的。
-      await this.prisma.attachmentDeletionTask
-        .deleteMany({ where: { objectKey, reason: 'UPLOAD_PENDING' } })
-        .catch((queueError) => {
-          this.logger.error(
-            `附件对象回滚后无法清理删除队列（key=${objectKey}）：${(queueError as Error).message}`,
-          );
-        });
+      await abandonPendingUpload(this.prisma, this.storage, this.logger, objectKey);
       throw error;
     }
   }

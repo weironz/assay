@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAuth } from "../stores/auth";
@@ -269,7 +269,9 @@ export default function AppLayout() {
                 : undefined
             }
           >
-            <Outlet />
+            <Suspense fallback={<p role="status" className="text-sm text-gray-500">{t('common.loading')}</p>}>
+              <Outlet />
+            </Suspense>
           </div>
         </main>
       </div>

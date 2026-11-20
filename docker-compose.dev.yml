@@ -67,16 +67,20 @@ services:
     env_file: .env
     environment:
       NODE_ENV: development
+      API_PORT: "3000"
       # 容器内使用服务名连接
       DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD:-assay_dev_pwd}@postgres:5432/${POSTGRES_DB:-assay}?schema=public
       REDIS_HOST: redis
       REDIS_PORT: "6379"
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       S3_ENDPOINT: http://rustfs:9000
       # 开发环境：邮件走 mailpit 捕获器（UI http://localhost:8025）
       SMTP_HOST: mailpit
       SMTP_PORT: "1025"
       SMTP_FROM: 工单系统 <no-reply@assay.local>
-      APP_URL: http://localhost:5173
+      AUTH_BASE_URL: ${AUTH_BASE_URL:-http://localhost:${API_PORT:-3000}}
+      AUTH_TRUST_ORIGINS: ${AUTH_TRUST_ORIGINS:-http://localhost:${WEB_PORT:-5173}}
+      APP_URL: ${APP_URL:-http://localhost:${WEB_PORT:-5173}}
     ports:
       - "${API_PORT:-3000}:3000"
     volumes:
@@ -97,7 +101,7 @@ services:
       dockerfile: Dockerfile.dev
     restart: unless-stopped
     environment:
-      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:3000}
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:${API_PORT:-3000}}
     ports:
       - "${WEB_PORT:-5173}:5173"
     volumes:

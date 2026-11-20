@@ -11,6 +11,8 @@ const zhCN: Resource = {
   workbench: workbenchCn,
   cop: copZhCN,
   common: {
+    loadFailed: '加载失败，请重试。',
+    retry: '重试',
     loading: '加载中…',
     save: '保存',
     cancel: '取消',

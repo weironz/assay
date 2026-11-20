@@ -27,6 +27,8 @@ const DELETION_RETRY_BASE_MS = 5 * 60 * 1000;
 const DELETION_RETRY_MAX_MS = 24 * 60 * 60 * 1000;
 /** 连续失败达到这个次数后在日志里标记为需要人工处理。 */
 export const DELETION_ALERT_AFTER = 5;
+const UPLOAD_PENDING = 'UPLOAD_PENDING';
+const UPLOAD_GRACE_MS = 60 * 60 * 1000;
 
 type DeletionDb = Pick<Prisma.TransactionClient, 'attachmentDeletionTask'>;
 
@@ -51,6 +53,43 @@ export async function enqueueObjectDeletions(
     data: keys.map((objectKey) => ({ objectKey, reason, nextAttemptAt })),
   });
   return keys.length;
+}
+
+export async function recordPendingUpload(db: DeletionDb, objectKey: string) {
+  await enqueueObjectDeletions(db, [objectKey], UPLOAD_PENDING, new Date(Date.now() + UPLOAD_GRACE_MS));
+}
+
+/** Commit in the same transaction as the attachment row. A claimed deletion
+ * can already be running against storage, even if its task still exists. */
+export async function finalizePendingUpload(tx: DeletionDb, objectKey: string) {
+  const result = await tx.attachmentDeletionTask.deleteMany({
+    where: { objectKey, reason: UPLOAD_PENDING, attempts: 0 },
+  });
+  if (!result.count) throw new Error('上传待删除登记已失效，拒绝创建附件记录');
+}
+
+export async function abandonPendingUpload(
+  db: DeletionDb, storage: Pick<StorageDriver, 'delete'>, logger: Pick<Logger, 'error'>, objectKey: string,
+) {
+  const where = { objectKey, reason: UPLOAD_PENDING };
+  try {
+    await storage.delete(objectKey);
+  } catch (error) {
+    const lastError = errorMessage(error);
+    logger.error(`附件对象回滚失败：${lastError}`);
+    try {
+      const task = await db.attachmentDeletionTask.updateMany({
+        where, data: { nextAttemptAt: new Date(), lastError: lastError.slice(0, 2000) },
+      });
+      // The original lease may have completed before a slow upload finished.
+      if (!task.count) await enqueueObjectDeletions(db, [objectKey], UPLOAD_PENDING);
+    } catch (queueError) {
+      logger.error('无法登记待清理的上传对象', queueError);
+    }
+    return;
+  }
+  await db.attachmentDeletionTask.deleteMany({ where: { ...where, attempts: 0 } })
+    .catch(error => logger.error('附件对象回滚后无法清理删除登记', error));
 }
 
 function retryDelayMs(attempts: number) {

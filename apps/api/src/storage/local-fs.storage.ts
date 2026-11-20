@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream, promises as fs } from 'fs';
-import { dirname, resolve } from 'path';
+import { dirname, isAbsolute, relative, resolve, sep } from 'path';
 import type { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { getConfig } from '../config';
@@ -19,9 +19,10 @@ export class LocalFsStorage implements StorageDriver {
   constructor(private readonly baseDir: string) {}
 
   private full(key: string): string {
-    // 防目录穿越
-    const target = resolve(this.baseDir, key);
-    if (!target.startsWith(resolve(this.baseDir))) {
+    const base = resolve(this.baseDir);
+    const target = resolve(base, key);
+    const objectPath = relative(base, target);
+    if (!objectPath || objectPath === '..' || objectPath.startsWith('..' + sep) || isAbsolute(objectPath)) {
       throw new Error('Invalid object key');
     }
     return target;

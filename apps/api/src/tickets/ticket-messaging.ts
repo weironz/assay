@@ -3,6 +3,7 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -38,6 +39,8 @@ import { CreateMessageDto, UpdateMessageDto } from './dto';
  */
 @Injectable()
 export class TicketMessaging {
+  private readonly logger = new Logger(TicketMessaging.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly notifications: NotificationsService,
@@ -70,7 +73,7 @@ export class TicketMessaging {
     // 消息与附件绑定同一事务提交：内部/公开的可见性从落库那一刻起就是确定的。
     const body = cleanHtml(dto.body);
     const references = referencedAttachmentIds(body);
-    const message = await this.prisma.$transaction(async (tx) => {
+    const { message, firstResponse } = await this.prisma.$transaction(async (tx) => {
       await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${id} FOR KEY SHARE`;
       await lockAttachments(tx, references);
       await assertAttachmentReferencesAvailable(tx, user, references);
@@ -92,18 +95,19 @@ export class TicketMessaging {
         },
       });
       await linkReferencedAttachments(tx, id, created.id, created.body, user.id);
-      return created;
+      await writeHistory(tx, id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
+      // Only the first committed public staff reply sets the timestamp.
+      const firstResponse = !ticket.firstResponseAt && !isInternal && ticket.requesterId !== user.id
+        ? await tx.ticket.updateMany({
+            where: { id, firstResponseAt: null },
+            data: { firstResponseAt: created.createdAt },
+          })
+        : null;
+      return { message: created, firstResponse: !!firstResponse?.count };
     }, { isolationLevel: 'ReadCommitted' });
-    await writeHistory(this.prisma, id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
 
-    // 首次由非提单人发出的公开回复 → 记 first_response，并撤掉响应超时任务
-    if (!ticket.firstResponseAt && !isInternal && ticket.requesterId !== user.id) {
-      await this.prisma.ticket.update({
-        where: { id },
-        data: { firstResponseAt: new Date() },
-      });
-      await this.sla.cancel(id, 'response');
-    }
+    if (firstResponse)
+      void this.sla.cancel(id, 'response').catch(error => this.logger.warn('Response SLA cancellation failed for ' + id, error));
 
     const collaboratorIds = ticket.participants
       .filter((participant) => participant.role === 'COLLABORATOR')
@@ -111,39 +115,16 @@ export class TicketMessaging {
     const followerIds = ticket.participants
       .filter((participant) => participant.role === 'FOLLOWER')
       .map((participant) => participant.userId);
-    if (isInternal) {
-      // 内部讨论不泄露给提单人和仅关注者。
-      await notifyMany(
-        this.notifications,
-        [ticket.assigneeId, ...collaboratorIds].filter(Boolean) as string[],
-        user.id,
-        'MESSAGE',
-        `工单有新的内部讨论：${ticket.ticketNo}`,
-        ticket.title,
-        id,
-      );
-    } else {
-      await notifyMany(
-        this.notifications,
-        [ticket.requesterId, ticket.assigneeId, ...collaboratorIds, ...followerIds].filter(
-          Boolean,
-        ) as string[],
-        user.id,
-        'MESSAGE',
-        `工单有新回复：${ticket.ticketNo}`,
-        ticket.title,
-        id,
-      );
-    }
-    await notifyMany(
-      this.notifications,
-      mentionUserIds,
-      user.id,
-      'MENTION',
-      `有人在工单中提及你：${ticket.ticketNo}`,
-      ticket.title,
-      id,
-    );
+    const recipients = isInternal
+      ? [ticket.assigneeId, ...collaboratorIds]
+      : [ticket.requesterId, ticket.assigneeId, ...collaboratorIds, ...followerIds];
+    const title = isInternal ? '工单有新的内部讨论' : '工单有新回复';
+    await Promise.all([
+      notifyMany(this.notifications, recipients.filter((uid): uid is string => !!uid),
+        user.id, 'MESSAGE', `${title}：${ticket.ticketNo}`, ticket.title, id),
+      notifyMany(this.notifications, mentionUserIds,
+        user.id, 'MENTION', `有人在工单中提及你：${ticket.ticketNo}`, ticket.title, id),
+    ]).catch(error => this.logger.warn('Reply notification failed for ' + id, error));
     return message;
   }
 

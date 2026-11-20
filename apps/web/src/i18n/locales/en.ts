@@ -15,6 +15,8 @@ const en = {
   workbench: workbenchEn,
   cop: copEn,
   common: {
+    loadFailed: 'Could not load this information.',
+    retry: 'Retry',
     loading: 'Loading…',
     save: 'Save',
     cancel: 'Cancel',

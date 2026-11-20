@@ -6,6 +6,8 @@ const { PrismaClient } = require('@prisma/client');
 const { TicketEditor } = require('../dist/tickets/ticket-editor');
 const { TicketLifecycle } = require('../dist/tickets/ticket-lifecycle');
 const { TicketDeletion } = require('../dist/tickets/ticket-deletion');
+const { TicketMessaging } = require('../dist/tickets/ticket-messaging');
+const { WorkflowService } = require('../dist/tickets/workflow.service');
 const { enqueueObjectDeletions } = require('../dist/attachments/deletion-queue');
 
 const url = process.env.TICKET_LIFECYCLE_TEST_DATABASE_URL;
@@ -149,5 +151,46 @@ test('assignment cannot overwrite a concurrent cancellation and cannot commit wi
     await assert.rejects(auditFailure.assign(user, audited.id, { assigneeId: user.id }), /audit unavailable/);
     assert.equal((await db.ticket.findUniqueOrThrow({ where: { id: audited.id } })).status, 'NEW');
     assert.equal(notificationCount, 0);
+  });
+});
+
+test('committed holds and replies succeed through an SLA outage and record first response once', { skip: !url }, async () => {
+  await withUser(async (db, requester, tag) => {
+    const staff = await db.user.create({ data: { name: tag, email: `staff-${tag}@example.test` } });
+    const actor = { ...staff, roles: ['handler'], permissions: ['ticket:read', 'ticket:transition', 'ticket:comment'] };
+    const ticket = await db.ticket.create({ data: {
+      ticketNo: tag, title: tag, requesterId: requester.id, assigneeId: staff.id, status: 'IN_PROGRESS',
+    } });
+    const cancelled = [];
+    const sla = { cancel: async (id, kind) => { cancelled.push(kind); throw new Error('fixture Redis unavailable'); } };
+    const notifications = { notify: async () => { throw new Error('fixture notification unavailable'); } };
+    try {
+      const failure = new TicketLifecycle({
+        ticket: db.ticket,
+        $transaction: work => db.$transaction(tx => work({
+          ticket: tx.ticket,
+          ticketHistory: { create: async () => { throw new Error('fixture audit unavailable'); } },
+        })),
+      }, new WorkflowService(), notifications, sla);
+      await assert.rejects(failure.transition(actor, ticket.id, 'hold'), /fixture audit unavailable/);
+      assert.equal((await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } })).status, 'IN_PROGRESS');
+      assert.deepEqual(cancelled, []);
+
+      const lifecycle = new TicketLifecycle(db, new WorkflowService(), notifications, sla);
+      await lifecycle.transition(actor, ticket.id, 'hold');
+      const messaging = new TicketMessaging(db, notifications, sla, {});
+      const replies = await Promise.all([
+        messaging.addMessage(actor, ticket.id, { body: '<p>First concurrent reply</p>' }),
+        messaging.addMessage(actor, ticket.id, { body: '<p>Second concurrent reply</p>' }),
+      ]);
+      const updated = await db.ticket.findUniqueOrThrow({ where: { id: ticket.id } });
+      assert.equal(updated.status, 'PENDING');
+      assert.ok(replies.some(reply => +reply.createdAt === +updated.firstResponseAt));
+      assert.deepEqual(cancelled, [undefined, 'response']);
+      assert.equal(await db.ticketHistory.count({ where: { ticketId: ticket.id } }), 3);
+    } finally {
+      await db.ticket.delete({ where: { id: ticket.id } });
+      await db.user.delete({ where: { id: staff.id } });
+    }
   });
 });

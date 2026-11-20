@@ -326,19 +326,33 @@ class Pipeline:
     def test_api(self):
         image = self.docker_build('api', True)
         with self.sandbox('api') as (compose, env, network):
-            compose('up', '-d', '--wait', '--wait-timeout', '180', 'postgres', 'redis')
+            compose('--profile', 'smoke', 'up', '-d', '--wait', '--wait-timeout', '180',
+                    'postgres', 'redis', 'rustfs')
             url = 'postgresql://ci:ci_test_password@postgres:5432/assay_ci?schema=public'
+            databases = {
+                'COP_TEST_DATABASE_URL': 'assay_cop_test',
+                'OIDC_TEST_DATABASE_URL': 'assay_oidc_test',
+                'UNIFIED_LOGIN_TEST_DATABASE_URL': 'assay_unified_login_test',
+            }
+            for database in databases.values():
+                compose('exec', '-T', 'postgres', 'createdb', '-U', 'ci', database)
             args = ['docker', 'run', '--rm', '--network', network]
             values = {'DATABASE_URL': url, 'REDIS_URL': 'redis://redis:6379',
                       'SESSION_EPOCH_TEST_DATABASE_URL': url, 'SAMBA_AUDIT_TEST_DATABASE_URL': url,
                       'TICKET_LIFECYCLE_TEST_DATABASE_URL': url,
+                      'INLINE_IMAGE_TEST_S3_ENDPOINT': 'http://rustfs:9000',
                       'AUTH_BASE_URL': 'http://localhost:3000', 'AUTH_TRUST_ORIGINS': 'http://localhost:5173',
                       'NODE_ENV': 'test', 'MAIL_PROVIDER': 'none'}
+            values.update({name: url.replace('assay_ci', database) for name, database in databases.items()})
             for key, value in values.items():
                 args += ['-e', key + '=' + value]
             for directory in ['test', 'scripts']:
                 args += ['--mount', f'type=bind,src={ROOT / "apps/api" / directory},dst=/app/{directory},readonly']
-            call([*args, image, 'sh', '-ec', './node_modules/.bin/prisma validate && ./node_modules/.bin/prisma migrate deploy && node scripts/run-tests.cjs'], env=env)
+            call([*args, image, 'sh', '-ec',
+                  './node_modules/.bin/prisma validate; ./node_modules/.bin/prisma migrate deploy; '
+                  'for url in "$COP_TEST_DATABASE_URL" "$OIDC_TEST_DATABASE_URL" "$UNIFIED_LOGIN_TEST_DATABASE_URL"; do '
+                  'DATABASE_URL="$url" ./node_modules/.bin/prisma migrate deploy; done; '
+                  'node scripts/run-tests.cjs'], env=env)
         self.mark('test-api')
 
     def rust(self, directory, arguments):

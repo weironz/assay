@@ -11,6 +11,8 @@ const zhTW: Resource = {
   workbench: workbenchTw,
   cop: copZhTW,
   common: {
+    loadFailed: '載入失敗，請重試。',
+    retry: '重試',
     loading: '載入中…',
     save: '儲存',
     cancel: '取消',

@@ -208,7 +208,7 @@ function Row({ type }: { type: TicketType }) {
 
 export default function SlaPage() {
   const { t } = useTranslation();
-  const { data: types, isLoading } = useTypes();
+  const { data: types, isLoading, isError, refetch } = useTypes();
 
   return (
     <div className="max-w-4xl space-y-4">
@@ -217,6 +217,12 @@ export default function SlaPage() {
         <p className="mt-1 text-sm text-gray-500">{t('slaAdmin.intro')}</p>
       </div>
 
+      {isError && (
+        <div className="flex items-center gap-3 text-sm">
+          <p role="alert" className="text-red-600 dark:text-red-400">{t('common.loadFailed')}</p>
+          <button type="button" className="underline" onClick={() => void refetch()}>{t('common.retry')}</button>
+        </div>
+      )}
       <div className="overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
         <table className="w-full min-w-[36rem] text-sm">
           <thead className="bg-gray-50 text-gray-500 dark:bg-gray-800">

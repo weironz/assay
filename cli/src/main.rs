@@ -330,8 +330,8 @@ fn run(cli: Cli) -> Result<()> {
             if body.trim().is_empty() {
                 bail!("评论内容不能为空");
             }
-            ApiClient::from_config(&store.config)?.post(
-                &format!("/tickets/{}/messages", args.id),
+            ApiClient::from_config(&store.config)?.comment(
+                &args.id,
                 json!({
                     "body": body,
                     "isInternal": args.internal,

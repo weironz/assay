@@ -73,12 +73,10 @@ export class TicketLifecycle {
     let reschedule = false;
 
     if (to === 'PENDING') {
-      // 挂起：记下暂停起点，把两个到期任务撤掉，时钟就停了
       data.holdStartedAt = now;
-      await this.sla.cancel(id);
     } else if (ticket.status === 'PENDING' && ticket.holdStartedAt) {
       // 恢复：把这段暂停时长整体加回到两个截止时刻上，等价于时钟从未走过
-      const paused = now.getTime() - ticket.holdStartedAt.getTime();
+      const paused = Math.max(0, now.getTime() - ticket.holdStartedAt.getTime());
       data.holdStartedAt = null;
       data.holdMs = { increment: BigInt(paused) };
       if (responseDue && !ticket.firstResponseAt) {
@@ -102,26 +100,28 @@ export class TicketLifecycle {
 
     // 乐观并发：状态从读取到写入之间若被并发流转，updateMany 命中 0 行，
     // 拒绝重放（避免双写历史、双加暂停时长、重复调度 SLA）。
-    const updated = await this.prisma.ticket.updateMany({
-      where: { id, status: ticket.status },
-      data,
+    await this.prisma.$transaction(async tx => {
+      const updated = await tx.ticket.updateMany({
+        where: { id, status: ticket.status, updatedAt: ticket.updatedAt },
+        data,
+      });
+      if (!updated.count)
+        throw new ConflictException('工单状态已被其他人变更，请刷新后重试');
+      await writeHistory(tx, id, user.id, 'TRANSITION', 'status', ticket.status, to);
     });
-    if (updated.count === 0)
-      throw new ConflictException('工单状态已被其他人变更，请刷新后重试');
-    await writeHistory(this.prisma, id, user.id, 'TRANSITION', 'status', ticket.status, to);
 
-    // SLA 任务调度 / 取消
-    if (['RESOLVED', 'CLOSED', 'CANCELLED'].includes(to)) {
-      await this.sla.cancel(id);
+    // The worker checks the persisted status and reconciliation restores active deadlines.
+    if (['PENDING', 'RESOLVED', 'CLOSED', 'CANCELLED'].includes(to)) {
+      void this.sla.cancel(id).catch(error => this.logger.warn('SLA cancellation failed for ' + id, error));
     } else if (reschedule) {
-      if (!ticket.firstResponseAt) {
-        await this.sla.schedule(id, 'response', responseDue);
-      }
-      await this.sla.schedule(id, 'resolve', resolveDue);
+      void Promise.all([
+        ticket.firstResponseAt ? undefined : this.sla.schedule(id, 'response', responseDue),
+        this.sla.schedule(id, 'resolve', resolveDue),
+      ]).catch(error => this.logger.warn('SLA scheduling will be reconciled for ' + id, error));
     }
 
-    // 状态变更通知
-    await this.notifyTransition(user, ticket, to);
+    await this.notifyTransition(user, ticket, to)
+      .catch(error => this.logger.warn('Transition notification failed for ' + id, error));
     return id;
   }
 

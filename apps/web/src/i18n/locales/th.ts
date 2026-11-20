@@ -11,6 +11,8 @@ const th: Resource = {
   workbench: workbenchTh,
   cop: copTh,
   common: {
+    loadFailed: 'โหลดข้อมูลไม่สำเร็จ โปรดลองอีกครั้ง',
+    retry: 'ลองอีกครั้ง',
     loading: 'กำลังโหลด…',
     save: 'บันทึก',
     cancel: 'ยกเลิก',

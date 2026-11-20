@@ -1,6 +1,7 @@
 import {
   IsArray,
   IsBoolean,
+  IsEnum,
   IsIn,
   IsInt,
   IsOptional,
@@ -15,6 +16,7 @@ import {
   IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { Priority, TicketStatus } from '@prisma/client';
 import { TicketContactDto } from './contact';
 
 const PRIORITIES = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'] as const;
@@ -207,8 +209,8 @@ export class ListTicketsQuery {
   createdTo?: string;
 
   @IsOptional()
-  @IsString()
-  status?: string;
+  @IsEnum(TicketStatus)
+  status?: TicketStatus;
 
   /** 仪表盘快捷入口使用的预设范围；与普通状态筛选可组合。 */
   @IsOptional()
@@ -216,8 +218,8 @@ export class ListTicketsQuery {
   scope?: (typeof TICKET_SCOPES)[number];
 
   @IsOptional()
-  @IsString()
-  priority?: string;
+  @IsEnum(Priority)
+  priority?: Priority;
 
   @IsOptional()
   @IsString()

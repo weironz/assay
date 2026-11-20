@@ -63,13 +63,15 @@ task local:deploy           # Ansible：最终停写备份、更新、校验、�
 | 文件 | 职责 |
 | --- | --- |
 | [`Taskfile.yml`](../../Taskfile.yml) | 所有人工/Agent 触发入口及任务顺序 |
-| [`.github/workflows/ci-cd.yml`](../../.github/workflows/ci-cd.yml) | 自动检查、手动构建发布、独立生产部署 job；调用同一 Taskfile |
+| [`.github/workflows/ci-cd.yml`](../../.github/workflows/ci-cd.yml) | 手动触发检查、构建发布及独立生产部署，调用同一 Taskfile |
 | [`run.py`](run.py) | 源码与产物校验记录、测试/构建、镜像推送、Release 与部署前置检查 |
 | [`actions.py`](actions.py)、[`actions_check.py`](actions_check.py)、[`actions_deploy.py`](actions_deploy.py) | Actions 提交/SHA 核对、runner 检查、临时密钥文件适配 |
 | [`deployment.py`](deployment.py)、[`deploy/ansible`](../../deploy/ansible) | 环境变量目标、严格主机校验、Ansible 传送/执行与完成凭证回传 |
 | [`deploy.sh`](deploy.sh)、[`deploy_config.py`](deploy_config.py) | 主机锁、配置边界、最终备份、仅 API/Web 更新、失败恢复 |
 | [`backup.sh`](../backup.sh)、[`backup-s3.cjs`](../backup-s3.cjs) | PostgreSQL、S3 当前对象、配置与恢复密钥备份 |
 | [`upgrade.py`](upgrade.py)、[`db_fingerprint.py`](db_fingerprint.py) | 隔离恢复、升级/旧程序兼容演练及原记录完整性校验 |
+
+`task test:api` 使用隔离的 PostgreSQL、Redis 和 RustFS，包含资产库存、OIDC、统一登录以及真实对象删除的集成测试。
 
 ### 如何判断完成与交接
 
