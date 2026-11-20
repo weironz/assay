@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { randomUUID } = require('node:crypto');
+const { mkdtemp, rm, writeFile } = require('node:fs/promises');
+const { tmpdir } = require('node:os');
+const { join } = require('node:path');
 require('reflect-metadata');
 const { PrismaClient } = require('@prisma/client');
 const { TicketEditor } = require('../dist/tickets/ticket-editor');
@@ -8,6 +11,9 @@ const { TicketLifecycle } = require('../dist/tickets/ticket-lifecycle');
 const { TicketDeletion } = require('../dist/tickets/ticket-deletion');
 const { TicketMessaging } = require('../dist/tickets/ticket-messaging');
 const { WorkflowService } = require('../dist/tickets/workflow.service');
+const { allocateTicketNo } = require('../dist/tickets/core');
+const { AttachmentsService } = require('../dist/attachments/attachments.service');
+const { MAX_ATTACHMENTS_PER_TICKET, MAX_DAILY_UPLOADS } = require('../dist/attachments/limits');
 const { enqueueObjectDeletions } = require('../dist/attachments/deletion-queue');
 
 const url = process.env.TICKET_LIFECYCLE_TEST_DATABASE_URL;
@@ -25,6 +31,7 @@ async function withUser(work) {
         await db.ticketCreationRequest.deleteMany({ where: { requesterId: user.id } });
         await db.ticket.deleteMany({ where: { requesterId: user.id } });
         await db.ticketAttachment.deleteMany({ where: { uploaderId: user.id } });
+        await db.ticketUploadUsage.deleteMany({ where: { uploaderId: user.id } });
         await db.user.delete({ where: { id: user.id } });
       }
       await db.attachmentDeletionTask.deleteMany({ where: { objectKey: { startsWith: tag + '/' } } });
@@ -34,6 +41,81 @@ async function withUser(work) {
 
 const image = (id, suffix = '') => `<img src="https://example.test/api/attachments/${id}/download${suffix}" />`;
 const ticketDraft = (title, body = '<p>Details</p>') => ({ title, body });
+
+test('daily numbering is numeric, survives deletion, and allocates concurrent values exactly once', { skip: !url }, async () => {
+  await withUser(async (db, user) => {
+    const day = '20990411';
+    const old = await db.ticket.create({
+      data: { ticketNo: `WO-${day}-9999`, title: 'Older API fixture', requesterId: user.id },
+    });
+    await db.ticket.delete({ where: { id: old.id } });
+    try {
+      const date = new Date('2099-04-11T12:00:00Z');
+      const numbers = await Promise.all(Array.from({ length: 6 }, () => db.$transaction(tx => allocateTicketNo(tx, date))));
+      assert.deepEqual(numbers.sort(), Array.from({ length: 6 }, (_, i) => `WO-${day}-${10000 + i}`));
+    } finally {
+      await db.ticketNumberCounter.deleteMany({ where: { day } });
+    }
+  });
+});
+
+test('uploads racing for the final daily slot cannot exceed the limit and deleting it does not refund quota', { skip: !url, timeout: 15000 }, async () => {
+  await withUser(async (db, user, tag) => {
+    await db.ticketUploadUsage.createMany({
+      data: Array.from({ length: MAX_DAILY_UPLOADS - 1 }, (_, i) => ({
+        id: `${tag}-${i}`, uploaderId: user.id, fileSize: 1, createdAt: new Date(),
+      })),
+    });
+    const directory = await mkdtemp(join(tmpdir(), 'assay-quota-'));
+    const file = async name => {
+      const path = join(directory, name);
+      await writeFile(path, 'x');
+      return { path, originalname: name, size: 1, mimetype: 'text/plain' };
+    };
+    const objects = new Set();
+    let streams = 0;
+    let open;
+    const barrier = new Promise(resolve => { open = resolve; });
+    const store = {
+      putStream: async ({ key, body }) => {
+        for await (const chunk of body) assert.equal(chunk.length, 1);
+        objects.add(key);
+        if (++streams === 2) open();
+        await barrier;
+      },
+      delete: async key => objects.delete(key),
+    };
+    try {
+      const service = new AttachmentsService(db, store);
+      const files = await Promise.all([file('one.txt'), file('two.txt')]);
+      const results = await Promise.allSettled(files.map(entry => service.uploadDraft(user, entry)));
+      const succeeded = results.filter(result => result.status === 'fulfilled');
+      assert.equal(succeeded.length, 1);
+      assert.equal(results.find(result => result.status === 'rejected').reason.getStatus(), 400);
+      assert.equal(objects.size, 1);
+      await db.ticketAttachment.delete({ where: { id: succeeded[0].value.id } });
+      await assert.rejects(service.uploadDraft(user, await file('retry.txt')), { status: 400 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+test('binding a draft in a reply cannot exceed the per-ticket cap', { skip: !url }, async () => {
+  await withUser(async (db, user, tag) => {
+    const ticket = await db.ticket.create({ data: { ticketNo: tag, title: tag, requesterId: user.id } });
+    const attachment = index => ({ fileName: 'fixture.png', objectKey: `${tag}/${index}`, fileSize: 1,
+      mime: 'image/png', uploaderId: user.id, isInline: true });
+    await db.ticketAttachment.createMany({
+      data: Array.from({ length: MAX_ATTACHMENTS_PER_TICKET }, (_, i) => ({ ...attachment(i), ticketId: ticket.id })),
+    });
+    const draft = await db.ticketAttachment.create({ data: attachment('draft') });
+    const messaging = new TicketMessaging(db, {}, {}, {});
+    await assert.rejects(messaging.addMessage(user, ticket.id, { body: image(draft.id) }), { status: 400 });
+    assert.equal(await db.ticketMessage.count({ where: { ticketId: ticket.id } }), 0);
+    assert.equal((await db.ticketAttachment.findUniqueOrThrow({ where: { id: draft.id } })).ticketId, null);
+  });
+});
 
 test('SLA failure and concurrent retries return one committed ticket; discarded draft objects are queued', { skip: !url }, async () => {
   await withUser(async (db, user, tag) => {

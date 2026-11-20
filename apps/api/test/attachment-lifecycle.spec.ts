@@ -27,9 +27,12 @@ test('disabling automatic draft cleanup preserves uploads while the deletion out
         callbacks.push(callback);
         return { unref() {} };
       }) as any);
-      const service = new AttachmentMaintenanceService({} as any, {} as any);
       let sweeps = 0;
       let drains = 0;
+      let quotaPrunes = 0;
+      const service = new AttachmentMaintenanceService({
+        ticketUploadUsage: { deleteMany: async () => { quotaPrunes++; } },
+      } as any, {} as any);
       service.sweep = async () => { sweeps++; return 0; };
       service.processDeletions = async () => { drains++; return { deleted: 0, retrying: 0 }; };
       try {
@@ -37,6 +40,7 @@ test('disabling automatic draft cleanup preserves uploads while the deletion out
         for (const callback of callbacks) await callback();
         assert.equal(sweeps, enabled ? 2 : 0);
         assert.equal(drains, 1);
+        assert.equal(quotaPrunes, 1);
       } finally {
         service.onModuleDestroy();
         timers.mock.restore();
@@ -150,17 +154,20 @@ const emptyStorage = () => ({
 
 function uploadPrisma(overrides: { count?: number; uploads?: number; create?: () => Promise<any> } = {}) {
   const prisma: any = {
+    $queryRaw: async () => [],
     ticket: { findUnique: async () => ticketAccess },
     ticketMessage: { findMany: async () => [] },
     ticketAttachment: {
       count: async () => overrides.count ?? 0,
+      create:
+        overrides.create ??
+        (async (args: any) => ({ id: 'attachment-new', ...args.data })),
+    },
+    ticketUploadUsage: {
       aggregate: async () => ({
         _count: { _all: overrides.uploads ?? 0 },
         _sum: { fileSize: 0 },
       }),
-      create:
-        overrides.create ??
-        (async (args: any) => ({ id: 'attachment-new', ...args.data })),
     },
     // 上传前先登记待删除，成功后在同一事务里撤销；失败的测试会覆盖这些方法。
     attachmentDeletionTask: {

@@ -1,6 +1,7 @@
-import { ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { AuthUser } from '../auth/auth.types';
+import { MAX_ATTACHMENTS_PER_TICKET } from './limits';
 import {
   canOperateTicket,
   isInternalParticipant,
@@ -21,6 +22,15 @@ import {
  */
 
 type MessageReader = Pick<PrismaClient, 'ticketMessage'>;
+
+export async function assertAttachmentSlots(
+  db: Pick<Prisma.TransactionClient, 'ticketAttachment'>, ticketId: string, additional = 0,
+) {
+  const count = await db.ticketAttachment.count({ where: { ticketId } });
+  if (count + additional > MAX_ATTACHMENTS_PER_TICKET) {
+    throw new BadRequestException(`单个工单最多 ${MAX_ATTACHMENTS_PER_TICKET} 个附件`);
+  }
+}
 
 // ——— 正文引用：URL 解析与改写 ———
 
@@ -144,10 +154,10 @@ export async function linkReferencedAttachments(
   uploaderId: string,
 ) {
   const ids = [...referencedAttachmentIds(body)];
-  if (!ids.length) return;
+  if (!ids.length) return 0;
   // 旧流程可能先按草稿上传（ticketId 为空）再把图片粘进回复；这里先把本人
   // 仍处于草稿状态的引用附件挂到当前工单，下一句才能绑定 messageId。
-  await db.ticketAttachment.updateMany({
+  const claimed = await db.ticketAttachment.updateMany({
     where: { id: { in: ids }, uploaderId, ticketId: null, messageId: null },
     data: { ticketId },
   });
@@ -155,6 +165,7 @@ export async function linkReferencedAttachments(
     where: { id: { in: ids }, ticketId, uploaderId, messageId: null },
     data: { messageId },
   });
+  return claimed.count;
 }
 
 /** 谁能向工单上传附件：可操作工单的人（管理岗/提单人/处理人）或协作成员。 */

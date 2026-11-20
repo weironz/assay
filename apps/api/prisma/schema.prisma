@@ -458,6 +458,13 @@ model TicketAttachmentReference {
 }
 
 /// Keep a replay receipt even when the original ticket is deleted.
+model TicketNumberCounter {
+  day       String @id
+  lastValue BigInt @map("last_value")
+
+  @@map("ticket_number_counters")
+}
+
 model TicketCreationRequest {
   requesterId String @map("requester_id")
   key         String
@@ -502,9 +509,20 @@ model TicketAttachment {
   uploader User           @relation(fields: [uploaderId], references: [id])
 
   @@index([ticketId])
-  // 上传配额按「上传者 + 时间窗口」统计，没有这个索引每次上传都要全表扫描
   @@index([uploaderId, createdAt])
   @@map("ticket_attachments")
+}
+
+/// 上传完成后的短期配额记录，独立于附件或工单的删除。
+model TicketUploadUsage {
+  id         String   @id
+  uploaderId String   @map("uploader_id")
+  fileSize   Int      @map("file_size")
+  createdAt  DateTime @map("created_at")
+
+  @@index([uploaderId, createdAt])
+  @@index([createdAt])
+  @@map("ticket_upload_usage")
 }
 
 /// 对象删除 outbox。

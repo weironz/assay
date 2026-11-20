@@ -44,6 +44,7 @@ export class AttachmentMaintenanceService
   private readonly logger = new Logger('Attachments');
   private sweepTimer?: NodeJS.Timeout;
   private drainTimer?: NodeJS.Timeout;
+  private quotaTimer?: NodeJS.Timeout;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -71,11 +72,18 @@ export class AttachmentMaintenanceService
     // 与 SlaService 一致：定时器不能拖住进程退出。
     this.sweepTimer?.unref();
     this.drainTimer.unref();
+    this.quotaTimer = setInterval(() => {
+      const cutoff = new Date(Date.now() - 48 * 60 * 60 * 1000);
+      void this.prisma.ticketUploadUsage.deleteMany({ where: { createdAt: { lt: cutoff } } })
+        .catch(error => this.logger.error('附件配额记录清理失败', error));
+    }, SWEEP_INTERVAL_MS);
+    this.quotaTimer.unref();
   }
 
   onModuleDestroy() {
     if (this.sweepTimer) clearInterval(this.sweepTimer);
     if (this.drainTimer) clearInterval(this.drainTimer);
+    if (this.quotaTimer) clearInterval(this.quotaTimer);
   }
 
   /**

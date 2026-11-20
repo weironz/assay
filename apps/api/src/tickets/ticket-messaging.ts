@@ -15,6 +15,7 @@ import { SlaService } from '../sla/sla.service';
 import { AttachmentsService } from '../attachments/attachments.service';
 import {
   assertAttachmentReferencesAvailable,
+  assertAttachmentSlots,
   linkReferencedAttachments,
   lockAttachments,
   referencedAttachmentIds,
@@ -74,7 +75,7 @@ export class TicketMessaging {
     const body = cleanHtml(dto.body);
     const references = referencedAttachmentIds(body);
     const { message, firstResponse } = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${id} FOR KEY SHARE`;
+      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${id} FOR NO KEY UPDATE`;
       await lockAttachments(tx, references);
       await assertAttachmentReferencesAvailable(tx, user, references);
       const created = await tx.ticketMessage.create({
@@ -94,7 +95,8 @@ export class TicketMessaging {
           mentions: { include: { user: { select: PARTICIPANT_USER_SELECT } } },
         },
       });
-      await linkReferencedAttachments(tx, id, created.id, created.body, user.id);
+      const added = await linkReferencedAttachments(tx, id, created.id, created.body, user.id);
+      if (added) await assertAttachmentSlots(tx, id);
       await writeHistory(tx, id, user.id, 'MESSAGE', 'message', null, isInternal ? '内部备注' : '回复');
       // Only the first committed public staff reply sets the timestamp.
       const firstResponse = !ticket.firstResponseAt && !isInternal && ticket.requesterId !== user.id
@@ -152,7 +154,7 @@ export class TicketMessaging {
     const after = referencedAttachmentIds(body);
     // 正文、附件绑定、删除队列和审计一起提交，存储操作在提交之后执行。
     const result = await this.prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${ticketId} FOR KEY SHARE`;
+      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${ticketId} FOR NO KEY UPDATE`;
       const current = await tx.ticket.findUnique({
         where: { id: ticketId },
         include: { participants: true },
@@ -205,10 +207,11 @@ export class TicketMessaging {
         }
         throw error;
       });
-      await linkReferencedAttachments(tx, ticketId, messageId, next.body, user.id);
+      const added = await linkReferencedAttachments(tx, ticketId, messageId, next.body, user.id);
       const queued = before.size ? await this.attachments.queueRemovedInlineImages(
         tx, ticketId, messageId, user.id, authorized.body, next.body,
       ) : 0;
+      if (added) await assertAttachmentSlots(tx, ticketId);
       await writeHistory(tx, ticketId, user.id, 'UPDATE', 'message', null, '编辑消息');
       return { next, queued };
     }, { isolationLevel: 'ReadCommitted' });

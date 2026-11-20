@@ -52,23 +52,19 @@ export function normalizeContact(
   };
 }
 
-export async function genTicketNo(
-  prisma: Pick<Prisma.TransactionClient, 'ticket'>,
+export async function allocateTicketNo(
+  tx: Pick<Prisma.TransactionClient, 'ticketNumberCounter'>,
+  createdAt: Date,
 ): Promise<string> {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(
-    d.getDate(),
-  ).padStart(2, '0')}`;
-  const prefix = `WO-${ymd}-`;
-  // 取当天最大编号 +1，而不是数当天条数：删掉任意一张单都会让计数回退，
-  // 下一张新单就会撞上已存在的编号。序号补零到 4 位，字典序即数字序。
-  const last = await prisma.ticket.findFirst({
-    where: { ticketNo: { startsWith: prefix } },
-    orderBy: { ticketNo: 'desc' },
-    select: { ticketNo: true },
+  // Match the container's existing UTC numbering day across all API replicas.
+  const day = createdAt.toISOString().slice(0, 10).replaceAll('-', '');
+  const { lastValue } = await tx.ticketNumberCounter.upsert({
+    where: { day },
+    create: { day, lastValue: 1n },
+    update: { lastValue: { increment: 1n } },
+    select: { lastValue: true },
   });
-  const seq = last ? Number(last.ticketNo.slice(prefix.length)) + 1 : 1;
-  return `${prefix}${String(seq).padStart(4, '0')}`;
+  return `WO-${day}-${lastValue.toString().padStart(4, '0')}`;
 }
 
 export function writeHistory(
@@ -113,28 +109,6 @@ export async function resolveCategoryId(
   if (existing) return existing.id;
   const created = await db.category.create({ data: { name } });
   return created.id;
-}
-
-/**
- * 编号是「读当天最大值 + 1」，两个请求挨得足够近就会读到同一个值。
- * 唯一索引会挡住后一个，这里重取编号再试；连撞 5 次就不是并发问题了，抛出去。
- */
-export async function createWithTicketNo(
-  prisma: Pick<Prisma.TransactionClient, 'ticket'>,
-  create: (ticketNo: string) => Promise<Ticket>,
-) {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    try {
-      return await create(await genTicketNo(prisma));
-    } catch (e) {
-      const dup =
-        e instanceof Prisma.PrismaClientKnownRequestError &&
-        e.code === 'P2002' &&
-        String(e.meta?.target ?? '').includes('ticket_no');
-      if (!dup || attempt === 4) throw e;
-    }
-  }
-  throw new Error('unreachable');
 }
 
 /**

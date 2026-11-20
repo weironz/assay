@@ -139,6 +139,56 @@ def main():
     denied(lambda: smbclient.rename(root + '\\existing.txt', root + '\\renamed.txt', port=port))
     # Even the creator/owner must not get WRITE_DAC back implicitly.
     denied(lambda: smbclient.open_file(root + '\\created-after.txt', mode='rb', desired_access=0x40000, port=port).close())
+
+    large_directory = os.getenv('SAMBA_ACL_LARGE_DIRECTORY_TEST') == '1'
+    if large_directory:
+        smbclient.mkdir(root + '\\large-dir', port=port)
+        subprocess.run([
+            'docker', 'exec', 'assay-samba-test-ad-1', 'python3', '-c',
+            'from pathlib import Path; import sys; '
+            'root = Path(sys.argv[1]); assert root.is_dir(); '
+            '[(root / f"fixture-{i}").touch(exist_ok=False) for i in range(10001)]',
+            f'/shares/{share}/large-dir',
+        ], check=True)
+
+    def check_gateway(person, delete_status, check_large=False):
+        owner = secrets.token_hex(32)
+        gateway_token = (directory / 'secrets/files-token').read_text().strip()
+        headers = {'Authorization': 'Bearer ' + gateway_token, 'X-File-Owner': owner}
+
+        def file_request(method, path, body=None, content_type='application/json'):
+            req = urllib.request.Request(base + '/files/v1/' + path, data=body, method=method,
+                headers={**headers, 'Content-Type': content_type})
+            try:
+                with http.open(req, timeout=40) as response:
+                    return response.status, response.read()
+            except urllib.error.HTTPError as error:
+                return error.code, error.read()
+
+        identity = {key: users[person][key] for key in ('id', 'name', 'dn')}
+        status, data = file_request('POST', 'session', json.dumps({
+            'owner': owner, 'identity': identity, 'password': password, 'shares': [share], 'ttl': 120,
+        }).encode())
+        assert status == 200, ('gateway session', status)
+        headers['X-File-Session'] = json.loads(data)['token']
+        try:
+            name = 'gateway-' + person + '.txt'
+            target = urllib.parse.urlencode({'share': share, 'path': name})
+            contents = b'gateway ACL fixture'
+            assert file_request('PUT', 'content?' + target, contents, 'application/octet-stream')[0] == 200
+            assert file_request('GET', 'content?' + target) == (200, contents)
+            deletion = json.dumps({'action': 'delete', 'share': share, 'path': name}).encode()
+            assert file_request('POST', 'commands', deletion)[0] == delete_status
+            if check_large:
+                path = 'list?' + urllib.parse.urlencode({'share': share, 'path': 'large-dir'})
+                started = time.monotonic()
+                assert file_request('GET', path)[0] == 422
+                return round((time.monotonic() - started) * 1000)
+        finally:
+            file_request('DELETE', 'session')
+
+    large_ms = check_gateway(staff, 403, large_directory)
+    check_gateway(leader, 200)
     connect(leader)
     smbclient.open_file(root + '\\created-after.txt', mode='rb', desired_access=0x40000, port=port).close()
     for name in ('existing.txt', 'created-after.txt', 'existing-dir\\nested.txt', 'new-dir\\new.txt'):
@@ -147,7 +197,8 @@ def main():
     smbclient.rmdir(root + '\\new-dir', port=port)
     smbclient.reset_connection_cache()
     report = {'passed':True,'scope':'isolated ASSAY.TEST only','staffReadWrite':True,'existingAndNewDeletesDenied':True,
-        'ownerWriteDacDenied':True,'renameDenied':True,'leaderAlsoDepartmentMember':True,'leaderDeletesAllowed':True,'leaderWriteDacAllowed':True,'readOnlyPreview':True,'staleRevisionRejected':True,'backupId':result['result']['backupId']}
+        'ownerWriteDacDenied':True,'renameDenied':True,'leaderAlsoDepartmentMember':True,'leaderDeletesAllowed':True,'leaderWriteDacAllowed':True,'readOnlyPreview':True,'staleRevisionRejected':True,'backupId':result['result']['backupId'],
+        'gatewayReadWriteAndDeletePolicy': True, 'largeDirectoryLimitMs': large_ms}
     (directory / 'no-delete-result.json').write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report))
     # Keep evidence and the isolated config together until explicit test cleanup.

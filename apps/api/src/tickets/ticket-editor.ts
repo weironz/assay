@@ -13,6 +13,7 @@ import { AuthUser } from '../auth/auth.types';
 import { cleanHtml } from '../common/sanitize';
 import {
   assertAttachmentReferencesAvailable,
+  assertAttachmentSlots,
   linkReferencedAttachments,
   lockAttachments,
   referencedAttachmentIds,
@@ -22,7 +23,7 @@ import { SlaService } from '../sla/sla.service';
 import { canOperateTicket } from './visibility';
 import {
   assertValidReference,
-  createWithTicketNo,
+  allocateTicketNo,
   loadTicketOrThrow,
   normalizeContact,
   resolveCategoryId,
@@ -79,7 +80,7 @@ export class TicketEditor {
       dto.typeId ?? this.defaultTypeId(),
       dto.queueId ?? this.defaultQueueId(),
     ]);
-    const ticket = await createWithTicketNo(this.prisma, (ticketNo) => this.prisma.$transaction(async (tx) => {
+    const ticket = await this.prisma.$transaction(async (tx) => {
       if (request) await tx.ticketCreationRequest.create({ data: request });
       await lockAttachments(tx, [...references, ...attachmentIds]);
       await assertAttachmentReferencesAvailable(tx, user, references);
@@ -87,6 +88,7 @@ export class TicketEditor {
       const categoryId = await resolveCategoryId(tx, dto.categoryId, dto.categoryName);
       const sla = await slaOf(tx, typeId);
       const createdAt = new Date();
+      const ticketNo = await allocateTicketNo(tx, createdAt);
       const created = await tx.ticket.create({
         data: {
           ticketNo,
@@ -112,8 +114,9 @@ export class TicketEditor {
         const first = await tx.ticketMessage.findFirstOrThrow({
           where: { ticketId: created.id }, orderBy: { createdAt: 'asc' }, select: { id: true },
         });
-        await this.bindDrafts(tx, user.id, created.id, first.id, attachmentIds, references);
-        await linkReferencedAttachments(tx, created.id, first.id, body, user.id);
+        const drafts = await this.bindDrafts(tx, user.id, created.id, first.id, attachmentIds, references);
+        const inline = await linkReferencedAttachments(tx, created.id, first.id, body, user.id);
+        if (drafts || inline) await assertAttachmentSlots(tx, created.id);
       }
       await writeHistory(tx, created.id, user.id, 'CREATE', 'status', null, 'NEW');
       if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
@@ -124,7 +127,7 @@ export class TicketEditor {
         data: { ticketId: created.id },
       });
       return created;
-    }, { isolationLevel: 'ReadCommitted' })).catch(async error => {
+    }, { isolationLevel: 'ReadCommitted' }).catch(async error => {
       if (request && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const repeated = await replay();
         if (repeated) return repeated;
@@ -146,7 +149,7 @@ export class TicketEditor {
     tx: Prisma.TransactionClient, uploaderId: string, ticketId: string,
     messageId: string, ids: string[], references: ReadonlySet<string>,
   ) {
-    if (!ids.length) return;
+    if (!ids.length) return 0;
     const unreferencedIds = ids.filter(id => !references.has(id));
     const discarded = unreferencedIds.length ? await tx.ticketAttachment.findMany({
       where: { id: { in: unreferencedIds }, uploaderId, ticketId: null, messageId: null, isInline: true },
@@ -166,10 +169,12 @@ export class TicketEditor {
       }
     }
     const keep = ids.filter(id => !discardedIds.includes(id));
-    if (keep.length) await tx.ticketAttachment.updateMany({
+    if (!keep.length) return 0;
+    const bound = await tx.ticketAttachment.updateMany({
       where: { id: { in: keep }, uploaderId, ticketId: null, messageId: null },
       data: { ticketId, messageId },
     });
+    return bound.count;
   }
 
   private async defaultTypeId() {

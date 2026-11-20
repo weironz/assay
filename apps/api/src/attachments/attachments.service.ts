@@ -15,7 +15,6 @@ import { STORAGE_DRIVER, StorageDriver } from '../storage/storage.interface';
 import { AuthUser } from '../auth/auth.types';
 import {
   ALLOWED_EXTS,
-  MAX_ATTACHMENTS_PER_TICKET,
   MAX_DAILY_UPLOADS,
   MAX_DAILY_UPLOAD_BYTES,
   MAX_DAILY_UPLOAD_MB,
@@ -41,6 +40,7 @@ import {
 } from '../tickets/visibility';
 import {
   attachmentListWhere,
+  assertAttachmentSlots,
   attachmentRowVisible,
   canUploadToTicket,
   findAttachmentReference,
@@ -137,28 +137,14 @@ export class AttachmentsService {
     assertAttachmentSize(file);
   }
 
-  /**
-   * 存储配额：单工单附件数 + 单用户 24 小时上传次数/总量。
-   *
-   * 三个计数都是「先查后用」而不是事务里扣减，并发请求可能同时通过；这里的目标
-   * 是挡住脚本批量刷接口和长期无限增长，不是精确计费，所以不做额外的锁。
-   */
   private async assertQuota(
     user: AuthUser,
     ticketId: string | null,
     fileSize: number,
+    db: Pick<Prisma.TransactionClient, 'ticketAttachment' | 'ticketUploadUsage'> = this.prisma,
   ) {
-    if (ticketId) {
-      const count = await this.prisma.ticketAttachment.count({
-        where: { ticketId },
-      });
-      if (count >= MAX_ATTACHMENTS_PER_TICKET) {
-        throw new BadRequestException(
-          `单个工单最多 ${MAX_ATTACHMENTS_PER_TICKET} 个附件`,
-        );
-      }
-    }
-    const usage = await this.prisma.ticketAttachment.aggregate({
+    if (ticketId) await assertAttachmentSlots(db, ticketId, 1);
+    const usage = await db.ticketUploadUsage.aggregate({
       where: {
         uploaderId: user.id,
         createdAt: { gte: new Date(Date.now() - 24 * 60 * 60 * 1000) },
@@ -277,6 +263,10 @@ export class AttachmentsService {
         contentType: mime,
       });
       const rec = await this.prisma.$transaction(async (tx) => {
+        // Lock the ticket before the uploader. File streaming stays outside the transaction.
+        if (ticketId) await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${ticketId} FOR NO KEY UPDATE`;
+        await tx.$queryRaw`SELECT id FROM users WHERE id = ${user.id} FOR NO KEY UPDATE`;
+        await this.assertQuota(user, ticketId, file.size, tx);
         const created = await tx.ticketAttachment.create({
           data: {
             ticketId,

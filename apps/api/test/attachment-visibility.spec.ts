@@ -639,10 +639,12 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
   };
   const tx = {
     $queryRaw: async () => [{ id: 'att-body' }, { id: 'att-file' }],
+    ticketNumberCounter: { upsert: async () => ({ lastValue: 1n }) },
     ticket: { create: async () => ticket },
     ticketType: { findUnique: async () => null },
     ticketHistory: { create: async () => ({}) },
     ticketAttachment: {
+      count: async () => 2,
       findMany: async ({ where }: any) => where.isInline ? [] : [{ ticket: null, uploaderId: 'requester', messageId: null }],
       updateMany: async (args: any) => {
         updates.push(args);
