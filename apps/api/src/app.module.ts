@@ -41,17 +41,8 @@ const redis = getConfig().redis;
     // validate：启动期执行 zod schema 校验 + 生产敏感默认值检查。
     configModule,
     // REDIS_URL 优先（可携带密码/TLS）；未设置时退回 HOST/PORT 组合。
-    // 与 ioredis 约定一致：url 存在时 host/port 被忽略。
-    BullModule.forRoot(
-      redis.url
-        ? { connection: { url: redis.url } }
-        : {
-            connection: {
-              host: redis.host,
-              port: redis.port,
-            },
-          },
-    ),
+    // SLA、认证和健康检查使用同一个解析后的地址。
+    BullModule.forRoot({ connection: { url: redis.connectionUrl } }),
     PrismaModule,
     StorageModule,
     AuthModule,

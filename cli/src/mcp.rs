@@ -50,7 +50,7 @@ fn tools() -> Vec<Value> {
             input_schema["properties"]["dryRun"] = json!({"type":"boolean","default":false,"description":"只校验并预览请求，不创建工单"});
             let mut definition = tool(
                 "assay_ticket_create",
-                "创建工单，以当前身份作为提单人。需要 ticket:create；用户已授权提单时调用。dryRun=true 可先预览；提交结果未知时先搜索确认，不自动重试。",
+                "创建工单，以当前身份作为提单人。需要 ticket:create；用户已授权提单时调用。dryRun=true 可先预览。提供 idempotencyKey 时可用同一个键重试；没有键时先搜索确认是否已创建。",
                 input_schema,
             );
             definition["annotations"] = json!({"readOnlyHint":false,"destructiveHint":false,"idempotentHint":false,"openWorldHint":false});

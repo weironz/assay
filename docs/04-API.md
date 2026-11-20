@@ -255,6 +255,9 @@ POST /api/tickets
 | `contact` | object | | 联系方式，见下 |
 | `saveContactAsDefault` | boolean | | 把该联系方式存为本人默认，下次建单自动带出 |
 | `attachmentIds` | string[] | | 预先上传的附件 id，见 §5 |
+| `idempotencyKey` | string | | 建单请求编号。16–100 个字母、数字、下划线或短横线 |
+
+同一账号用相同的 `idempotencyKey` 和内容重试，会返回原工单。请求编号已用于其他内容，或对应工单已删除时，返回 `409`。
 
 `contact` 结构：
 
@@ -417,7 +420,7 @@ PATCH /api/tickets/:id/messages/:msgId   权限 ticket:comment
 | `contentType` | string | | 默认 `text/html` |
 | `mentionUserIds` | string[] | | 可选；仅能提及本工单的协作相关人员，收到 `MENTION` 通知 |
 
-编辑消息仅限消息原作者本人。
+编辑消息仅限原作者。`PATCH` 请求须携带开始编辑时读到的 `revision`（非负整数，随消息返回）。版本缺失或已过期时返回 `409`，客户端应保留未保存内容并重新读取消息。
 
 ### 3.9 协作成员与关注人
 

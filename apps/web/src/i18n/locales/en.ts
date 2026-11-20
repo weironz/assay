@@ -411,6 +411,10 @@ const en = {
   },
 
   ticketDetail: {
+    loadForbidden: 'You do not have permission to view this ticket.',
+    loadMissing: 'This ticket does not exist or has been deleted.',
+    loadFailed: 'Could not load the ticket. Try again.',
+    messageEditConflict: 'The message or its attachments have changed. Copy your draft, refresh the ticket, and edit the latest version.',
     messageSaveFailed: 'Could not save the message. Check that its attachments still exist, or copy your draft before refreshing the ticket and trying again.',
     actionPending: '{{action}}…',
     actionFailed: 'Could not update the status. Refresh the ticket and check its current status before retrying. Contact an administrator if it still fails.',

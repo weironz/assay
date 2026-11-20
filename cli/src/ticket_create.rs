@@ -13,6 +13,7 @@ pub fn schema() -> Value {
             "title":{"type":"string","minLength":1,"description":"工单标题"},
             "body":{"type":"string","minLength":1,"description":"问题描述，HTML；图片需先通过 /api/uploads 上传"},
             "priority":{"type":"string","enum":["LOW","MEDIUM","HIGH","URGENT"],"description":"省略时为 MEDIUM"},
+            "idempotencyKey":{"type":"string","minLength":16,"maxLength":100,"description":"同一次建单重试时沿用此值；只接受字母、数字、下划线和短横线"},
             "typeId":optional_id, "categoryId":optional_id, "queueId":optional_id,
             "datacenterId":optional_id,
             "categoryName":{"type":"string","maxLength":60,"description":"自定义分类；与 categoryId 同时传入时以 categoryId 为准"},
@@ -98,11 +99,17 @@ fn validate(value: &Value, rules: &Value, field: &str) -> Result<()> {
 
 pub fn create(config: &Config, input: Value, dry_run: bool) -> Result<Value> {
     validate(&input, &schema(), "工单")?;
+    if input["idempotencyKey"].as_str().is_some_and(|key| {
+        !key.bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    }) {
+        bail!("idempotencyKey 只能包含字母、数字、下划线和短横线");
+    }
     if dry_run {
         return Ok(json!({"dryRun":true,"method":"POST","path":"/api/tickets","body":input}));
     }
     // Never automatically retry a create request: a lost response can mean the
-    // ticket was already committed. Search before resubmitting.
+    // ticket was already committed. Reuse its request key, or search if no key was supplied.
     ApiClient::from_config(config)?.post("/tickets", input)
 }
 

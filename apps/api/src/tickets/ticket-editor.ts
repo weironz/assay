@@ -1,9 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -14,6 +17,7 @@ import {
   lockAttachments,
   referencedAttachmentIds,
 } from '../attachments/rules';
+import { enqueueObjectDeletions } from '../attachments/deletion-queue';
 import { SlaService } from '../sla/sla.service';
 import { canOperateTicket } from './visibility';
 import {
@@ -34,87 +38,138 @@ import { DEFAULT_QUEUE, DEFAULT_TICKET_TYPE } from './presets';
  */
 @Injectable()
 export class TicketEditor {
+  private readonly logger = new Logger(TicketEditor.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly sla: SlaService,
   ) {}
 
   async create(user: AuthUser, dto: CreateTicketDto): Promise<string> {
+    const body = cleanHtml(dto.body);
+    const references = referencedAttachmentIds(body);
+    const contact = normalizeContact(dto.contact);
+    const attachmentIds = [...new Set(dto.attachmentIds ?? [])].sort();
+    const requested = {
+      title: dto.title, body, priority: dto.priority ?? 'MEDIUM',
+      typeId: dto.typeId, queueId: dto.queueId, categoryId: dto.categoryId,
+      categoryName: dto.categoryName?.trim(), datacenterId: dto.datacenterId,
+      clusterId: dto.clusterId, serialNumber: dto.serialNumber?.trim() || null,
+      contact, saveContactAsDefault: !!dto.saveContactAsDefault, attachmentIds,
+    };
+    const request = dto.idempotencyKey && {
+      requesterId: user.id, key: dto.idempotencyKey,
+      requestHash: createHash('sha256').update(JSON.stringify(requested)).digest('hex'),
+    };
+    const replay = async () => {
+      if (!request) return;
+      const { requesterId, key, requestHash } = request;
+      const previous = await this.prisma.ticketCreationRequest.findUnique({
+        where: { requesterId_key: { requesterId, key } },
+      });
+      if (!previous) return;
+      if (previous.requestHash !== requestHash) throw new ConflictException('此建单请求编号已用于其他内容');
+      if (!previous.ticketId) throw new ConflictException('此请求对应的工单已删除');
+      return previous.ticketId;
+    };
+    const previous = await replay();
+    if (previous) return previous;
+
     const [typeId, queueId] = await Promise.all([
       dto.typeId ?? this.defaultTypeId(),
       dto.queueId ?? this.defaultQueueId(),
     ]);
-    const categoryId = await resolveCategoryId(
-      this.prisma,
-      dto.categoryId,
-      dto.categoryName,
-    );
-    const body = cleanHtml(dto.body);
-    const references = referencedAttachmentIds(body);
     const ticket = await createWithTicketNo(this.prisma, (ticketNo) => this.prisma.$transaction(async (tx) => {
-      await lockAttachments(tx, [...references, ...(dto.attachmentIds ?? [])]);
+      if (request) await tx.ticketCreationRequest.create({ data: request });
+      await lockAttachments(tx, [...references, ...attachmentIds]);
       await assertAttachmentReferencesAvailable(tx, user, references);
-      const created = await tx.ticket.create({ data: {
-        ticketNo,
-        title: dto.title,
-        requesterId: user.id,
-        priority: dto.priority ?? 'MEDIUM',
-        typeId,
-        categoryId,
-        queueId,
-        datacenterId: dto.datacenterId,
-        clusterId: dto.clusterId,
-        serialNumber: dto.serialNumber?.trim() || null,
-        contact: normalizeContact(dto.contact),
-        status: 'NEW',
-        messages: {
-          create: {
-            authorId: user.id,
-            type: 'REPLY',
-            isInternal: false,
-            contentType: 'text/html',
-            body,
-          },
+
+      const categoryId = await resolveCategoryId(tx, dto.categoryId, dto.categoryName);
+      const sla = await slaOf(tx, typeId);
+      const createdAt = new Date();
+      const created = await tx.ticket.create({
+        data: {
+          ticketNo,
+          title: dto.title,
+          requesterId: user.id,
+          priority: requested.priority,
+          typeId,
+          categoryId,
+          queueId,
+          datacenterId: dto.datacenterId,
+          clusterId: dto.clusterId,
+          serialNumber: requested.serialNumber,
+          contact,
+          createdAt,
+          firstResponseDueAt: new Date(createdAt.getTime() + sla.responseMin * 60_000),
+          slaDueAt: new Date(createdAt.getTime() + sla.resolveMin * 60_000),
+          status: 'NEW',
+          messages: { create: { authorId: user.id, body, contentType: 'text/html' } },
         },
-      } });
-
-      if (!references.size && !dto.attachmentIds?.length) return created;
-      const firstMessage = await tx.ticketMessage.findFirstOrThrow({
-        where: { ticketId: created.id },
-        orderBy: { createdAt: 'asc' },
-        select: { id: true },
       });
-      if (dto.attachmentIds?.length) {
-        await tx.ticketAttachment.updateMany({
-          where: { id: { in: dto.attachmentIds }, uploaderId: user.id, ticketId: null },
-          data: { ticketId: created.id, messageId: firstMessage.id },
+
+      if (references.size || attachmentIds.length) {
+        const first = await tx.ticketMessage.findFirstOrThrow({
+          where: { ticketId: created.id }, orderBy: { createdAt: 'asc' }, select: { id: true },
         });
+        await this.bindDrafts(tx, user.id, created.id, first.id, attachmentIds, references);
+        await linkReferencedAttachments(tx, created.id, first.id, body, user.id);
       }
-      await linkReferencedAttachments(tx, created.id, firstMessage.id, body, user.id);
-      return created;
-    }, { isolationLevel: 'ReadCommitted' }));
-    // SLA 从建单起算：一直没人接手才是最该告警的情况，
-    // 从「开始处理」起算的话这种单永远不会超时
-    const sla = await slaOf(this.prisma, typeId);
-    const base = ticket.createdAt.getTime();
-    const firstResponseDueAt = new Date(base + sla.responseMin * 60_000);
-    const slaDueAt = new Date(base + sla.resolveMin * 60_000);
-    await this.prisma.ticket.update({
-      where: { id: ticket.id },
-      data: { firstResponseDueAt, slaDueAt },
-    });
-    await this.sla.schedule(ticket.id, 'response', firstResponseDueAt);
-    await this.sla.schedule(ticket.id, 'resolve', slaDueAt);
-
-    await writeHistory(this.prisma, ticket.id, user.id, 'CREATE', 'status', null, 'NEW');
-    // 勾了「设为默认」才写用户档案；没勾就不动，免得覆盖上次存好的
-    if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
-      await this.prisma.user.update({
-        where: { id: user.id },
-        data: { defaultContact: normalizeContact(dto.contact) },
+      await writeHistory(tx, created.id, user.id, 'CREATE', 'status', null, 'NEW');
+      if (dto.saveContactAsDefault && dto.contact?.phone?.trim()) {
+        await tx.user.update({ where: { id: user.id }, data: { defaultContact: contact } });
+      }
+      if (request) await tx.ticketCreationRequest.update({
+        where: { requesterId_key: { requesterId: request.requesterId, key: request.key } },
+        data: { ticketId: created.id },
       });
-    }
+      return created;
+    }, { isolationLevel: 'ReadCommitted' })).catch(async error => {
+      if (request && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const repeated = await replay();
+        if (repeated) return repeated;
+      }
+      throw error;
+    });
+    if (typeof ticket === 'string') return ticket;
+
+    // The reconciliation worker can restore either job from the committed deadline.
+    void Promise.all([
+      this.sla.schedule(ticket.id, 'response', ticket.firstResponseDueAt),
+      this.sla.schedule(ticket.id, 'resolve', ticket.slaDueAt),
+    ]).catch(error => this.logger.warn('SLA scheduling will be reconciled for ' + ticket.id, error));
     return ticket.id;
+  }
+
+  /** The caller has locked all selected draft rows before inspecting references. */
+  private async bindDrafts(
+    tx: Prisma.TransactionClient, uploaderId: string, ticketId: string,
+    messageId: string, ids: string[], references: ReadonlySet<string>,
+  ) {
+    if (!ids.length) return;
+    const unreferencedIds = ids.filter(id => !references.has(id));
+    const discarded = unreferencedIds.length ? await tx.ticketAttachment.findMany({
+      where: { id: { in: unreferencedIds }, uploaderId, ticketId: null, messageId: null, isInline: true },
+      select: { id: true, objectKey: true },
+    }) : [];
+    const discardedIds = discarded.map(row => row.id);
+    if (discardedIds.length) {
+      // A historical draft with references cannot safely be deleted or rebound.
+      const used = await tx.ticketAttachmentReference.findMany({
+        where: { attachmentId: { in: discardedIds } }, select: { attachmentId: true },
+      });
+      const usedIds = new Set(used.map(row => row.attachmentId));
+      const unused = discarded.filter(row => !usedIds.has(row.id));
+      if (unused.length) {
+        await tx.ticketAttachment.deleteMany({ where: { id: { in: unused.map(row => row.id) } } });
+        await enqueueObjectDeletions(tx, unused.map(row => row.objectKey), 'INLINE_DRAFT_DISCARDED');
+      }
+    }
+    const keep = ids.filter(id => !discardedIds.includes(id));
+    if (keep.length) await tx.ticketAttachment.updateMany({
+      where: { id: { in: keep }, uploaderId, ticketId: null, messageId: null },
+      data: { ticketId, messageId },
+    });
   }
 
   private async defaultTypeId() {

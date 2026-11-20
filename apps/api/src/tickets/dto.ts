@@ -7,6 +7,7 @@ import {
   IsString,
   Max,
   MaxLength,
+  Matches,
   Min,
   MinLength,
   ValidateNested,
@@ -26,6 +27,11 @@ const TICKET_SCOPES = [
 ] as const;
 
 export class CreateTicketDto {
+  @IsOptional()
+  @IsString()
+  @Matches(/^[A-Za-z0-9_-]{16,100}$/)
+  idempotencyKey?: string;
+
   @IsString()
   @MinLength(1)
   title!: string;
@@ -83,6 +89,7 @@ export class CreateTicketDto {
   saveContactAsDefault?: boolean;
 
   @IsOptional()
+  @IsArray()
   @IsString({ each: true })
   attachmentIds?: string[]; // 建单前上传的草稿附件
 }
@@ -165,6 +172,13 @@ export class CreateMessageDto {
   @IsArray()
   @IsString({ each: true })
   mentionUserIds?: string[];
+}
+
+export class UpdateMessageDto extends CreateMessageDto {
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  revision?: number; // Missing revisions receive a conflict so old editors must reload.
 }
 
 export class AddParticipantDto {

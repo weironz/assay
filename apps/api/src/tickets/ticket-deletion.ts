@@ -1,6 +1,7 @@
 import {
   ForbiddenException,
   Injectable,
+  Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthUser } from '../auth/auth.types';
@@ -14,6 +15,7 @@ import { loadTicketOrThrow } from './core';
  */
 @Injectable()
 export class TicketDeletion {
+  private readonly logger = new Logger(TicketDeletion.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly sla: SlaService,
@@ -32,6 +34,9 @@ export class TicketDeletion {
     // 不会出现「记录删了但 key 丢了」。事务提交后再立即尝试删对象，失败由
     // 持久化 outbox 重试并告警。
     await this.prisma.$transaction(async (tx) => {
+      // Attachments acquire a foreign-key lock on the parent when inserted.
+      // Wait for existing uploads and block new rows before collecting keys.
+      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${id} FOR UPDATE`;
       const attachments = await tx.ticketAttachment.findMany({
         where: { ticketId: id },
         select: { objectKey: true },
@@ -42,15 +47,10 @@ export class TicketDeletion {
         'TICKET_DELETED',
       );
       await tx.ticket.delete({ where: { id } });
-    });
+    }, { isolationLevel: 'ReadCommitted' });
 
-    try {
-      await this.sla.cancel(id);
-    } finally {
-      // 只触发后台清理，不把全局 outbox 的 S3 删除串行压在删除请求上；
-      // outbox 已经和业务删除一起提交，慢/坏的对象由定时任务继续重试。
-      void this.attachments.processPendingDeletions().catch(() => undefined);
-    }
+    void this.sla.cancel(id).catch(error => this.logger.warn('SLA cancellation after deletion failed', error));
+    void this.attachments.processPendingDeletions();
     return { ok: true };
   }
 }

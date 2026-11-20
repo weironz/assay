@@ -106,7 +106,7 @@ function harness(ticketRow: any, message: MessageMeta | null) {
           if (where.id !== message.id || where.ticketId !== message.ticketId) return null;
           if (message.authorId !== where.authorId) return null;
           if (where.isInternal === false && message.isInternal) return null;
-          return { id: message.id, body: '<p>original</p>' };
+          return { id: message.id, body: '<p>original</p>', revision: 0 };
         }
         if (!message) return null;
         return { authorId: message.authorId, isInternal: message.isInternal };
@@ -175,7 +175,7 @@ test('普通作者编辑自己公开消息成功', async () => {
     author,
     TICKET_ID,
     MESSAGE_ID,
-    { body: EDIT_BODY } as any,
+    { body: EDIT_BODY, revision: 0 } as any,
   );
   assert.equal(updated.id, MESSAGE_ID);
   assert.deepEqual(calls.findFirst[0].where, {
@@ -183,7 +183,7 @@ test('普通作者编辑自己公开消息成功', async () => {
     ticketId: TICKET_ID,
     authorId: AUTHOR_ID,
   });
-  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
+  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true, revision: true });
   assertSuccessfulEdit(calls, AUTHOR_ID);
 });
 
@@ -199,7 +199,7 @@ test('admin 编辑自己发送的消息成功', async () => {
     admin,
     TICKET_ID,
     MESSAGE_ID,
-    { body: EDIT_BODY } as any,
+    { body: EDIT_BODY, revision: 0 } as any,
   );
   assert.equal(updated.id, MESSAGE_ID);
   // admin 同样受作者归属约束，授权查询恒带 authorId。
@@ -223,7 +223,7 @@ for (const { name, user: actor, internal } of unauthorizedEditors) {
   test(`${name} 编辑 A 的消息返回 403 且授权查询恒带 authorId`, async () => {
     const { service, calls } = harness(ticket, publicMessageByA);
     await assert.rejects(
-      service.updateMessage(actor, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY } as any),
+      service.updateMessage(actor, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY, revision: 0 } as any),
       (err: any) => {
         assert.equal(err.status, 403);
         assert.equal(err.message, '只能编辑自己的消息');
@@ -238,7 +238,7 @@ for (const { name, user: actor, internal } of unauthorizedEditors) {
     if (!internal) expectedWhere.isInternal = false;
     assert.equal(calls.findFirst.length, 2, '授权查询 + 元数据查询各一次');
     assert.deepEqual(calls.findFirst[0].where, expectedWhere);
-    assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
+    assert.deepEqual(calls.findFirst[0].select, { id: true, body: true, revision: true });
     assert.deepEqual(calls.findFirst[1].where, { id: MESSAGE_ID, ticketId: TICKET_ID });
     assert.deepEqual(calls.findFirst[1].select, {
       authorId: true,
@@ -251,7 +251,7 @@ for (const { name, user: actor, internal } of unauthorizedEditors) {
 test('非内部参与者不能编辑或探测内部备注', async () => {
   const { service, calls } = harness(ticket, internalNoteByA);
   await assert.rejects(
-    service.updateMessage(requester, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY } as any),
+    service.updateMessage(requester, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY, revision: 0 } as any),
     (err: any) => {
       assert.equal(err.status, 403);
       return true;
@@ -264,7 +264,7 @@ test('非内部参与者不能编辑或探测内部备注', async () => {
     authorId: 'requester',
     isInternal: false,
   });
-  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true });
+  assert.deepEqual(calls.findFirst[0].select, { id: true, body: true, revision: true });
   assert.deepEqual(calls.findFirst[1].select, {
     authorId: true,
     isInternal: true,
@@ -286,7 +286,7 @@ test('已被移出工单的原作者仍不能编辑历史消息', async () => {
   const removedAuthor = user(AUTHOR_ID, ['handler']);
   const { service, calls } = harness(removedTicket, publicMessageByA);
   await assert.rejects(
-    service.updateMessage(removedAuthor, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY } as any),
+    service.updateMessage(removedAuthor, TICKET_ID, MESSAGE_ID, { body: EDIT_BODY, revision: 0 } as any),
     (err: any) => {
       assert.equal(err.status, 403);
       assert.equal(err.message, '无权查看该工单');

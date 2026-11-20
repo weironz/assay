@@ -71,6 +71,7 @@ export interface TicketListItem {
 export interface TicketMessage {
   id: string;
   body: string;
+  revision: number;
   type: string;
   isInternal: boolean;
   contentType: string;
@@ -191,6 +192,10 @@ export function useTicket(id: string) {
     queryKey: ['ticket', id],
     queryFn: async () => (await api.get(`/tickets/${id}`)).data as TicketDetail,
     enabled: !!id,
+    retry: (failures, error) => {
+      const status = (error as { response?: { status: number } }).response?.status;
+      return status !== 403 && status !== 404 && failures < 3;
+    },
   });
 }
 
@@ -244,6 +249,7 @@ export const usePublicTicketShare = (token: string) =>
 export function useCreateTicket() {
   return useMutation({
     mutationFn: async (body: {
+      idempotencyKey: string;
       title: string;
       body: string;
       priority?: string;
@@ -294,8 +300,8 @@ export const useUpdateTicket = () =>
 
 /** 编辑某条消息正文 */
 export const useUpdateMessage = () =>
-  useTicketMutation<{ messageId: string; body: string }>((id, arg) =>
-    api.patch(`/tickets/${id}/messages/${arg.messageId}`, { body: arg.body }), ['attachments'],
+  useTicketMutation<{ messageId: string; body: string; revision: number }>((id, arg) =>
+    api.patch(`/tickets/${id}/messages/${arg.messageId}`, { body: arg.body, revision: arg.revision }), ['attachments'],
   );
 
 export const useAssign = () =>

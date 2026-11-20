@@ -2,7 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
-  NotFoundException,
+  Logger,
 } from '@nestjs/common';
 import { Prisma, TicketStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -25,6 +25,7 @@ import { AssignDto } from './dto';
  */
 @Injectable()
 export class TicketLifecycle {
+  private readonly logger = new Logger(TicketLifecycle.name);
   constructor(
     private readonly prisma: PrismaService,
     private readonly workflow: WorkflowService,
@@ -42,30 +43,21 @@ export class TicketLifecycle {
     });
     if (!assignee) throw new BadRequestException('指派对象不存在');
 
-    await this.prisma.ticket.update({
-      where: { id },
-      data: {
-        assigneeId: dto.assigneeId,
-        queueId: dto.queueId ?? ticket.queueId,
-        status: 'ASSIGNED',
-      },
+    await this.prisma.$transaction(async tx => {
+      const changed = await tx.ticket.updateMany({
+        where: { id, status: ticket.status, updatedAt: ticket.updatedAt },
+        data: { assigneeId: dto.assigneeId, queueId: dto.queueId ?? undefined, status: 'ASSIGNED' },
+      });
+      if (!changed.count) throw new ConflictException('工单已变更，请刷新后重新指派');
+      await writeHistory(tx, id, user.id, 'ASSIGN', 'assignee', ticket.assigneeId, dto.assigneeId);
+      await writeHistory(tx, id, user.id, 'TRANSITION', 'status', ticket.status, 'ASSIGNED');
     });
-    await writeHistory(
-      this.prisma,
-      id,
-      user.id,
-      'ASSIGN',
-      'assignee',
-      ticket.assigneeId,
-      dto.assigneeId,
-    );
-    await writeHistory(this.prisma, id, user.id, 'TRANSITION', 'status', ticket.status, 'ASSIGNED');
     await this.notifications.notify(dto.assigneeId, {
       type: 'ASSIGNED',
       title: `你被指派了工单：${ticket.ticketNo}`,
       content: ticket.title,
       ticketId: id,
-    });
+    }).catch(error => this.logger.warn('Assignment notification failed', error));
     return id;
   }
 

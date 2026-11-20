@@ -400,6 +400,10 @@ const zhCN: Resource = {
   },
 
   ticketDetail: {
+    loadForbidden: '你没有权限查看此工单。',
+    loadMissing: '此工单不存在或已删除。',
+    loadFailed: '读取工单失败，请重试。',
+    messageEditConflict: '消息或附件已变更。请先复制未保存的内容，再刷新工单，按最新正文重新编辑。',
     messageSaveFailed: '消息保存失败。请确认引用的附件仍存在，或复制未保存的内容后刷新工单再重试。',
     actionPending: '{{action}}中…',
     actionFailed: '状态更新失败。请刷新工单核对当前状态后重试；如仍失败，请联系管理员。',

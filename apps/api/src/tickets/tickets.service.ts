@@ -13,6 +13,7 @@ import {
   CreateMessageDto,
   CreateTicketDto,
   ListTicketsQuery,
+  UpdateMessageDto,
   UpdateTicketDto,
 } from './dto';
 
@@ -92,7 +93,7 @@ export class TicketsService {
     user: AuthUser,
     ticketId: string,
     messageId: string,
-    dto: CreateMessageDto,
+    dto: UpdateMessageDto,
   ) {
     return this.messaging.updateMessage(user, ticketId, messageId, dto);
   }

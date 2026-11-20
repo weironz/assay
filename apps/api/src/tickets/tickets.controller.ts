@@ -19,6 +19,7 @@ import {
   CreateTicketDto,
   ListTicketsQuery,
   TransitionDto,
+  UpdateMessageDto,
   UpdateTicketDto,
 } from './dto';
 
@@ -150,7 +151,7 @@ export class TicketsController {
     @CurrentUser() user: AuthUser,
     @Param('id') id: string,
     @Param('messageId') messageId: string,
-    @Body() dto: CreateMessageDto,
+    @Body() dto: UpdateMessageDto,
   ) {
     return this.tickets.updateMessage(user, id, messageId, dto);
   }

@@ -109,7 +109,7 @@ test('public reference check only looks at public messages', async () => {
   assert.deepEqual(query.where, {
     ticketId: 'ticket-1',
     isInternal: false,
-    body: { contains: '/attachments/att-1/download' },
+    attachmentReferences: { some: { attachmentId: 'att-1' } },
   });
 });
 
@@ -442,8 +442,8 @@ test('same fixture yields one verdict across in-site list, download and share pa
         if (where.id) {
           return messages[where.id] ? { isInternal: messages[where.id].isInternal } : null;
         }
-        // isReferencedByPublicMessage：按正文 contains 匹配公开消息。
-        const needle = where.body?.contains ?? '';
+        // Simulate the indexed reference lookup against fixture messages.
+        const needle = `/attachments/${where.attachmentReferences?.some.attachmentId}/download`;
         const hit = Object.values(messages).find(
           (message) => !message.isInternal && message.body.includes(needle),
         );
@@ -513,6 +513,7 @@ test('message edit scopes authorization into the query and does not read an inte
     participants: [],
   };
   const prisma: any = {
+    $queryRaw: async () => [],
     ticket: { findUnique: async () => ticket },
     ticketMessage: {
       findFirst: async (args: any) => {
@@ -548,7 +549,7 @@ test('message edit scopes authorization into the query and does not read an inte
     isInternal: false,
   });
   // 仅满足作者与可见性条件才读取旧正文，用于比较附件引用。
-  assert.deepEqual(queries[0].select, { id: true, body: true });
+  assert.deepEqual(queries[0].select, { id: true, body: true, revision: true });
 });
 
 test('message author can edit their own public message inside the transaction', async () => {
@@ -561,12 +562,13 @@ test('message author can edit their own public message inside the transaction', 
     participants: [],
   };
   const prisma: any = {
+    $queryRaw: async () => [],
     ticket: { findUnique: async () => ticket },
     ticketHistory: { create: async () => ({}) },
     ticketMessage: {
       findFirst: async (args: any) => {
         authorization = args;
-        return { id: 'message-1', body: '<p>original</p>' };
+        return { id: 'message-1', body: '<p>original</p>', revision: 0 };
       },
       update: async (args: any) => {
         events.push(`update:${args.where.id}`);
@@ -605,7 +607,7 @@ test('message author can edit their own public message inside the transaction', 
     requester,
     'ticket-1',
     'message-1',
-    { body: '<p>edited</p>' } as any,
+    { body: '<p>edited</p>', revision: 0 } as any,
   );
   assert.equal(updated.id, 'message-1');
   assert.deepEqual(authorization.where, {
@@ -638,8 +640,10 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
   const tx = {
     $queryRaw: async () => [{ id: 'att-body' }, { id: 'att-file' }],
     ticket: { create: async () => ticket },
+    ticketType: { findUnique: async () => null },
+    ticketHistory: { create: async () => ({}) },
     ticketAttachment: {
-      findMany: async () => [{ ticket: null, uploaderId: 'requester', messageId: null }],
+      findMany: async ({ where }: any) => where.isInline ? [] : [{ ticket: null, uploaderId: 'requester', messageId: null }],
       updateMany: async (args: any) => {
         updates.push(args);
         return { count: 1 };

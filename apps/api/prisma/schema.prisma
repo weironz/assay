@@ -386,6 +386,7 @@ model Ticket {
   cluster    Cluster?    @relation(fields: [clusterId], references: [id])
 
   messages            TicketMessage[]
+  creationRequests    TicketCreationRequest[]
   attachments         TicketAttachment[]
   history             TicketHistory[]
   tags                TicketTag[]
@@ -431,16 +432,42 @@ model TicketMessage {
   isInternal  Boolean     @default(false) @map("is_internal")
   contentType String      @default("text/html") @map("content_type")
   body        String
+  revision    Int         @default(0)
   createdAt   DateTime    @default(now()) @map("created_at")
 
   ticket      Ticket                 @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   author      User                   @relation(fields: [authorId], references: [id])
   attachments TicketAttachment[]
   mentions    TicketMessageMention[]
+  attachmentReferences TicketAttachmentReference[]
 
   // 复合索引覆盖「工单内消息按时间排序」；纯 ticketId 前缀查询同样命中
   @@index([ticketId, createdAt])
   @@map("ticket_messages")
+}
+
+/// Maintained by the message triggers, including writes from older API versions.
+model TicketAttachmentReference {
+  messageId    String @map("message_id")
+  attachmentId String @map("attachment_id")
+  message      TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, attachmentId])
+  @@index([attachmentId, messageId])
+  @@map("ticket_attachment_references")
+}
+
+/// Keep a replay receipt even when the original ticket is deleted.
+model TicketCreationRequest {
+  requesterId String @map("requester_id")
+  key         String
+  requestHash String @map("request_hash")
+  ticketId    String? @map("ticket_id")
+  ticket      Ticket? @relation(fields: [ticketId], references: [id], onDelete: SetNull)
+
+  @@id([requesterId, key])
+  @@index([ticketId])
+  @@map("ticket_creation_requests")
 }
 
 // @ 提及独立落库：通知、审计和后续“提及我的消息”筛选不依赖解析富文本正文。

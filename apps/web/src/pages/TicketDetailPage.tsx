@@ -49,7 +49,7 @@ export default function TicketDetailPage() {
   const { id = '' } = useParams();
   const qc = useQueryClient();
   const { user, has } = useAuth();
-  const { data: ticket, isLoading } = useTicket(id);
+  const { data: ticket, isLoading, isError, error, refetch } = useTicket(id);
   const transition = useTransition();
   const assign = useAssign();
   const addMessage = useAddMessage();
@@ -76,7 +76,7 @@ export default function TicketDetailPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState('');
-  const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
+  const [editingMsg, setEditingMsg] = useState<{ id: string; revision: number } | null>(null);
   const [msgDraft, setMsgDraft] = useState('');
   const [participantId, setParticipantId] = useState('');
   const [participantRole, setParticipantRole] = useState<'COLLABORATOR' | 'FOLLOWER'>('COLLABORATOR');
@@ -86,6 +86,16 @@ export default function TicketDetailPage() {
   const [attributesSaved, setAttributesSaved] = useState(false);
   const [preview, setPreview] = useState<{ images: PreviewImage[]; index: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const status = (error as { response?: { status: number } } | null)?.response?.status;
+  if (isError && (!ticket || status === 403 || status === 404)) {
+    const errorKey = status === 403 ? 'loadForbidden' : status === 404 ? 'loadMissing' : 'loadFailed';
+    return <div className="space-y-3">
+      <p role="alert" className="text-sm text-red-600 dark:text-red-400">{t(`ticketDetail.${errorKey}`)}</p>
+      <Link to="/tickets" className="text-sm text-brand-700 hover:underline">{t('ticketDetail.back')}</Link>
+      {status !== 403 && status !== 404 && <button type="button" className="ml-4 text-sm underline" onClick={() => void refetch()}>{t('ticketAttributes.retry')}</button>}
+    </div>;
+  }
 
   if (isLoading || !ticket)
     return <div className="text-gray-400">{t('common.loading')}</div>;
@@ -125,10 +135,10 @@ export default function TicketDetailPage() {
     );
   };
   const saveMsg = () => {
-    if (!editingMsgId || !msgDraft.trim()) return;
+    if (!editingMsg || !msgDraft.trim()) return;
     updateMessage.mutate(
-      { id, arg: { messageId: editingMsgId, body: msgDraft } },
-      { onSuccess: () => setEditingMsgId(null) },
+      { id, arg: { messageId: editingMsg.id, body: msgDraft, revision: editingMsg.revision } },
+      { onSuccess: () => setEditingMsg(null) },
     );
   };
   const uploadImg = async (file: File) =>
@@ -244,13 +254,19 @@ export default function TicketDetailPage() {
             </select>
             <button
               disabled={!assigneeId || assign.isPending}
-              onClick={() => assign.mutate({ id, arg: { assigneeId } })}
+              onClick={() => assign.mutate({ id, arg: { assigneeId } }, {
+                onError: () => void qc.invalidateQueries({ queryKey: ['ticket', id] }),
+              })}
               className="rounded-md bg-brand-700 text-white px-3 py-1.5 text-sm hover:bg-brand-800 disabled:opacity-50"
             >
               {t('ticketDetail.assign')}
             </button>
           </div>
         )}
+        {assign.isError && assign.variables?.id === id && <p role="alert" className="w-full text-sm text-red-600 dark:text-red-400">
+          {t((assign.error as { response?: { status: number } })?.response?.status === 409
+            ? 'ticketDetail.actionConflict' : 'ticketDetail.actionFailed')}
+        </p>}
         {canShare && (
           <button
             type="button"
@@ -270,7 +286,7 @@ export default function TicketDetailPage() {
           <div className="overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
             {ticket.messages.map((m, i) => {
               const canEditMsg = canEditMessage(m.author.id, user?.id);
-              const editing = editingMsgId === m.id;
+              const editing = editingMsg?.id === m.id;
               return (
                 <article
                   key={m.id}
@@ -316,7 +332,7 @@ export default function TicketDetailPage() {
                           onClick={() => {
                             updateMessage.reset();
                             setMsgDraft(m.body);
-                            setEditingMsgId(m.id);
+                            setEditingMsg({ id: m.id, revision: m.revision });
                           }}
                           className="shrink-0 text-brand-700 hover:underline"
                         >
@@ -333,11 +349,12 @@ export default function TicketDetailPage() {
                           onUploadImage={uploadImg}
                         />
                         {updateMessage.isError && <p role="alert" className="text-sm text-red-600 dark:text-red-400">
-                          {t('ticketDetail.messageSaveFailed')}
+                          {t((updateMessage.error as { response?: { status: number } })?.response?.status === 409
+                            ? 'ticketDetail.messageEditConflict' : 'ticketDetail.messageSaveFailed')}
                         </p>}
                         <div className="flex justify-end gap-2">
                           <button
-                            onClick={() => setEditingMsgId(null)}
+                            onClick={() => setEditingMsg(null)}
                             className="rounded-md border border-gray-300 dark:border-gray-700 px-3 py-1 text-sm"
                           >
                             {t('common.cancel')}

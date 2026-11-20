@@ -30,7 +30,7 @@ import {
   PARTICIPANT_USER_SELECT,
   writeHistory,
 } from './core';
-import { CreateMessageDto } from './dto';
+import { CreateMessageDto, UpdateMessageDto } from './dto';
 
 /**
  * 工单消息域：公开回复/内部备注、@提及、编辑正文。
@@ -71,6 +71,7 @@ export class TicketMessaging {
     const body = cleanHtml(dto.body);
     const references = referencedAttachmentIds(body);
     const message = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${id} FOR KEY SHARE`;
       await lockAttachments(tx, references);
       await assertAttachmentReferencesAvailable(tx, user, references);
       const created = await tx.ticketMessage.create({
@@ -151,7 +152,7 @@ export class TicketMessaging {
     user: AuthUser,
     ticketId: string,
     messageId: string,
-    dto: CreateMessageDto,
+    dto: UpdateMessageDto,
   ) {
     const ticket = await this.prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -170,6 +171,7 @@ export class TicketMessaging {
     const after = referencedAttachmentIds(body);
     // 正文、附件绑定、删除队列和审计一起提交，存储操作在提交之后执行。
     const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM tickets WHERE id = ${ticketId} FOR KEY SHARE`;
       const current = await tx.ticket.findUnique({
         where: { id: ticketId },
         include: { participants: true },
@@ -190,7 +192,7 @@ export class TicketMessaging {
           authorId: user.id,
           ...(canSeeInternal ? {} : { isInternal: false }),
         },
-        select: { id: true, body: true },
+        select: { id: true, body: true, revision: true },
       });
       if (!authorized) {
         // 只在确认存在后返回 403，不把无权访问的消息正文带出来。
@@ -208,11 +210,12 @@ export class TicketMessaging {
         throw new ForbiddenException('无权编辑该消息');
       }
 
+      if (dto.revision !== authorized.revision) throw new ConflictException('消息已变更，请刷新后重试');
       const before = referencedAttachmentIds(authorized.body);
       await lockAttachments(tx, [...before, ...after]);
       await assertAttachmentReferencesAvailable(tx, user, [...after].filter(id => !before.has(id)));
       const next = await tx.ticketMessage.update({
-        where: { id: authorized.id, body: authorized.body },
+        where: { id: authorized.id, revision: dto.revision },
         data: { body },
         include: { author: { select: AUTHOR_SELECT } },
       }).catch(error => {

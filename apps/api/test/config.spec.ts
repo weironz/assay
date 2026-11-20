@@ -28,6 +28,16 @@ test('historical draft cleanup requires explicit opt-in', () => {
   }
 });
 
+test('auth and SLA use the configured Redis endpoint when only host and port are supplied', () => {
+  const redis = parseConfig({ REDIS_HOST: 'redis.internal', REDIS_PORT: '6382' }).redis;
+  assert.equal(redis.connectionUrl, 'redis://redis.internal:6382');
+  assert.equal(redis.host, 'redis.internal');
+  assert.equal(redis.port, 6382);
+  assert.equal(parseConfig({ REDIS_HOST: '::1', REDIS_PORT: '6382' }).redis.connectionUrl, 'redis://[::1]:6382');
+  assert.equal(parseConfig({ REDIS_URL: 'rediss://redis.example.test:6380', REDIS_HOST: 'ignored' }).redis.connectionUrl,
+    'rediss://redis.example.test:6380');
+});
+
 test('non-production keeps the local rustfsadmin fallback for development', () => {
   const config = parseConfig({ NODE_ENV: 'development' });
   assert.equal(config.storage.s3.accessKeyId, 'rustfsadmin');

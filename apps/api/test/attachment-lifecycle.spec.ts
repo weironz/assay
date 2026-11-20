@@ -394,6 +394,7 @@ test('draft sweep keeps a failed object deletion in the durable outbox', async (
 test('deleting a ticket queues object keys in the same transaction before cascade', async () => {
   const events: string[] = [];
   const prisma: any = {
+    $queryRaw: async () => { events.push('lock-ticket'); return []; },
     ticket: {
       findUnique: async () => ({
         id: 'ticket-1',
@@ -441,6 +442,7 @@ test('deleting a ticket queues object keys in the same transaction before cascad
   await service.remove(requester, 'ticket-1');
   assert.deepEqual(events, [
     'begin',
+    'lock-ticket',
     'read-keys',
     'queue:k1,k2',
     'delete-ticket',

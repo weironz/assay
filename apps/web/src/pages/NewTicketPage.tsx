@@ -60,6 +60,7 @@ export default function NewTicketPage() {
   // Derive the preset once options arrive. An explicit user choice wins over refetches.
   const selectedTypeId = form.typeId || defaultTypeId || '';
   const [error, setError] = useState<Msg>(null);
+  const request = useRef<{ payload: string; key: string } | null>(null);
   // 正文内联图片与显式附件分开存：数量上限只约束后者，
   // 否则粘 6 张截图就把「最多 5 个附件」占满了
   const [inlineDrafts, setInlineDrafts] = useState<Attachment[]>([]);
@@ -135,7 +136,12 @@ export default function NewTicketPage() {
         saveContactAsDefault: contact ? saveContactAsDefault : undefined,
         attachmentIds: [...inlineDrafts, ...drafts].map((d) => d.id),
       };
-      const created = await createMut.mutateAsync(payload);
+      const serialized = JSON.stringify(payload);
+      if (request.current?.payload !== serialized) {
+        const bytes = crypto.getRandomValues(new Uint8Array(16));
+        request.current = { payload: serialized, key: Array.from(bytes, n => n.toString(16).padStart(2, '0')).join('') };
+      }
+      const created = await createMut.mutateAsync({ ...payload, idempotencyKey: request.current.key });
       navigate(`/tickets/${created.id}`);
     } catch (err: any) {
       const serverMsg = err?.response?.data?.message;

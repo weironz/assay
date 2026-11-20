@@ -58,9 +58,9 @@ export interface AppConfig {
     draftCleanupEnabled: boolean;
   };
   redis: {
-    /** 原始 REDIS_URL；未设置时为空，调用方按 HOST/PORT 组合。 */
+    /** 原始 REDIS_URL，未设置时为空。 */
     url?: string;
-    /** 兼容旧代码的完整连接串（REDIS_URL 或默认值）。 */
+    /** 统一连接串。REDIS_URL 优先，否则由 REDIS_HOST 和 REDIS_PORT 组合。 */
     connectionUrl: string;
     host: string;
     port: number;
@@ -310,6 +310,8 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`环境变量配置校验失败: ${formatIssues(result.error)}`);
   }
   const value = result.data;
+  const redisHost = value.REDIS_HOST.replace(/^\[([^\]]+)\]$/, '$1');
+  const redisUrlHost = redisHost.includes(':') ? `[${redisHost}]` : redisHost;
   const isProduction = value.NODE_ENV === 'production';
   const provider = detectMailProvider(
     value.MAIL_PROVIDER,
@@ -366,8 +368,8 @@ export function parseConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     },
     redis: {
       url: value.REDIS_URL,
-      connectionUrl: value.REDIS_URL ?? 'redis://redis:6379',
-      host: value.REDIS_HOST,
+      connectionUrl: value.REDIS_URL ?? `redis://${redisUrlHost}:${value.REDIS_PORT}`,
+      host: redisHost,
       port: value.REDIS_PORT,
     },
     storage: {

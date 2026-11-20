@@ -51,19 +51,27 @@ test('removing inline images deletes unreferenced objects, preserves other refer
     const standalone = await upload('standalone', false);
     const legacy = await upload('legacy', null, original.id);
     const neverInserted = await upload('never-inserted', true);
-    await messaging.updateMessage(user, first.id, original.id, { body: img(inline.id) + img(standalone.id) + img(legacy.id) });
+    await messaging.updateMessage(user, first.id, original.id, { revision: original.revision, body: img(inline.id) + img(standalone.id) + img(legacy.id) });
+    await assert.rejects(messaging.updateMessage(user, first.id, original.id, {
+      revision: original.revision, body: '<p>Stale tab</p>',
+    }), { status: 409 });
+    const current = await db.ticketMessage.findUniqueOrThrow({ where: { id: original.id } });
+    assert.equal(current.revision, original.revision + 1);
+    assert.ok(current.body.includes(src(inline.id)));
+    assert.equal(await db.ticketAttachmentReference.count({ where: { messageId: original.id } }), 3);
+    assert.ok(await db.ticketAttachment.findUnique({ where: { id: inline.id } }));
     const sameTicketRef = await messaging.addMessage(user, first.id, { body: `See <a href="${src(inline.id)}">image</a>` });
     const crossTicketRef = await messaging.addMessage(user, second.id, { body: img(inline.id) });
-    await messaging.updateMessage(user, first.id, original.id, { body: '<p>Removed images</p>' });
+    await messaging.updateMessage(user, first.id, original.id, { revision: original.revision + 1, body: '<p>Removed images</p>' });
     const tasks = () => db.attachmentDeletionTask.findMany({ where: { objectKey: { in: objectKeys } } });
     assert.deepEqual((await tasks()).map(row => [row.objectKey, row.reason]), [[legacy.objectKey, 'INLINE_IMAGE_REMOVED']]);
     assert.equal(await db.ticketAttachment.findUnique({ where: { id: legacy.id } }), null);
     await assert.rejects(service.remove(user, inline.id), { status: 400 });
-    await messaging.updateMessage(user, first.id, sameTicketRef.id, { body: '<p>See other ticket</p>' });
+    await messaging.updateMessage(user, first.id, sameTicketRef.id, { revision: sameTicketRef.revision, body: '<p>See other ticket</p>' });
     await assert.rejects(service.remove(user, inline.id), { status: 400 });
 
     // The last reference can be removed in a different ticket.
-    await messaging.updateMessage(user, second.id, crossTicketRef.id, { body: '<p></p>' });
+    await messaging.updateMessage(user, second.id, crossTicketRef.id, { revision: crossTicketRef.revision, body: '<p></p>' });
     assert.equal(await db.ticketAttachment.findUnique({ where: { id: inline.id } }), null);
     await assert.rejects(messaging.addMessage(user, first.id, { body: img(inline.id) }), { status: 409 });
     assert.ok(await db.ticketAttachment.findUnique({ where: { id: standalone.id } }));

@@ -82,7 +82,7 @@ export async function assertAttachmentReferencesAvailable(
 /** Include links and references in other tickets, and conservatively keep URLs in text. */
 export function findAttachmentReference(db: MessageReader, attachmentId: string) {
   return db.ticketMessage.findFirst({
-    where: { body: { contains: `/attachments/${attachmentId}/download` } },
+    where: { attachmentReferences: { some: { attachmentId } } },
     select: { id: true },
   });
 }
@@ -118,9 +118,7 @@ export async function isReferencedByPublicMessage(
     where: {
       ticketId,
       isInternal: false,
-      // 正文可能带源站、/api 前缀或查询串，但 /attachments/<id>/download 这段
-      // 在四种历史形式里都保持不变。
-      body: { contains: `/attachments/${attachmentId}/download` },
+      attachmentReferences: { some: { attachmentId } },
     },
     select: { id: true },
   });
