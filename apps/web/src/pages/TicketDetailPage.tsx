@@ -614,9 +614,6 @@ export default function TicketDetailPage() {
             <Meta label={t('ticketDetail.metaAssignee')}>
               {ticket.assignee?.name ?? t('ticketDetail.unassigned')}
             </Meta>
-            <Meta label={t('ticketDetail.metaQueue')}>
-              {ticket.queue ? metadataLabel(t, 'queue', ticket.queue.name) : t('common.empty')}
-            </Meta>
             <Meta label={t('ticketDetail.metaType')}>
               {ticket.type ? metadataLabel(t, 'type', ticket.type.name) : t('common.empty')}
             </Meta>

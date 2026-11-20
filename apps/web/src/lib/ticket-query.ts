@@ -3,7 +3,6 @@ export const TICKET_FILTER_KEYS = [
   'status',
   'scope',
   'priority',
-  'queueId',
   'assigneeId',
   'requesterId',
   'categoryId',

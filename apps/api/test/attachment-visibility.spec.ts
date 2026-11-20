@@ -663,6 +663,7 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
         cluster: null,
       }),
     },
+    ticketType: { findUnique: async () => null },
     ticketHistory: { create: async () => ({}) },
     $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx),
   };
@@ -678,6 +679,8 @@ test('creating a ticket binds selected and body-referenced draft attachments', a
     title: 'fixture',
     body: '<img src="/api/attachments/att-body/download">',
     attachmentIds: ['att-file'],
+    queueId: 'queue-1',
+    typeId: 'type-1',
   } as any);
 
   // 独立附件一次绑定工单和首条消息，其余正文图片由引用解析绑定。

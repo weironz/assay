@@ -30,8 +30,8 @@ describe('ticket attributes patch and permission boundary', () => {
   });
   test('optional fields can be explicitly cleared', () => {
     const first = attributeDraft({ ...ticket, datacenter: { id: 'dc-1' } });
-    expect(attributePatch(first, { ...first, typeId: '', categoryId: '', queueId: '', datacenterId: '', serialNumber: ' ', contact: null }))
-      .toEqual({ typeId: null, categoryId: null, queueId: null, datacenterId: null, serialNumber: null, contact: null });
+    expect(attributePatch(first, { ...first, typeId: '', categoryId: '', datacenterId: '', serialNumber: ' ', contact: null }))
+      .toEqual({ typeId: null, categoryId: null, datacenterId: null, serialNumber: null, contact: null });
   });
   test('custom category sentinel is never sent as a database id', () => {
     const first = attributeDraft(ticket);

@@ -25,7 +25,6 @@ test('all list filters survive URLs, reloads and saved views without pagination 
     scope: 'open' as const,
     slaState: 'within' as const,
     priority: 'HIGH',
-    queueId: 'q',
     createdFrom: dateBoundary('2026-10-20'),
     createdTo: dateBoundary('2026-10-21', true),
     page: 2,
@@ -37,6 +36,14 @@ test('all list filters survive URLs, reloads and saved views without pagination 
       new URLSearchParams('scope=invalid&slaState=bad&page=-2&pageSize=1000'),
     ),
   ).toEqual({ page: 1, pageSize: 20 });
+});
+
+test('legacy queue filters no longer restrict Web lists or saved views', () => {
+  const legacy = { queueId: 'old-queue', priority: 'HIGH' };
+  expect(ticketQueryFromSearch(new URLSearchParams(legacy))).toEqual({
+    priority: 'HIGH', page: 1, pageSize: 20,
+  });
+  expect(ticketQuerySearch(legacy).toString()).toBe('priority=HIGH');
 });
 
 test('local inclusive calendar days round trip through UTC boundaries, including month/year boundaries', () => {

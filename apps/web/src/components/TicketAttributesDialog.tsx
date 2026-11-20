@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useCategories, useDatacenters, useQueues, useTypes, useUpdateTicket, type TicketDetail } from '../features/tickets/api';
+import { useCategories, useDatacenters, useTypes, useUpdateTicket, type TicketDetail } from '../features/tickets/api';
 import { attributeDraft, attributePatch, CUSTOM_CATEGORY, type AttributeDraft } from '../lib/ticket-attributes';
 import { metadataLabel } from '../lib/metadata-labels';
 import { PRIORITY_KEYS, priorityLabel } from '../lib/ticket-meta';
@@ -22,10 +22,10 @@ export default function TicketAttributesDialog({ ticket, onClose, onSaved }: {
   const update = useUpdateTicket();
   const types = useTypes();
   const categories = useCategories();
-  const queues = useQueues();
   const datacenters = useDatacenters();
-  const loading = [types, categories, queues, datacenters].some(query => query.isLoading);
-  const loadError = [types, categories, queues, datacenters].some(query => query.isError);
+  const options = [types, categories, datacenters];
+  const loading = options.some(query => query.isLoading);
+  const loadError = options.some(query => query.isError);
 
   useEffect(() => {
     const element = dialog.current!;
@@ -68,14 +68,13 @@ export default function TicketAttributesDialog({ ticket, onClose, onSaved }: {
       <button type="button" disabled={update.isPending} onClick={close} aria-label={t('common.close')} className={`${buttonClass} shrink-0`}>×</button>
     </div>
     <form onSubmit={save} className="mt-5 space-y-5">
-      {loadError && <div role="alert" className="text-sm text-red-600"><p>{t('ticketAttributes.loadFailed')}</p><button type="button" onClick={() => [types, categories, queues, datacenters].forEach(query => void query.refetch())} className={`${buttonClass} mt-2`}>{t('ticketAttributes.retry')}</button></div>}
+      {loadError && <div role="alert" className="text-sm text-red-600"><p>{t('ticketAttributes.loadFailed')}</p><button type="button" onClick={() => options.forEach(query => void query.refetch())} className={`${buttonClass} mt-2`}>{t('ticketAttributes.retry')}</button></div>}
       {loading && <p role="status" className="text-sm text-gray-500">{t('common.loading')}</p>}
       <fieldset disabled={loading || loadError || update.isPending} className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 disabled:opacity-60">
         <label className="space-y-1 text-sm sm:col-span-2"><span><span className="text-red-500" aria-hidden="true">* </span>{t('ticketNew.fieldTitle')}</span><input autoFocus required value={form.title} onChange={event => set('title', event.target.value)} className={inputClass} /></label>
         <label className="space-y-1 text-sm"><span><span className="text-red-500" aria-hidden="true">* </span>{t('ticketNew.priority')}</span><select required value={form.priority} onChange={event => set('priority', event.target.value)} className={inputClass}>{PRIORITY_KEYS.map(key => <option key={key} value={key}>{priorityLabel(t, key)}</option>)}</select></label>
         <label className="space-y-1 text-sm"><span>{t('ticketNew.type')}</span><select value={form.typeId} onChange={event => set('typeId', event.target.value)} className={inputClass}><option value="">{t('common.notSpecified')}</option>{types.data?.map(item => <option key={item.id} value={item.id}>{metadataLabel(t, 'type', item.name)}</option>)}</select></label>
         <div><label className="space-y-1 text-sm"><span>{t('ticketNew.category')}</span><select value={form.categoryId} onChange={event => set('categoryId', event.target.value)} className={inputClass}><option value="">{t('common.notSpecified')}</option>{categories.data?.map((item: { id: string; name: string }) => <option key={item.id} value={item.id}>{metadataLabel(t, 'category', item.name)}</option>)}<option value={CUSTOM_CATEGORY}>{t('ticketNew.categoryCustom')}</option></select></label>{form.categoryId === CUSTOM_CATEGORY && <input required maxLength={60} aria-label={t('ticketNew.categoryCustomPlaceholder')} value={form.categoryName} onChange={event => set('categoryName', event.target.value)} placeholder={t('ticketNew.categoryCustomPlaceholder')} className={`${inputClass} mt-2`} />}</div>
-        <label className="space-y-1 text-sm"><span>{t('ticketNew.queue')}</span><select value={form.queueId} onChange={event => set('queueId', event.target.value)} className={inputClass}><option value="">{t('common.notSpecified')}</option>{queues.data?.map((item: { id: string; name: string }) => <option key={item.id} value={item.id}>{metadataLabel(t, 'queue', item.name)}</option>)}</select></label>
         <label className="space-y-1 text-sm"><span>{t('ticketNew.datacenter')}</span><select value={form.datacenterId} onChange={event => set('datacenterId', event.target.value)} className={inputClass}><option value="">{t('common.notSpecified')}</option>{datacenters.data?.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
         <label className="space-y-1 text-sm"><span>{t('ticketNew.serialNumber')}</span><input maxLength={200} value={form.serialNumber} onChange={event => set('serialNumber', event.target.value)} placeholder={t('ticketNew.serialNumberPlaceholder')} className={inputClass} /></label>
         <fieldset className="min-w-0 space-y-3 border-t border-gray-200 pt-4 sm:col-span-2 dark:border-gray-700">

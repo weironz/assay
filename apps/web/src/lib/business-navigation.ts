@@ -18,7 +18,7 @@ export const BUSINESS_MODULES: BusinessModule[] = [
   {
     id: 'tickets',
     labelKey: 'nav.ticketSystem',
-    areas: ['/tickets', '/queues', '/sla'],
+    areas: ['/tickets', '/sla'],
     items: [
       {
         to: '/tickets/dashboard',
@@ -31,7 +31,6 @@ export const BUSINESS_MODULES: BusinessModule[] = [
         labelKey: 'nav.newTicket',
         permission: 'ticket:create',
       },
-      { to: '/queues', labelKey: 'nav.queues', permission: 'queue:manage' },
       { to: '/sla', labelKey: 'nav.sla', permission: 'queue:manage' },
     ],
   },

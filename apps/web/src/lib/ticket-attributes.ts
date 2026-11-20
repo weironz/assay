@@ -6,7 +6,6 @@ export interface AttributeSource {
   priority: string;
   type: { id: string } | null;
   category: { id: string } | null;
-  queue: { id: string } | null;
   datacenter: { id: string } | null;
   serialNumber: string | null;
   contact: TicketContact | null;
@@ -17,7 +16,6 @@ export interface AttributeDraft {
   typeId: string;
   categoryId: string;
   categoryName: string;
-  queueId: string;
   datacenterId: string;
   serialNumber: string;
   contact: TicketContact | null;
@@ -26,7 +24,7 @@ export interface AttributeDraft {
 export function attributeDraft(ticket: AttributeSource): AttributeDraft {
   return {
     title: ticket.title, priority: ticket.priority, typeId: ticket.type?.id ?? '',
-    categoryId: ticket.category?.id ?? '', categoryName: '', queueId: ticket.queue?.id ?? '',
+    categoryId: ticket.category?.id ?? '', categoryName: '',
     datacenterId: ticket.datacenter?.id ?? '', serialNumber: ticket.serialNumber ?? '',
     contact: ticket.contact ? { ...ticket.contact, emails: [...ticket.contact.emails] } : null,
   };
@@ -38,7 +36,7 @@ export function attributePatch(initial: AttributeDraft, current: AttributeDraft)
   const patch: Record<string, unknown> = {};
   if (current.title.trim() !== initial.title.trim()) patch.title = current.title.trim();
   if (current.priority !== initial.priority) patch.priority = current.priority;
-  for (const field of ['typeId', 'queueId', 'datacenterId'] as const) {
+  for (const field of ['typeId', 'datacenterId'] as const) {
     if (current[field] !== initial[field]) patch[field] = current[field] || null;
   }
   if (current.categoryId !== initial.categoryId || current.categoryName !== initial.categoryName) {

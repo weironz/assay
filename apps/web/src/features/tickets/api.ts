@@ -115,7 +115,6 @@ export interface TicketQuery {
   status?: string;
   scope?: 'open' | 'completed' | 'mine' | 'unassigned' | 'overdue';
   priority?: string;
-  queueId?: string;
   assigneeId?: string;
   requesterId?: string;
   categoryId?: string;
@@ -252,7 +251,6 @@ export function useCreateTicket() {
       categoryId?: string;
       /** 下拉里没有合适分类时的自填名称，服务端负责去重/新建 */
       categoryName?: string;
-      queueId?: string;
       datacenterId?: string;
       serialNumber?: string;
       contact?: TicketContact;
@@ -301,7 +299,7 @@ export const useUpdateMessage = () =>
   );
 
 export const useAssign = () =>
-  useTicketMutation<{ assigneeId: string; queueId?: string }>((id, arg) =>
+  useTicketMutation<{ assigneeId: string }>((id, arg) =>
     api.post(`/tickets/${id}/assign`, arg),
   );
 
@@ -338,12 +336,6 @@ export const useRemoveParticipant = () =>
   );
 
 // —— 元数据 ——
-export const useQueues = () =>
-  useQuery({
-    queryKey: ['queues'],
-    queryFn: async () => (await api.get('/queues')).data,
-  });
-
 export interface TicketType {
   id: string;
   name: string;
@@ -353,10 +345,16 @@ export interface TicketType {
   slaResolveMin: number;
 }
 
+export const DEFAULT_TICKET_TYPE_NAME = '故障';
+
 export const useTypes = () =>
   useQuery({
     queryKey: ['ticket-types'],
     queryFn: async () => (await api.get('/ticket-types')).data as TicketType[],
+    select: types => {
+      const incident = types.find(type => type.name === DEFAULT_TICKET_TYPE_NAME);
+      return incident ? [incident, ...types.filter(type => type.id !== incident.id)] : types;
+    },
   });
 
 /** 改 SLA 只影响之后新建的工单，在跑的工单截止时刻不变（见后端注释） */

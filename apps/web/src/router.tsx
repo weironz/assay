@@ -21,7 +21,6 @@ import TicketsPage from './pages/TicketsPage';
 import NewTicketPage from './pages/NewTicketPage';
 import TicketDetailPage from './pages/TicketDetailPage';
 import UsersPage from './pages/UsersPage';
-import QueuesPage from './pages/QueuesPage';
 import SlaPage from './pages/SlaPage';
 import PublicTicketSharePage from './pages/PublicTicketSharePage';
 
@@ -146,14 +145,7 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         ),
       },
-      {
-        path: 'queues',
-        element: (
-          <ProtectedRoute permission="queue:manage">
-            <QueuesPage />
-          </ProtectedRoute>
-        ),
-      },
+      { path: 'queues', element: <Navigate to="/tickets" replace /> },
     ],
   },
   { path: '*', element: <Navigate to="/" replace /> },

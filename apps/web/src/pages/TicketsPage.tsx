@@ -4,7 +4,6 @@ import { useTranslation } from 'react-i18next';
 import { useDateFormat } from '../i18n/format';
 import {
   useTickets,
-  useQueues,
   useCategories,
   useDatacenters,
   useTicketFilterPeople,
@@ -49,7 +48,6 @@ export default function TicketsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const q = ticketQueryFromSearch(searchParams);
   const { data, isLoading, isError, refetch } = useTickets(q);
-  const { data: queues } = useQueues();
   const { data: categories } = useCategories();
   const { data: datacenters } = useDatacenters();
   const { data: filterPeople } = useTicketFilterPeople();
@@ -179,21 +177,6 @@ export default function TicketsPage() {
         (categories || []).map((item: { id: string; name: string }) => ({
           ...item,
           name: metadataLabel(t, 'category', item.name),
-        })),
-      ),
-    },
-    {
-      id: 'queue',
-      label: t('ticketNew.queue'),
-      active: !!q.queueId,
-      clear: () => set({ queueId: undefined }),
-      control: select(
-        t('ticketNew.queue'),
-        q.queueId,
-        (value) => set({ queueId: value || undefined }),
-        (queues || []).map((item: { id: string; name: string }) => ({
-          ...item,
-          name: metadataLabel(t, 'queue', item.name),
         })),
       ),
     },
@@ -460,7 +443,7 @@ export default function TicketsPage() {
         )}
       </div>
       <div className="hidden overflow-x-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 lg:block">
-        <table className="w-full min-w-[88rem] text-sm">
+        <table className="w-full min-w-[80rem] text-sm">
           <thead className="bg-gray-50 text-gray-500 dark:bg-gray-800">
             <tr>
               {filters.map((field) => (
@@ -484,7 +467,7 @@ export default function TicketsPage() {
             {isLoading && (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={filters.length + 1}
                   className="px-4 py-8 text-center text-gray-400"
                 >
                   {t('common.loading')}
@@ -530,11 +513,6 @@ export default function TicketsPage() {
                     : t('common.empty')}
                 </td>
                 <td className="whitespace-nowrap px-3 py-2">
-                  {ticket.queue
-                    ? metadataLabel(t, 'queue', ticket.queue.name)
-                    : t('common.empty')}
-                </td>
-                <td className="whitespace-nowrap px-3 py-2">
                   <span
                     className={`rounded px-2 py-0.5 text-xs ${STATUS_COLOR[ticket.status]}`}
                   >
@@ -566,7 +544,7 @@ export default function TicketsPage() {
             {data?.items.length === 0 && (
               <tr>
                 <td
-                  colSpan={12}
+                  colSpan={filters.length + 1}
                   className="px-4 py-8 text-center text-gray-400"
                 >
                   {t('tickets.empty')}

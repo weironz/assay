@@ -1,6 +1,7 @@
 // 必须第一行：在任何业务模块求值前加载 .env（DATABASE_URL 等供顶层快照使用）。
 import './config/load-env';
 import { PrismaClient } from '@prisma/client';
+import { DEFAULT_QUEUE, DEFAULT_TICKET_TYPE } from './tickets/presets';
 import {
   SYSTEM_ROLE_DESCRIPTIONS,
   SYSTEM_ROLE_NAMES,
@@ -72,14 +73,14 @@ async function main() {
 
   // 默认队列
   await prisma.queue.upsert({
-    where: { name: '默认队列' },
+    where: { name: DEFAULT_QUEUE.name },
     update: {},
-    create: { name: '默认队列', description: '未分类工单默认归属' },
+    create: DEFAULT_QUEUE,
   });
 
   // 示例工单类型（含 SLA 时限）
   const types = [
-    { name: '故障', slaResponseMin: 30, slaResolveMin: 480 },
+    DEFAULT_TICKET_TYPE,
     { name: '需求', slaResponseMin: 120, slaResolveMin: 2880 },
     { name: '咨询', slaResponseMin: 60, slaResolveMin: 1440 },
   ];

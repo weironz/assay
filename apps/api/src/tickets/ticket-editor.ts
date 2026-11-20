@@ -26,6 +26,7 @@ import {
   writeHistory,
 } from './core';
 import { CreateTicketDto, UpdateTicketDto } from './dto';
+import { DEFAULT_QUEUE, DEFAULT_TICKET_TYPE } from './presets';
 
 /**
  * 工单写域 - 建单与编辑。注册为 TicketsModule provider，由 TicketsService 构造器注入并委派。
@@ -39,6 +40,10 @@ export class TicketEditor {
   ) {}
 
   async create(user: AuthUser, dto: CreateTicketDto): Promise<string> {
+    const [typeId, queueId] = await Promise.all([
+      dto.typeId ?? this.defaultTypeId(),
+      dto.queueId ?? this.defaultQueueId(),
+    ]);
     const categoryId = await resolveCategoryId(
       this.prisma,
       dto.categoryId,
@@ -53,10 +58,10 @@ export class TicketEditor {
         ticketNo,
         title: dto.title,
         requesterId: user.id,
-        priority: (dto.priority as any) ?? 'MEDIUM',
-        typeId: dto.typeId,
+        priority: dto.priority ?? 'MEDIUM',
+        typeId,
         categoryId,
-        queueId: dto.queueId,
+        queueId,
         datacenterId: dto.datacenterId,
         clusterId: dto.clusterId,
         serialNumber: dto.serialNumber?.trim() || null,
@@ -90,7 +95,7 @@ export class TicketEditor {
     }, { isolationLevel: 'ReadCommitted' }));
     // SLA 从建单起算：一直没人接手才是最该告警的情况，
     // 从「开始处理」起算的话这种单永远不会超时
-    const sla = await slaOf(this.prisma, dto.typeId ?? null);
+    const sla = await slaOf(this.prisma, typeId);
     const base = ticket.createdAt.getTime();
     const firstResponseDueAt = new Date(base + sla.responseMin * 60_000);
     const slaDueAt = new Date(base + sla.resolveMin * 60_000);
@@ -110,6 +115,25 @@ export class TicketEditor {
       });
     }
     return ticket.id;
+  }
+
+  private async defaultTypeId() {
+    const where = { name: DEFAULT_TICKET_TYPE.name };
+    const select = { id: true };
+    const type = await this.prisma.ticketType.findUnique({ where, select });
+    // An unseeded database can still accept a ticket. Keep existing SLA settings.
+    return (type ?? await this.prisma.ticketType.upsert({
+      where, select, create: DEFAULT_TICKET_TYPE, update: { name: where.name },
+    })).id;
+  }
+
+  private async defaultQueueId() {
+    const where = { name: DEFAULT_QUEUE.name };
+    const select = { id: true };
+    const queue = await this.prisma.queue.findUnique({ where, select });
+    return (queue ?? await this.prisma.queue.upsert({
+      where, select, create: DEFAULT_QUEUE, update: { name: where.name },
+    })).id;
   }
 
   async update(user: AuthUser, id: string, dto: UpdateTicketDto): Promise<string> {

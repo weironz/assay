@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   useCreateTicket,
-  useQueues,
+  DEFAULT_TICKET_TYPE_NAME,
   useTypes,
   useCategories,
   useDatacenters,
@@ -42,7 +42,6 @@ export default function NewTicketPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const createMut = useCreateTicket();
-  const { data: queues } = useQueues();
   const { data: types } = useTypes();
   const { data: categories } = useCategories();
   const { data: datacenters } = useDatacenters();
@@ -50,14 +49,16 @@ export default function NewTicketPage() {
   const [form, setForm] = useState({
     title: '',
     body: '',
-    priority: '',
+    priority: 'MEDIUM',
     categoryId: '',
     categoryName: '',
     typeId: '',
-    queueId: '',
     datacenterId: '',
     serialNumber: '',
   });
+  const defaultTypeId = types?.find(type => type.name === DEFAULT_TICKET_TYPE_NAME)?.id;
+  // Derive the preset once options arrive. An explicit user choice wins over refetches.
+  const selectedTypeId = form.typeId || defaultTypeId || '';
   const [error, setError] = useState<Msg>(null);
   // 正文内联图片与显式附件分开存：数量上限只约束后者，
   // 否则粘 6 张截图就把「最多 5 个附件」占满了
@@ -124,11 +125,10 @@ export default function NewTicketPage() {
     try {
       const payload = {
         ...form,
-        typeId: form.typeId || undefined,
+        typeId: selectedTypeId || undefined,
         // 自定义分类走 categoryName，服务端负责查重后建；哨兵值不能外泄到接口
         categoryId: custom ? undefined : form.categoryId || undefined,
         categoryName: custom ? form.categoryName.trim() : undefined,
-        queueId: form.queueId || undefined,
         datacenterId: form.datacenterId || undefined,
         serialNumber: form.serialNumber.trim() || undefined,
         contact: contact ?? undefined,
@@ -236,19 +236,17 @@ export default function NewTicketPage() {
           )}
         </div>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {/* 优先级与类型必选：不给默认值，逼用户自己判断。
-              留个默认「中」等于大家都不填，SLA 就失去意义了 */}
           <div>
-            <label className="block text-sm text-gray-500 mb-1">
+            <label htmlFor="new-ticket-priority" className="block text-sm text-gray-500 mb-1">
               <Req /> {t('ticketNew.priority')}
             </label>
             <select
+              id="new-ticket-priority"
               required
               value={form.priority}
               onChange={(e) => setForm({ ...form, priority: e.target.value })}
               className={inputCls}
             >
-              <option value="">{t('common.pleaseSelect')}</option>
               {PRIORITY_KEYS.map((k) => (
                 <option key={k} value={k}>
                   {priorityLabel(t, k)}
@@ -257,17 +255,18 @@ export default function NewTicketPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">
+            <label htmlFor="new-ticket-type" className="block text-sm text-gray-500 mb-1">
               <Req /> {t('ticketNew.type')}
             </label>
             <select
+              id="new-ticket-type"
               required
-              value={form.typeId}
+              value={selectedTypeId}
               onChange={(e) => setForm({ ...form, typeId: e.target.value })}
               className={inputCls}
             >
-              <option value="">{t('common.pleaseSelect')}</option>
-              {types?.map((item: any) => (
+              {!defaultTypeId && <option value="" disabled>{t('common.pleaseSelect')}</option>}
+              {types?.map(item => (
                 <option key={item.id} value={item.id}>
                   {metadataLabel(t, 'type', item.name)}
                 </option>
@@ -305,23 +304,6 @@ export default function NewTicketPage() {
                 className={`${inputCls} mt-2`}
               />
             )}
-          </div>
-          <div>
-            <label className="block text-sm text-gray-500 mb-1">
-              {t('ticketNew.queue')}
-            </label>
-            <select
-              value={form.queueId}
-              onChange={(e) => setForm({ ...form, queueId: e.target.value })}
-              className={inputCls}
-            >
-              <option value="">{t('common.notSpecified')}</option>
-              {queues?.map((qu: any) => (
-                <option key={qu.id} value={qu.id}>
-                  {metadataLabel(t, 'queue', qu.name)}
-                </option>
-              ))}
-            </select>
           </div>
           {/* IDC 与设备序列号，均选填；Cluster 已从业务界面移除。 */}
           <div>
