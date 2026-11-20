@@ -112,7 +112,7 @@ docker compose up -d           # 默认读取 docker-compose.yaml，拉取镜像
 - 首次启动自动执行数据库迁移（`prisma migrate deploy`）+ 灌种子 + 创建管理员
 - 仅 `web:80` 对外暴露；postgres / redis / rustfs 均为内部服务
 - 镜像版本可用 `IMAGE_TAG` 覆盖（默认 `latest`，另有 `1.1.0`）
-- 备份：`bash scripts/backup.sh`（导出数据库 + 打包附件卷）
+- 备份见[部署文档 §5](docs/05-部署文档.md#5-备份与恢复)。阿里云工单站的 PostgreSQL 和 RustFS 分别由 Databasus 和 Zerobyte 定时异地备份，发布前的停写快照由 Ansible 调用仓库脚本生成。
 
 ### 阿里云环境
 
