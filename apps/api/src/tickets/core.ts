@@ -14,6 +14,12 @@ export const FALLBACK_SLA = { responseMin: 60, resolveMin: 1440 };
 export const TERMINAL_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED', 'CANCELLED'];
 export const COMPLETED_STATUSES: TicketStatus[] = ['RESOLVED', 'CLOSED'];
 
+/** Keep the existing JSON number contract; practical millisecond durations are
+ * exact within Number's safe integer range. Never return Prisma BigInt to JSON. */
+export function ticketForApi<T extends { holdMs: bigint }>(ticket: T) {
+  return { ...ticket, holdMs: Number(ticket.holdMs) };
+}
+
 /** 会话流要展示头像和邮箱，凡是返回消息作者的地方都按这套字段取 */
 export const AUTHOR_SELECT = {
   id: true,

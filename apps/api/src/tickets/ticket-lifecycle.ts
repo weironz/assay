@@ -88,7 +88,7 @@ export class TicketLifecycle {
       // 恢复：把这段暂停时长整体加回到两个截止时刻上，等价于时钟从未走过
       const paused = now.getTime() - ticket.holdStartedAt.getTime();
       data.holdStartedAt = null;
-      data.holdMs = { increment: paused };
+      data.holdMs = { increment: BigInt(paused) };
       if (responseDue && !ticket.firstResponseAt) {
         responseDue = new Date(responseDue.getTime() + paused);
         data.firstResponseDueAt = responseDue;

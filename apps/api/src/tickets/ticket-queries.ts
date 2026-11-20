@@ -13,6 +13,7 @@ import {
   COMPLETED_STATUSES,
   PARTICIPANT_USER_SELECT,
   TERMINAL_STATUSES,
+  ticketForApi,
 } from './core';
 import {
   canViewTicket,
@@ -146,7 +147,7 @@ export class TicketQueries {
       }),
       this.prisma.ticket.count({ where }),
     ]);
-    return { items, total, page, pageSize };
+    return { items: items.map(ticketForApi), total, page, pageSize };
   }
 
   async findOne(user: AuthUser, id: string) {
@@ -184,7 +185,7 @@ export class TicketQueries {
       : ticket.messages.filter((m) => !m.isInternal);
 
     const actions = this.workflow.availableActions(ticket.status, user, ticket);
-    return { ...ticket, messages, availableActions: actions };
+    return { ...ticketForApi(ticket), messages, availableActions: actions };
   }
 
   async history(id: string) {

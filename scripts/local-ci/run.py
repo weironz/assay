@@ -331,6 +331,7 @@ class Pipeline:
             args = ['docker', 'run', '--rm', '--network', network]
             values = {'DATABASE_URL': url, 'REDIS_URL': 'redis://redis:6379',
                       'SESSION_EPOCH_TEST_DATABASE_URL': url, 'SAMBA_AUDIT_TEST_DATABASE_URL': url,
+                      'TICKET_LIFECYCLE_TEST_DATABASE_URL': url,
                       'AUTH_BASE_URL': 'http://localhost:3000', 'AUTH_TRUST_ORIGINS': 'http://localhost:5173',
                       'NODE_ENV': 'test', 'MAIL_PROVIDER': 'none'}
             for key, value in values.items():

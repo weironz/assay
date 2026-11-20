@@ -400,6 +400,10 @@ const zhTW: Resource = {
   },
 
   ticketDetail: {
+    actionPending: '{{action}}中…',
+    actionFailed: '狀態更新失敗。請重新整理工單確認目前狀態後重試；若仍失敗，請聯絡管理員。',
+    actionForbidden: '你已無權執行此操作，請重新整理工單確認權限。',
+    actionConflict: '工單狀態已變更，正在重新整理，請確認目前狀態後再操作。',
     imagePreview: '圖片預覽',
     imagePrevious: '上一張',
     imageNext: '下一張',

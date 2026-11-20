@@ -24,7 +24,6 @@ import {
   PRIORITY_COLOR,
   statusLabel,
   priorityLabel,
-  actionLabel,
   historyActionLabel,
 } from '../lib/ticket-meta';
 import { ACCEPT_ATTR } from '../lib/attachments';
@@ -42,6 +41,7 @@ import { canEditMessage } from '../lib/message-edit';
 import { metadataLabel } from '../lib/metadata-labels';
 import { collectPreviewImages, previewImageFromTarget, type PreviewImage } from '../lib/image-preview';
 import ImageLightbox from '../components/ImageLightbox';
+import TicketWorkflowActions from '../components/TicketWorkflowActions';
 
 export default function TicketDetailPage() {
   const { t } = useTranslation();
@@ -212,16 +212,21 @@ export default function TicketDetailPage() {
 
       {/* 状态流转 + 指派 */}
       <div className="flex flex-wrap items-center gap-2">
-        {ticket.availableActions.map((a) => (
-          <button
-            key={a}
-            disabled={transition.isPending}
-            onClick={() => transition.mutate({ id, arg: a })}
-            className="rounded-md border border-brand-600 text-brand-700 px-3 py-1.5 text-sm hover:bg-brand-700 hover:text-white disabled:opacity-50"
-          >
-            {actionLabel(t, a)}
-          </button>
-        ))}
+        <TicketWorkflowActions
+          actions={ticket.availableActions}
+          isPending={transition.isPending}
+          pendingAction={transition.variables?.arg}
+          error={transition.variables?.id === id ? transition.error : null}
+          onAction={action => transition.mutate({ id, arg: action }, {
+            // A conflict or a post-commit scheduling failure may mean the
+            // server already changed status. Refresh before offering a retry.
+            onError: () => {
+              void qc.invalidateQueries({ queryKey: ['ticket', id] });
+              void qc.invalidateQueries({ queryKey: ['tickets'] });
+              void qc.invalidateQueries({ queryKey: ['history', id] });
+            },
+          })}
+        />
         {canAssign && (
           <div className="flex items-center gap-2">
             <select

@@ -400,6 +400,10 @@ const zhCN: Resource = {
   },
 
   ticketDetail: {
+    actionPending: '{{action}}中…',
+    actionFailed: '状态更新失败。请刷新工单核对当前状态后重试；如仍失败，请联系管理员。',
+    actionForbidden: '你已无权执行此操作，请刷新工单核对权限。',
+    actionConflict: '工单状态已变更，正在刷新，请核对当前状态后再操作。',
     imagePreview: '图片预览',
     imagePrevious: '上一张',
     imageNext: '下一张',

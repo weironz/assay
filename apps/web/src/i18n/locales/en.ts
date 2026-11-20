@@ -411,6 +411,10 @@ const en = {
   },
 
   ticketDetail: {
+    actionPending: '{{action}}…',
+    actionFailed: 'Could not update the status. Refresh the ticket and check its current status before retrying. Contact an administrator if it still fails.',
+    actionForbidden: 'You no longer have permission for this action. Refresh the ticket to check your access.',
+    actionConflict: 'The ticket status has changed. Refreshing now; check its current status before taking another action.',
     imagePreview: 'Image preview',
     imagePrevious: 'Previous image',
     imageNext: 'Next image',

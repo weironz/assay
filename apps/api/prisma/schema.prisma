@@ -364,9 +364,10 @@ model Ticket {
    */
   holdStartedAt      DateTime?    @map("hold_started_at")
   /**
-   * 累计挂起毫秒数，供报表算「真实处理时长」用
+   * 累计挂起毫秒数，供报表算「真实处理时长」用。
+   * 必须使用 64 位整数：32 位毫秒数仅能保存约 24.9 天。
    */
-  holdMs             Int          @default(0) @map("hold_ms")
+  holdMs             BigInt       @default(0) @map("hold_ms")
   // 提单人的联系方式，选填。结构见 TicketContactDto：
   // { position?, phone, callTime, smsTime, emails[] }。
   // 时间/职位存的是枚举键而非展示文案——四种语言下文案会变，键不会
