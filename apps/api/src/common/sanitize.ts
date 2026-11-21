@@ -16,6 +16,7 @@ export function cleanHtml(dirty: string): string {
       a: ['href', 'target', 'rel'],
       img: ['src', 'alt', 'title'],
     },
+    allowedClasses: { code: [/^language-[a-z][a-z0-9_+#-]{0,31}$/i] },
     allowedSchemes: ['http', 'https', 'mailto'],
     allowedSchemesByTag: { img: ['http', 'https', 'data'] },
     transformTags: {

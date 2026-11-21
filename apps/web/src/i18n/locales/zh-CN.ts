@@ -594,6 +594,7 @@ const zhCN: Resource = {
     orderedList: '1. 列表',
     quote: '引用',
     codeBlock: '代码块',
+    codeLanguage: '代码语言',
     image: '🖼 图片',
     errUploadFailed: '图片上传失败',
   },

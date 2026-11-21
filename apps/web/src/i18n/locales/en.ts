@@ -608,6 +608,7 @@ const en = {
     orderedList: '1. List',
     quote: 'Quote',
     codeBlock: 'Code',
+    codeLanguage: 'Code language',
     image: '🖼 Image',
     errUploadFailed: 'Image upload failed.',
   },

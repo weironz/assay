@@ -594,6 +594,7 @@ const th: Resource = {
     orderedList: '1. รายการ',
     quote: 'อ้างอิง',
     codeBlock: 'บล็อกโค้ด',
+    codeLanguage: 'ภาษาโค้ด',
     image: '🖼 รูปภาพ',
     errUploadFailed: 'อัปโหลดรูปภาพไม่สำเร็จ',
   },

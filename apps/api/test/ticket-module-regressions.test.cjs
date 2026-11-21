@@ -16,6 +16,14 @@ const { Module, ValidationPipe } = require('@nestjs/common');
 const { NestFactory, Reflector } = require('@nestjs/core');
 const { PermissionsGuard } = require('../dist/auth/permissions.guard');
 const { SessionGuard } = require('../dist/auth/session.guard');
+const { cleanHtml } = require('../dist/common/sanitize');
+
+test('saved ticket code keeps its language while dropping unrelated CSS classes', () => {
+  assert.equal(
+    cleanHtml('<pre class="layout"><code class="language-ts layout">const x = 1;</code></pre><p class="language-ts">text</p>'),
+    '<pre><code class="language-ts">const x = 1;</code></pre><p>text</p>',
+  );
+});
 
 test('environment/SLA/date filters intersect ticket visibility; list and count use exactly the same scope', async () => {
   const queries = [];

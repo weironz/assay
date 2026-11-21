@@ -1,5 +1,37 @@
-import { Extension } from '@tiptap/react';
-import { Plugin, PluginKey } from '@tiptap/pm/state';
+import { Extension, InputRule, textblockTypeInputRule } from '@tiptap/react';
+import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state';
+
+function appendCodeBlockTail(transaction: Transaction) {
+  const { doc } = transaction;
+  if (doc.lastChild?.type.name === 'codeBlock') {
+    transaction.insert(doc.content.size, doc.type.schema.nodes.paragraph.create());
+  }
+}
+
+export const InstantCodeBlock = Extension.create({
+  name: 'instantCodeBlock',
+  priority: 110,
+  addKeyboardShortcuts() {
+    return {
+      // Undo the typed shortcut before CodeBlock handles Backspace on an empty node.
+      Backspace: () => this.editor.isActive('codeBlock') && this.editor.commands.undoInputRule(),
+    };
+  },
+  addInputRules() {
+    const codeBlock = textblockTypeInputRule({
+      find: /^```$/,
+      type: this.editor.schema.nodes.codeBlock,
+    });
+    return [new InputRule({
+      find: codeBlock.find,
+      handler: (props) => {
+        if (codeBlock.handler(props) === null) return null;
+        // A separate tail transaction would clear ProseMirror's input-rule undo.
+        appendCodeBlockTail(props.state.tr);
+      },
+    })];
+  },
+});
 
 // An actual paragraph after a terminal code block gives both mouse and touch
 // users a caret target. Keep it outside the code block, without stealing focus.
@@ -11,12 +43,9 @@ export const CodeBlockTail = Extension.create({
         key: new PluginKey('codeBlockTail'),
         appendTransaction(_transactions, _oldState, state) {
           if (state.doc.lastChild?.type.name !== 'codeBlock') return null;
-          return state.tr
-            .insert(
-              state.doc.content.size,
-              state.schema.nodes.paragraph.create(),
-            )
-            .setMeta('addToHistory', false);
+          const transaction = state.tr;
+          appendCodeBlockTail(transaction);
+          return transaction.setMeta('addToHistory', false);
         },
       }),
     ];

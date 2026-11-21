@@ -3,9 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Image from '@tiptap/extension-image';
-import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
-import { CodeBlockTail, CODE_BLOCK_OPTIONS, codeBlockShortcutFromLine } from '../lib/editor-code-block';
+import { CodeBlockTail, CODE_BLOCK_OPTIONS, InstantCodeBlock, codeBlockShortcutFromLine } from '../lib/editor-code-block';
+import { MarkdownLink } from '../lib/editor-markdown-link';
 
 interface Props {
   onChange: (html: string) => void;
@@ -94,9 +94,10 @@ export default function RichEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({ codeBlock: CODE_BLOCK_OPTIONS }),
+      InstantCodeBlock,
       CodeBlockTail,
       Image,
-      Link.configure({ openOnClick: false }),
+      MarkdownLink.configure({ openOnClick: false }),
       // 占位符必须由扩展渲染：它负责给空段落加 is-editor-empty 和
       // data-placeholder，CSS 的 attr(data-placeholder) 才取得到值。
       // 之前把 data-placeholder 挂在外层容器上，attr() 读不到，占位符从来没显示过。
@@ -105,19 +106,18 @@ export default function RichEditor({
     content,
     onUpdate: ({ editor }) => onChange(editor.getHTML()),
     editorProps: {
-      // 行首输入 ``` 后按 Enter：Tiptap 自带 input rule 的
-      // /^```([a-z]+)?[\s\n]$/ 只在整行恰好是 ``` 时命中，行首后面还跟着
-      // 原有内容就不匹配，表现为「必须先新建空行才能插入代码块」。这里补上
-      // Enter 兜底：删掉 ``` 前缀后把当前段落转成代码块，原文字作为正文保留。
+      // Keep Enter available for a fence already present as plain text, for
+      // example a pasted line with a language identifier and existing content.
       handleKeyDown: (view, event) => {
-        if (event.key !== 'Enter') return false;
+        if (event.key !== 'Enter' || event.isComposing) return false;
         const { $from } = view.state.selection;
         if ($from.parent.type.name !== 'paragraph') return false;
         const line = $from.parent.textContent;
         const shortcut = codeBlockShortcutFromLine(line);
         if (!shortcut) return false;
         const codeBlock = view.state.schema.nodes.codeBlock;
-        if (!codeBlock) return false;
+        const blockIndex = $from.index(-1);
+        if (!codeBlock || !$from.node(-1).canReplaceWith(blockIndex, blockIndex + 1, codeBlock)) return false;
         const from = $from.start();
         const prefixLength = line.length - shortcut.content.length;
         const tr = view.state.tr.delete(from, from + prefixLength);
@@ -195,6 +195,27 @@ export default function RichEditor({
           onClick={() => editor.chain().focus().toggleBlockquote().run()} />
         <Btn label={t('editor.codeBlock')} title={t('editor.codeBlock')} active={editor.isActive('codeBlock')}
           onClick={() => editor.chain().focus().toggleCodeBlock().run()} />
+        {editor.isActive('codeBlock') && (
+          <label className="flex items-center gap-1 px-2 text-xs text-gray-600 dark:text-gray-300">
+            {t('editor.codeLanguage')}
+            <input
+              className="w-20 rounded border border-gray-300 px-1 dark:border-gray-600 dark:bg-gray-800"
+              value={editor.getAttributes('codeBlock').language ?? ''}
+              maxLength={32}
+              spellCheck={false}
+              onChange={(event) => {
+                const language = event.target.value;
+                if (language && !/^[a-z][a-z0-9_+#-]{0,31}$/i.test(language)) return;
+                editor.commands.updateAttributes('codeBlock', { language: language || null });
+              }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return;
+                event.preventDefault();
+                editor.commands.focus();
+              }}
+            />
+          </label>
+        )}
         {onUploadImage && (
           <Btn label={t('editor.image')} title={t('editor.image')}
             onClick={() => fileRef.current?.click()} />

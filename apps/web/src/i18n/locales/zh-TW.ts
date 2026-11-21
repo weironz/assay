@@ -594,6 +594,7 @@ const zhTW: Resource = {
     orderedList: '1. 清單',
     quote: '引用',
     codeBlock: '程式碼區塊',
+    codeLanguage: '程式語言',
     image: '🖼 圖片',
     errUploadFailed: '圖片上傳失敗',
   },
