@@ -2,7 +2,6 @@ import { AssetImportService } from './import.service';
 import {
   Body,
   Controller,
-  Delete,
   Get,
   Param,
   Patch,
@@ -34,7 +33,6 @@ import {
   MembershipInput,
   PageQuery,
   PartInput,
-  TicketLinkInput,
   WarehouseInput,
 } from './dto';
 const attachmentUpload = createAttachmentUploadOptions();
@@ -139,36 +137,6 @@ export class OperationsController {
     @Param('id') id: string,
   ) {
     return this.assets.register(u, id);
-  }
-  @Get('assets/:id/tickets') @RequirePermissions('asset:read') assetTickets(
-    @CurrentUser() u: AuthUser,
-    @Param('id') id: string,
-  ) {
-    return this.assets.tickets(u, id);
-  }
-  @Post('assets/:id/tickets')
-  @RequirePermissions('asset:manage', 'ticket:read')
-  link(
-    @CurrentUser() u: AuthUser,
-    @Param('id') id: string,
-    @Body() d: TicketLinkInput,
-  ) {
-    return this.assets.link(u, id, d.ticketId);
-  }
-  @Delete('assets/:id/tickets/:ticketId')
-  @RequirePermissions('asset:manage', 'ticket:read')
-  unlink(
-    @CurrentUser() u: AuthUser,
-    @Param('id') id: string,
-    @Param('ticketId') ticketId: string,
-  ) {
-    return this.assets.link(u, id, ticketId, true);
-  }
-  @Get('tickets/:id/assets') @RequirePermissions('ticket:read') ticketAssets(
-    @CurrentUser() u: AuthUser,
-    @Param('id') id: string,
-  ) {
-    return this.assets.ticketAssets(u, id);
   }
   @Get('spare-parts') @RequirePermissions('inventory:read') parts(
     @Query() q: PageQuery,

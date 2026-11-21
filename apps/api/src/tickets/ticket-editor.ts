@@ -53,7 +53,7 @@ export class TicketEditor {
     const attachmentIds = [...new Set(dto.attachmentIds ?? [])].sort();
     const requested = {
       title: dto.title, body, priority: dto.priority ?? 'MEDIUM',
-      typeId: dto.typeId, queueId: dto.queueId, categoryId: dto.categoryId,
+      typeId: dto.typeId, categoryId: dto.categoryId,
       categoryName: dto.categoryName?.trim(), datacenterId: dto.datacenterId,
       clusterId: dto.clusterId, serialNumber: dto.serialNumber?.trim() || null,
       contact, saveContactAsDefault: !!dto.saveContactAsDefault, attachmentIds,
@@ -78,7 +78,7 @@ export class TicketEditor {
 
     const [typeId, queueId] = await Promise.all([
       dto.typeId ?? this.defaultTypeId(),
-      dto.queueId ?? this.defaultQueueId(),
+      this.defaultQueueId(),
     ]);
     const ticket = await this.prisma.$transaction(async (tx) => {
       if (request) await tx.ticketCreationRequest.create({ data: request });
@@ -209,7 +209,6 @@ export class TicketEditor {
       const references = [
         { field: 'typeId', value: dto.typeId, find: () => database.ticketType.findUnique({ where: { id: dto.typeId! } }) },
         { field: 'categoryId', value: dto.categoryId, find: () => database.category.findUnique({ where: { id: dto.categoryId! } }) },
-        { field: 'queueId', value: dto.queueId, find: () => database.queue.findUnique({ where: { id: dto.queueId! } }) },
         { field: 'datacenterId', value: dto.datacenterId, find: () => database.datacenter.findUnique({ where: { id: dto.datacenterId! } }) },
         { field: 'clusterId', value: dto.clusterId, find: () => database.cluster.findUnique({ where: { id: dto.clusterId! } }) },
       ];
@@ -220,7 +219,7 @@ export class TicketEditor {
         title: dto.title?.trim(), priority: dto.priority, typeId: dto.typeId,
         categoryId: dto.categoryName !== undefined && !dto.categoryId
           ? await resolveCategoryId(database, undefined, dto.categoryName) : dto.categoryId,
-        queueId: dto.queueId, datacenterId: dto.datacenterId, clusterId: dto.clusterId,
+        datacenterId: dto.datacenterId, clusterId: dto.clusterId,
         serialNumber: dto.serialNumber === undefined ? undefined : dto.serialNumber?.trim() || null,
         contact: dto.contact === undefined ? undefined : normalizeContact(dto.contact),
       };

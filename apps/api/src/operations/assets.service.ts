@@ -14,8 +14,6 @@ import {
   writeActivity,
 } from './business';
 import { AssetInput, AssetQuery } from './dto';
-import { PlatformService } from './platform.service';
-import { ticketVisibilityWhere } from '../tickets/visibility';
 
 export const ASSET_TRANSITIONS: Record<AssetStatus, AssetStatus[]> = {
   PENDING_REGISTRATION: ['IN_STOCK', 'IN_USE', 'MAINTENANCE', 'RETIRED'],
@@ -26,10 +24,7 @@ export const ASSET_TRANSITIONS: Record<AssetStatus, AssetStatus[]> = {
 };
 @Injectable()
 export class AssetsService {
-  constructor(
-    private readonly db: PrismaService,
-    private readonly platform: PlatformService,
-  ) {}
+  constructor(private readonly db: PrismaService) {}
   private where(query: AssetQuery): Prisma.AssetWhereInput {
     const search = query.search?.trim();
     return {
@@ -216,57 +211,6 @@ export class AssetsService {
       await writeActivity(tx, user, 'asset', id, 'REGISTER', before, after);
       return after;
     });
-  }
-  async tickets(user: AuthUser, id: string) {
-    await this.get(user, id);
-    if (!user.permissions.includes('ticket:read')) return [];
-    const scope = ticketVisibilityWhere(user);
-    const links = await this.db.ticketAsset.findMany({
-      where: { assetId: id, ticket: scope },
-      include: {
-        ticket: {
-          select: { id: true, ticketNo: true, title: true, status: true },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-    return links.map((l) => l.ticket);
-  }
-  async link(user: AuthUser, id: string, ticketId: string, remove = false) {
-    return serializable(this.db, async (tx) => {
-      if (!(await tx.asset.findUnique({ where: { id } })))
-        throw new NotFoundException('资产不存在');
-      await this.platform.ticket(user, ticketId, tx);
-      if (remove)
-        await tx.ticketAsset.deleteMany({ where: { assetId: id, ticketId } });
-      else
-        await tx.ticketAsset.upsert({
-          where: { ticketId_assetId: { ticketId, assetId: id } },
-          update: {},
-          create: { ticketId, assetId: id },
-        });
-      await writeActivity(
-        tx,
-        user,
-        'asset',
-        id,
-        remove ? 'UNLINK_TICKET' : 'LINK_TICKET',
-        undefined,
-        { ticketId },
-      );
-      return { ok: true };
-    });
-  }
-  async ticketAssets(user: AuthUser, ticketId: string) {
-    await this.platform.ticket(user, ticketId);
-    return this.db.ticketAsset
-      .findMany({
-        where: { ticketId },
-        include: {
-          asset: { select: { id: true, code: true, name: true, status: true } },
-        },
-      })
-      .then((rows) => rows.map((row) => row.asset));
   }
   async export(query: AssetQuery) {
     const rows = await this.db.asset.findMany({

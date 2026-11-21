@@ -24,10 +24,10 @@ if (!isolated) {
   const { InventoryService } = require('../src/operations/inventory.service');
   const { AssetImportService } = require('../src/operations/import.service');
   const { BusinessFilesService } = require('../src/operations/files.service');
-  const { adapter, csv } = require('../src/operations/business');
+  const { adapter, csv, writeActivity } = require('../src/operations/business');
   const db = new PrismaClient(),
     platform = new PlatformService(db),
-    assets = new AssetsService(db, platform),
+    assets = new AssetsService(db),
     inventory = new InventoryService(db, platform),
     importer = new AssetImportService(db);
   const suffix = randomUUID();
@@ -393,7 +393,7 @@ if (!isolated) {
       assetIds[0],
     );
   });
-  test('ticket visibility applies to linking and related-ticket reads', async () => {
+  test('historical asset-link activity still respects ticket visibility', async () => {
     const visible = await db.ticket.create({
       data: {
         ticketNo: 'COP-' + randomUUID(),
@@ -410,25 +410,11 @@ if (!isolated) {
     });
     tickets.push(visible.id, hidden.id);
     const limited = auth(actor, ['ticket:read', 'asset:read', 'asset:manage']);
-    await assets.link(limited, assetIds[0], visible.id);
-    await assert.rejects(
-      assets.link(limited, assetIds[0], hidden.id),
-      rejected(403),
-    );
-    await assets.link(auth(actor), assetIds[0], hidden.id);
-    assert.deepEqual(
-      (await assets.tickets(limited, assetIds[0])).map((t) => t.id),
-      [visible.id],
-    );
-    await assert.rejects(
-      assets.ticketAssets(limited, hidden.id),
-      rejected(403),
-    );
-    assert.ok(
-      !JSON.stringify(
-        await platform.activity(limited, 'asset', assetIds[0]),
-      ).includes(hidden.id),
-    );
+    await writeActivity(db, auth(actor), 'asset', assetIds[0], 'LINK_TICKET', undefined, { ticketId: visible.id });
+    await writeActivity(db, auth(actor), 'asset', assetIds[0], 'LINK_TICKET', undefined, { ticketId: hidden.id });
+    const activity = JSON.stringify(await platform.activity(limited, 'asset', assetIds[0]));
+    assert.ok(activity.includes(visible.id));
+    assert.ok(!activity.includes(hidden.id));
   });
   test('file upload and download use business access rules and remove rejected temporary files', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'cop-files-'));

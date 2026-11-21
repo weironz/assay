@@ -14,7 +14,7 @@ pub fn schema() -> Value {
             "body":{"type":"string","minLength":1,"description":"问题描述，HTML；图片需先通过 /api/uploads 上传"},
             "priority":{"type":"string","enum":["LOW","MEDIUM","HIGH","URGENT"],"description":"省略时为 MEDIUM"},
             "idempotencyKey":{"type":"string","minLength":16,"maxLength":100,"description":"同一次建单重试时沿用此值；只接受字母、数字、下划线和短横线"},
-            "typeId":optional_id, "categoryId":optional_id, "queueId":optional_id,
+            "typeId":optional_id, "categoryId":optional_id,
             "datacenterId":optional_id,
             "categoryName":{"type":"string","maxLength":60,"description":"自定义分类；与 categoryId 同时传入时以 categoryId 为准"},
             "serialNumber":{"type":"string","maxLength":200},

@@ -46,7 +46,7 @@ export class TicketLifecycle {
     await this.prisma.$transaction(async tx => {
       const changed = await tx.ticket.updateMany({
         where: { id, status: ticket.status, updatedAt: ticket.updatedAt },
-        data: { assigneeId: dto.assigneeId, queueId: dto.queueId ?? undefined, status: 'ASSIGNED' },
+        data: { assigneeId: dto.assigneeId, status: 'ASSIGNED' },
       });
       if (!changed.count) throw new ConflictException('工单已变更，请刷新后重新指派');
       await writeHistory(tx, id, user.id, 'ASSIGN', 'assignee', ticket.assigneeId, dto.assigneeId);

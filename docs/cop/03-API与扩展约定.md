@@ -23,8 +23,6 @@
 | `/departments/members`、`/departments/members/:id` | GET / PATCH，调整员工部门 |
 | `/assets`、`/assets/:id` | GET / POST / PUT；编号发出后不可变 |
 | `/assets/:id/register` | POST，为尚未发号的草稿分配编号；重复调用返回现有编号 |
-| `/assets/:id/tickets`、`/assets/:id/tickets/:ticketId` | GET / POST / DELETE；必须能读取相关工单 |
-| `/tickets/:id/assets` | GET，工单用户可见安全的关联资产摘要 |
 | `/spare-parts`、`/spare-parts/:id` | GET / POST / PUT；SKU、单位、最低库存、停用 |
 | `/warehouses`、`/warehouses/:id` | GET / POST / PUT；仓库有库存时不能停用 |
 | `/inventory/balances`、`/inventory/operations` | GET；操作 POST，不提供修改/删除流水接口 |
@@ -34,6 +32,8 @@
 | `/operations/:kind/:id/activity` | GET，最近 100 条履历；隐藏无权查看的工单引用 |
 | `/operations/:kind/:id/attachments` | GET / POST，按业务引用检查文件读写权限 |
 | `/operations/attachments/:id/download` | GET，鉴权后流式附件下载、nosniff |
+
+工单和资产的双向关联接口已退役。资产的历史活动按工单可见性显示。库存流水仍可填写其业务需要的工单或资产引用。
 
 列表页码从 1 开始；`pageSize` 默认 20，最多 100；响应为 `{items,total,page,pageSize}`。实体维护使用完整 PUT 表单，不是 PATCH；省略可选手工字段视为清空，保留字段时须提交当前值。导入更新有独立规则：未提供的技术字段不清空已知值，且保留 COP 的所有权、责任人、采购、编号、状态与贴标核验。
 

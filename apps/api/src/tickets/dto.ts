@@ -64,10 +64,6 @@ export class CreateTicketDto {
 
   @IsOptional()
   @IsString()
-  queueId?: string;
-
-  @IsOptional()
-  @IsString()
   datacenterId?: string;
 
   @IsOptional()
@@ -121,10 +117,6 @@ export class UpdateTicketDto {
 
   @IsOptional()
   @IsString()
-  queueId?: string | null;
-
-  @IsOptional()
-  @IsString()
   datacenterId?: string | null;
 
   @IsOptional()
@@ -145,10 +137,6 @@ export class UpdateTicketDto {
 export class AssignDto {
   @IsString()
   assigneeId!: string;
-
-  @IsOptional()
-  @IsString()
-  queueId?: string;
 }
 
 export class TransitionDto {
@@ -220,10 +208,6 @@ export class ListTicketsQuery {
   @IsOptional()
   @IsEnum(Priority)
   priority?: Priority;
-
-  @IsOptional()
-  @IsString()
-  queueId?: string;
 
   @IsOptional()
   @IsString()

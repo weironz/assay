@@ -188,7 +188,6 @@ GET /api/tickets
 | --- | --- | --- |
 | `status` | string | 状态枚举，见 §7 |
 | `priority` | string | `LOW` `MEDIUM` `HIGH` `URGENT` |
-| `queueId` | string | 队列 id |
 | `datacenterId` | string | 机房 id；`__none__` 筛选未指定机房 |
 | `slaState` | string | `overdue` 已超时、`within` 未超时、`paused` 挂起、`completed` 已结束、`unset` 无 SLA；已结束/挂起不参与超时筛选 |
 | `createdFrom` | ISO 8601 | 创建时间下界（含），Web 按操作者本地日期换算为 UTC 时刻 |
@@ -249,7 +248,6 @@ POST /api/tickets
 | `typeId` | string | | 工单类型 id，**决定 SLA 时限** |
 | `categoryId` | string | | 分类 id |
 | `categoryName` | string | | 下拉里没有合适分类时自填（≤60 字符）。与 `categoryId` 二选一，同时给出以 `categoryId` 为准；服务端忽略大小写查重后复用或新建 |
-| `queueId` | string | | 队列 id |
 | `datacenterId` | string | | 机房 id |
 | `serialNumber` | string | | 设备序列号（≤200 字符） |
 | `contact` | object | | 联系方式，见下 |
@@ -351,10 +349,10 @@ PATCH /api/tickets/:id
 权限：`ticket:update`，且必须是提单人、当前主处理人、管理员或主管。
 `ticket:read:all` 只扩大读取范围，不赋予编辑权；普通协作者也不会因此获得属性编辑权。
 
-可改字段：`title` `priority` `typeId` `categoryId` `categoryName` `queueId`
+可改字段：`title` `priority` `typeId` `categoryId` `categoryName`
 `serialNumber` `datacenterId` `contact`。`categoryName` 与建单时相同：trim 后忽略大小写复用已有分类，找不到才创建；`categoryId` 优先。
 
-- **不传字段**表示保留原值；`typeId`、`categoryId`、`queueId`、`datacenterId`、`serialNumber`、`contact` 可传 `null` 清空。
+- **不传字段**表示保留原值；`typeId`、`categoryId`、`datacenterId`、`serialNumber`、`contact` 可传 `null` 清空。
 - 标题不可为空或仅空格，优先级必须是有效枚举；不存在的引用 ID 返回 400，不会部分保存。
 - 状态、处理人、提单人、SLA 截止时间不属于此接口；改变类型不会重新计算已启动的 SLA。
 - 属性与逐字段审计记录在同一数据库事务中保存，记录操作者及旧值/新值；实际未变化的字段不写重复记录。
@@ -380,7 +378,7 @@ Web 使用方式：打开工单详情，在右侧（手机端位于下方）**�
 
 ```
 POST /api/tickets/:id/assign
-{ "assigneeId": "<用户id>", "queueId": "<可选>" }
+{ "assigneeId": "<用户id>" }
 ```
 权限：`ticket:assign`。仅 `NEW` / `REOPENED` 状态可指派，指派后状态变为 `ASSIGNED`。
 
@@ -474,6 +472,8 @@ DELETE /api/tickets/:id
 
 ## 4. 元数据
 
+新工单由后台归入默认队列。队列管理接口已退役，建单、编辑、指派和列表筛选使用其他工单字段。历史工单的队列信息可在工单响应中读取。
+
 | 方法与路径 | 权限 | 说明 |
 | --- | --- | --- |
 | `GET /api/categories` | 登录 | 分类列表（树形结构，含 `parentId`） |
@@ -485,10 +485,6 @@ DELETE /api/tickets/:id
 | `GET /api/clusters` | 登录 | 集群列表，含 `datacenterId` |
 | `GET /api/tags` | 登录 | 标签列表 |
 | `POST /api/tags` | `ticket:update` | 建标签 `{ name, color? }` |
-| `GET /api/queues` | 登录 | 队列列表 |
-| `POST /api/queues` | `queue:manage` | 建队列 `{ name, description?, defaultAssigneeId? }` |
-| `PATCH /api/queues/:id` | `queue:manage` | 改队列 |
-| `DELETE /api/queues/:id` | `queue:manage` | 删队列 |
 | `GET /api/assignees` | 登录 | 可指派的处理人（handler / admin 且状态正常） |
 | `GET /api/roles` | `user:manage` | 固定岗位角色列表，仅用于为用户分配角色 |
 

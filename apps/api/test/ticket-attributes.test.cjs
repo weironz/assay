@@ -27,7 +27,7 @@ function fixture({ failAudit = false } = {}) {
         return structuredClone(row);
       },
     },
-    ticketType: reference(['incident']), queue: reference(['default']), datacenter: reference(['dc-1']), cluster: reference(['historical-cluster']),
+    ticketType: reference(['incident']), datacenter: reference(['dc-1']), cluster: reference(['historical-cluster']),
     category: {
       ...reference(['gpu']),
       findFirst: async ({ where }) => categories.find(c => c.name.toLowerCase() === where.name.equals.toLowerCase()) ?? null,
@@ -49,7 +49,8 @@ function fixture({ failAudit = false } = {}) {
 test('update DTO allows explicit null clears but rejects null required fields and malformed contact', async () => {
   const pipe = new ValidationPipe({ whitelist: true, transform: true });
   const transform = value => pipe.transform(value, { type: 'body', metatype: UpdateTicketDto });
-  const cleared = await transform({ typeId: null, categoryId: null, queueId: null, datacenterId: null, serialNumber: null, contact: null, status: 'CLOSED' });
+  const cleared = await transform({ typeId: null, categoryId: null, queueId: 'legacy', datacenterId: null, serialNumber: null, contact: null, status: 'CLOSED' });
+  assert.equal(cleared.queueId, undefined);
   assert.equal(cleared.contact, null);
   assert.equal(cleared.datacenterId, null);
   assert.equal(cleared.status, undefined);
@@ -73,14 +74,15 @@ test('requester can fill IDC/SN; only changed fields are audited and SLA, owner,
 
 test('null clears optional attributes/contact; omitted fields stay unchanged', async () => {
   const f = fixture();
-  const result = await f.service.update(requester, 'ticket-1', { typeId: null, categoryId: null, queueId: null, datacenterId: null, serialNumber: ' ', contact: null });
-  for (const field of ['typeId', 'categoryId', 'queueId', 'datacenterId', 'serialNumber', 'contact']) assert.equal(result[field], null);
+  const result = await f.service.update(requester, 'ticket-1', { typeId: null, categoryId: null, datacenterId: null, serialNumber: ' ', contact: null });
+  for (const field of ['typeId', 'categoryId', 'datacenterId', 'serialNumber', 'contact']) assert.equal(result[field], null);
   assert.equal(result.title, original.title); assert.equal(result.priority, original.priority);
+  assert.equal(result.queueId, original.queueId);
   assert.ok(f.history().every(h => h.newValue === null));
 });
 
 test('blank title or category and nonexistent references fail before any writes', async () => {
-  for (const patch of [{ title: ' ' }, { categoryName: ' ' }, ...['typeId', 'categoryId', 'queueId', 'datacenterId'].map(field => ({ [field]: 'missing' }))]) {
+  for (const patch of [{ title: ' ' }, { categoryName: ' ' }, ...['typeId', 'categoryId', 'datacenterId'].map(field => ({ [field]: 'missing' }))]) {
     const f = fixture();
     await assert.rejects(f.service.update(requester, 'ticket-1', patch), err => err.getStatus() === 400);
     assert.equal(f.writes(), 0); assert.deepEqual(f.history(), []);

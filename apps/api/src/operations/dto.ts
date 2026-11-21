@@ -109,9 +109,6 @@ export class DepartmentInput {
 export class MembershipInput {
   @IsOptional() @IsString() departmentId?: string;
 }
-export class TicketLinkInput {
-  @IsString() @Length(1, 100) ticketId!: string;
-}
 export class InventoryInput {
   @IsIn(['RECEIVE', 'ISSUE', 'RETURN', 'TRANSFER', 'ADJUST', 'REVERSAL'])
   type!: string;

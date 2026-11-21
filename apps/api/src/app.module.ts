@@ -9,7 +9,6 @@ import { PrismaModule } from './prisma/prisma.module';
 import { StorageModule } from './storage/storage.module';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
-import { QueuesModule } from './queues/queues.module';
 import { TicketsModule } from './tickets/tickets.module';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { NotificationsModule } from './notifications/notifications.module';
@@ -49,7 +48,6 @@ const redis = getConfig().redis;
     ApiTokensModule,
     TicketSharesModule,
     UsersModule,
-    QueuesModule,
     TicketsModule,
     AttachmentsModule,
     MailModule,

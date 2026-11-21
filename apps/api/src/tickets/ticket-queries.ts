@@ -57,7 +57,6 @@ export class TicketQueries {
     const filters: Prisma.TicketWhereInput[] = [ticketVisibilityWhere(user)];
     if (q.status) filters.push({ status: q.status });
     if (q.priority) filters.push({ priority: q.priority });
-    if (q.queueId) filters.push({ queueId: q.queueId });
     if (q.assigneeId) filters.push({ assigneeId: q.assigneeId === '__none__' ? null : q.assigneeId });
     if (q.datacenterId) filters.push({ datacenterId: q.datacenterId === '__none__' ? null : q.datacenterId });
     if (q.createdFrom && q.createdTo && new Date(q.createdFrom) >= new Date(q.createdTo)) {

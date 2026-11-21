@@ -7,12 +7,12 @@ const { TicketEditor } = require('../dist/tickets/ticket-editor');
 
 const url = process.env.TICKET_LIFECYCLE_TEST_DATABASE_URL;
 
-test('new tickets use medium priority, incident SLA and one default queue while preserving explicit API choices', { skip: !url }, async () => {
+test('new tickets use medium priority, incident SLA and one default queue while preserving explicit priority and type', { skip: !url }, async () => {
   const db = new PrismaClient({ datasourceUrl: url });
   const tag = `ticket-defaults-${randomUUID()}`;
   const jobs = [];
   const editor = new TicketEditor(db, { schedule: async (...args) => jobs.push(args) });
-  let user, customType, customQueue;
+  let user, customType;
   try {
     user = await db.user.create({ data: { name: tag, email: `${tag}@example.test` } });
     const body = '<p>Ticket fixture</p>';
@@ -38,12 +38,11 @@ test('new tickets use medium priority, incident SLA and one default queue while 
     }
 
     customType = await db.ticketType.create({ data: { name: tag, slaResponseMin: 17, slaResolveMin: 225 } });
-    customQueue = await db.queue.create({ data: { name: tag } });
-    const id = await editor.create(user, { title: `${tag} explicit`, body, priority: 'HIGH', typeId: customType.id, queueId: customQueue.id });
+    const id = await editor.create(user, { title: `${tag} explicit`, body, priority: 'HIGH', typeId: customType.id });
     const explicit = await db.ticket.findUniqueOrThrow({ where: { id } });
     assert.equal(explicit.priority, 'HIGH');
     assert.equal(explicit.typeId, customType.id);
-    assert.equal(explicit.queueId, customQueue.id);
+    assert.equal(explicit.queueId, defaults[0].queueId);
     assert.equal(explicit.slaDueAt - explicit.createdAt, 225 * 60_000);
   } finally {
     try {
@@ -52,7 +51,6 @@ test('new tickets use medium priority, incident SLA and one default queue while 
         await db.user.delete({ where: { id: user.id } });
       }
       if (customType) await db.ticketType.delete({ where: { id: customType.id } });
-      if (customQueue) await db.queue.delete({ where: { id: customQueue.id } });
     } finally { await db.$disconnect(); }
   }
 });
